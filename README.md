@@ -3,4 +3,4 @@
 <h1>Notflix</h1>
 </div>
 
-Stream experiments on Home Area Network
+So apparently writing for a TV is annoyingly difficult, I'll probably just write this to sync across devices on a home network
