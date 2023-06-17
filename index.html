@@ -64,8 +64,23 @@
     videojs.Vhs.GOAL_BUFFER_LENGTH = 300;
     videojs.Vhs.MAX_GOAL_BUFFER_LENGTH = 600;
     let player = videojs( 'my-video', {
-      liveui: false,
+      html5: {
+        hls: {
+          overrideNative: true
+        }
+      }
     } );
+
+    window.onerror = function ( err ) {
+      const value = typeof error === 'string' ? error : JSON.stringify( error );
+      fetch( '/track/error', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify( { error: value } )
+      } );
+    }
   </script>
 </body>
 
