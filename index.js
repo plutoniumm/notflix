@@ -11,7 +11,7 @@ const CSP = [
 ].join( " " );
 
 const server = createServer( ( req, res ) => {
-  console.log( 14, req.url );
+  console.log( "REQ: ", req.url );
   if ( req.method === 'GET' && req.url === "/" ) {
     res.writeHead( 200, {
       'Content-Type': 'text/html',
@@ -21,7 +21,7 @@ const server = createServer( ( req, res ) => {
   }
   if ( req.method === 'GET' && req.url.startsWith( "/assets" ) ) {
     const file = req.url.replace( "/assets", "assets" );
-    console.log( 24, file );
+    console.log( "FILE: ", file );
     return createReadStream( resolve( file ) ).pipe( res )
   };
 
@@ -29,12 +29,16 @@ const server = createServer( ( req, res ) => {
     let body = '';
     req.on( 'data', ( chunk ) => body += chunk );
     req.on( 'end', () => {
-      console.log( 32, body );
-      appendFile( 'tests.txt', `${ req.url.replace( '/track/', '' ) } ${ body }\n`, console.log );
+      console.log( "BODY: ", body );
+      appendFile( 'tests.txt', `${ req.url.replace( '/track/', '' ) } ${ body }\n`, ( e ) =>
+        e ? console.log( "Write Err " + e ) : null
+      );
 
       res.writeHead( 200, { 'Content-Type': 'text/html', } );
       return res.end( "ok" );
     } );
+
+    return 0;
   }
 
   if ( req.method === 'GET' && req.url === "/list" ) {
@@ -61,8 +65,7 @@ const server = createServer( ( req, res ) => {
       try {
         file = createReadStream( filepath, { start, end } );
       } catch ( error ) {
-        console.log( error );
-        console.log( "Bad Request @ /video" );
+        console.log( "Bad Request @ /video", error );
         res.writeHead( 400 );
         return res.end( "Bad Request @ /video" );
       }
@@ -85,7 +88,7 @@ const server = createServer( ( req, res ) => {
     }
   } else {
     // For when you dont know wtf happened
-    console.log( "Unkwnown Bad Request @ " + req.url );
+    console.log( "Unkwnown Bad Request @ " + req.url, req.method );
     res.writeHead( 400 );
     res.end( "Unkwnown Bad Request @ " + req.url );
   }
