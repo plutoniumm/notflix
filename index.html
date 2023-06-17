@@ -26,10 +26,6 @@
       height: calc(100vh - var(--sz) * 2);
     }
 
-    .vsc-controller {
-      display: none;
-    }
-
     #dialog {
       position: absolute;
       top: 50%;
@@ -71,23 +67,31 @@
 
     // event tracker
     // listen to event and set to server at /track
-    window.addEventListener( 'load', () => {
-      let events = [ 'loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'play', 'playing', 'pause', 'ended', 'seeking', 'seeked', 'waiting', 'durationchange', 'timeupdate', 'progress', 'ratechange', 'resize', 'volumechange' ];
-      events.forEach( event => {
-        player.on( event, () => {
-          fetch( '/track', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify( {
-              event: event,
-              time: player.currentTime()
-            } )
-          } );
-        } );
-      } );
+
+    const handleKey = ( name, event ) => fetch( `/track/${ name }`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify( {
+        key: event.key,
+        code: event.code,
+        keyCode: event.keyCode,
+        which: event.which,
+        shiftKey: event.shiftKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+        repeat: event.repeat,
+        location: event.location,
+        charCode: event.charCode,
+        keyCode: event.keyCode,
+        detail: event.detail
+      }
+      )
     } );
+    
+    window.addEventListener( 'keydown', e => handleKey( "keydown", e ) );
+    window.addEventListener( 'keyup', e => handleKey( "keyup", e ) );
+    window.addEventListener( 'keypress', e => handleKey( "keypress", e ) );
   </script>
 
   <style>

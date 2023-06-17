@@ -10,16 +10,16 @@ const server = createServer( ( req, res ) => {
     } );
     return createReadStream( resolve( "index.html" ) ).pipe( res );
   }
-  if ( req.method === 'GET' && req.url.startsWith( "/assets" ) ) {
+  if ( req.method === 'POST' && req.url.startsWith( "/assets" ) ) {
     const file = req.url.replace( "/assets", "assets" );
     console.log( file );
     return createReadStream( resolve( file ) ).pipe( res )
   };
 
-  if ( req.method === 'GET' && req.url.startsWith( "/track" ) ) {
-    // get data
-    const data = req.url.replace( "/track", "" );
-    console.log( data );
+  if ( req.method === 'POST' && req.url.startsWith( "/track" ) ) {
+    const body = req.body;
+    const name = req.url.replace( "/track/", "" );
+    const data = `${ name } ${ body }\n`;
     // write to file
     appendFile( 'tests.txt', data, function ( err ) {
       if ( err ) throw err;
