@@ -1,42 +1,70 @@
-import { readdirSync, statSync, appendFile } from "fs";
-import { serveStatic } from 'hono/bun';
-import path, { resolve } from "path";
-import { CSP } from "./utils";
+import { statSync, createReadStream as CRS } from "fs";
+import { serveStatic as serve } from 'hono/bun';
+import { CSP, read, dir, log } from "./utils";
+import { vStats } from "./video";
+import { resolve } from "path";
 import { Hono } from 'hono';
-import { file } from 'bun';
 
+const port = process.env.PORT || 3000;
 const app = new Hono()
-  .use( '/app/*', serveStatic( { root: './build' } ) )
-  .use( '/assets/*', serveStatic( { root: './assets' } ) )
+  .use( '/app/*', serve( { root: './' } ) )
+  .use( '/assets/*', serve( { root: './' } ) )
 
 app
   .get( '/', ( c ) => {
-    return c.html( file( './index.html' ), 200, {
-      'Content-Type': 'text/html',
+    return c.html( read( './index.html' ), 200, {
       'Content-Security-Policy': CSP
     } );
   } )
   .get( '/list', ( c ) => {
-    const files = readdirSync( resolve( "video" ) )
-      .filter( file => !file.startsWith( "." ) );
+    const files = dir( resolve( "video" ) )
+      .filter( f => !f.startsWith( "." ) );
 
-    return c.json( files, 200, {
-      'Content-Type': 'application/json',
-    } );
+    return c.json( files );
+  } )
+  .get( '/video/:id', ( c ) => {
+    const { id } = c.req.param();
+    const filepath = resolve( "video/" + id );
+    console.log( filepath );
+    const fileSize = statSync( filepath )?.size;
+
+    const range = c.req.headers.range;
+
+    let headers, stream;
+    if ( range ) {
+      const { start, end, c_len } = vStats( range, fileSize );
+      headers = new Headers( {
+        "Content-Range": `bytes ${ start }-${ end }/${ fileSize }`,
+        "Content-Type": "video/mp4",
+        "Accept-Ranges": "bytes",
+        "Content-Length": c_len
+      } );
+      stream = CRS( filepath, { start, end } );
+    } else {
+      headers = new Headers( {
+        "Content-Type": "video/mp4",
+        "Content-Length": fileSize,
+      } );
+      stream = CRS( filepath );
+    }
+
+    c.status( 206 );
+    c.header( headers );
+    return stream.pipe( c.res )
   } );
 
 app
   .post( '/track/:id', async ( c ) => {
+    const { id } = c.req.param();
     const body = await c.req.text();
 
-    appendFile( 'tests.txt', `${ req.url.replace( '/track/', '' ) } ${ body }\n`, ( e ) =>
-      e ? console.log( "Write Err " + e ) : null
-    );
-
-    return c.text( "ok", 200, {
-      'Content-Type': 'text/html',
-    } );
+    log( id + " " + body );
+    return c.text( "ok" );
   } );
 
 
-export default app
+
+console.log( `server listening on port:${ port }` );
+export default {
+  port, fetch: app.fetch,
+};
