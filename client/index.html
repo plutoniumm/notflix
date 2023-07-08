@@ -1,13 +1,87 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + Svelte + TS</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+
+  <link rel="apple-touch-icon" href="/assets/icon.svg">
+  <link rel="icon" type="image/png" href="/assets/icon.svg">
+  <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video.min.js" as="script"
+    crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video-js.min.css"
+    crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="/assets/vjs.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+  <title>Notflix</title>
+  <style>
+    body {
+      background: #000;
+      margin: 0;
+      padding: 0;
+    }
+
+    .video-js {
+      z-index: 0;
+      --sz: 0px;
+      border: var(--sz) solid #fff;
+      width: calc(100vw - var(--sz) * 2);
+      height: calc(100vh - var(--sz) * 2);
+      outline: none;
+    }
+
+    .video-js:focus {
+      outline: none;
+    }
+
+    #dialog {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10;
+      padding: 10px;
+      margin: 10px;
+      border-radius: 5px;
+      border: 1px solid #000;
+      background: #fff;
+    }
+  </style>
+</head>
+
+<body>
+  <video id="my-video" class="video-js" type="video/mp4" preload="auto" src="/video/bunny.mp4" autoplay controls
+    data-setup="" poster="assets/home.png"></video>
+
+  <script async src="assets/utils.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video.min.js" crossorigin="anonymous"
+    referrerpolicy="no-referrer"></script>
+  <script>
+    videojs.Vhs.GOAL_BUFFER_LENGTH = 300;
+    videojs.Vhs.MAX_GOAL_BUFFER_LENGTH = 600;
+    let player = videojs( 'my-video', {
+      html5: {
+        hls: {
+          overrideNative: true
+        }
+      }
+    } );
+
+    window.onerror = function ( err ) {
+      const value = typeof error === 'string' ? error : JSON.stringify( error );
+      fetch( '/track/error', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify( { error: value } )
+      } );
+    }
+  </script>
+
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
 </html>

@@ -1,12 +1,17 @@
 import { statSync, createReadStream as CRS } from "fs";
-import { serveStatic as serve } from 'hono/bun';
-import { CSP, read, dir, log } from "./utils";
-import { vStats } from "./video";
 import { resolve } from "path";
 import { Hono } from 'hono';
 
-const app = new Hono()
-  .use( '/app/*', serve( { root: './' } ) )
+const vStats = ( range, size ) => {
+  const parts = range.replace( /bytes=/, "" ).split( "-" );
+  return {
+    start: parseInt( parts[ 0 ], 10 ),
+    end: parts[ 1 ] ? parseInt( parts[ 1 ], 10 ) : size - 1, //IF NO END => EOF
+    c_len: ( end - start ) + 1
+  }
+}
+
+const app = new Hono();
 
 app
   .get( '/video/:id', ( c ) => {
@@ -38,15 +43,6 @@ app
     c.status( 206 );
     c.header( headers );
     return stream.pipe( c.res )
-  } );
-
-app
-  .post( '/track/:id', async ( c ) => {
-    const { id } = c.req.param();
-    const body = await c.req.text();
-
-    log( id + " " + body );
-    return c.text( "ok" );
   } );
 
 export default app;
