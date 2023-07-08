@@ -1,53 +1,7 @@
 import { readdirSync, createReadStream, statSync, appendFile } from "fs";
 import { createServer } from 'http';
 import path, { resolve } from "path";
-
-const CSP = [
-  "default-src *  data: 'unsafe-inline' 'unsafe-eval';",
-  "script-src * data: 'unsafe-inline' 'unsafe-eval';",
-  "img-src * data: 'unsafe-inline';",
-  "font-src * data: 'unsafe-inline' 'unsafe-eval';",
-  "worker-src * data: blob: 'unsafe-inline' 'unsafe-eval'"
-].join( " " );
-
 const server = createServer( ( req, res ) => {
-  console.log( "REQ: ", req.url );
-  if ( req.method === 'GET' && req.url === "/" ) {
-    res.writeHead( 200, {
-      'Content-Type': 'text/html',
-      'Content-Security-Policy': CSP
-    } );
-    return createReadStream( resolve( "index.html" ) ).pipe( res );
-  }
-  if ( req.method === 'GET' && req.url.startsWith( "/assets" ) ) {
-    const file = req.url.replace( "/assets", "assets" );
-    console.log( "FILE: ", file );
-    return createReadStream( resolve( file ) ).pipe( res )
-  };
-
-  if ( req.method === 'POST' && req.url.startsWith( "/track" ) ) {
-    let body = '';
-    req.on( 'data', ( chunk ) => body += chunk );
-    req.on( 'end', () => {
-      console.log( "BODY: ", body );
-      appendFile( 'tests.txt', `${ req.url.replace( '/track/', '' ) } ${ body }\n`, ( e ) =>
-        e ? console.log( "Write Err " + e ) : null
-      );
-
-      res.writeHead( 200, { 'Content-Type': 'text/html', } );
-      return res.end( "ok" );
-    } );
-
-    return 0;
-  }
-
-  if ( req.method === 'GET' && req.url === "/list" ) {
-    const files = readdirSync( resolve( "video" ) )
-      .filter( file => !file.startsWith( "." ) );
-    res.writeHead( 200, { 'Content-Type': 'application/json', } );
-    return res.end( JSON.stringify( files ) );
-  }
-
   if ( req.method === 'GET' && req.url === "/video" ) {
     const filepath = resolve( "video/video.mp4" );
     const fileSize = statSync( filepath )?.size;

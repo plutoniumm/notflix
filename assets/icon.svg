@@ -1,1 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 407 407"><defs><radialGradient xlink:href="#a" id="c" cx="368" cy="280.4" r="368.7" fx="368" fy="280.4" gradientTransform="matrix(0 0 4 11 -825 -2804)" gradientUnits="userSpaceOnUse"/><radialGradient xlink:href="#a" id="b" cx="368" cy="280.4" r="368.7" fx="368" fy="280.4" gradientTransform="matrix(0 0 4 11 -825 -2804)" gradientUnits="userSpaceOnUse"/><linearGradient id="a"><stop offset="0"/><stop offset="1" stop-opacity="0"/></linearGradient></defs><g transform="translate(12 7)"><rect width="407.3" height="407.3" x="-13" y="-7" ry="37.5"/><g fill-rule="evenodd"><path fill="#b1060f" d="M213 59v122l-5-14-7 136 10 27 8 1a627 627 0 0 1 48 4V59h-54zm-98 0v276l11-1a798 798 0 0 1 43-3l1-59v-58l4 12 2 4 6-136-2-6-10-28-1-1h-54z"/><path fill="url(#b)" d="M115-189V77l188 498V344l15 42 127 359 28 2a2158 2158 0 0 1 165 14V508L452-29l-1 50v210l-17-48a446039 446039 0 0 1-131-369l-1-3H115z" transform="matrix(0 0 0 0 82 114)"/><path fill="#e50914" d="m115 59 55 155 4 12 37 104 8 1a627 627 0 0 1 48 4l-54-154-5-14a129681 129681 0 0 1-38-107l-1-1h-54z"/><path fill="#b1060f" d="M213 59v122l-5-14-7 136 10 27 8 1a627 627 0 0 1 48 4V59h-54zm-98 0v276l11-1a798 798 0 0 1 43-3l1-59v-58l4 12 2 4 6-136-2-6-10-28-1-1h-54z"/><path fill="url(#c)" d="M115-189V77l188 498V344l15 42 127 359 28 2a2158 2158 0 0 1 165 14V508L452-29l-1 50v210l-17-48a446039 446039 0 0 1-131-369l-1-3H115z" transform="matrix(0 0 0 0 82 114)"/><path fill="#e50914" d="m115 59 55 155 4 12 37 104 8 1a627 627 0 0 1 48 4l-54-154-5-14a129681 129681 0 0 1-38-107l-1-1h-54z"/></g></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 407 407">
+  <defs>
+    <linearGradient id="a">
+      <stop offset="0" stop-color="#b01"/>
+      <stop offset="1" stop-color="#e01" />
+    </linearGradient>
+  </defs>
+  <g transform="translate(12 7)">
+    <rect width="407.3" fill="url(#a)" height="407.3" x="-13" y="-7" ry="37.5" />
+    <g fill-rule="evenodd">
+      <path fill="#111"
+        d="M213 59v122l-5-14-7 136 10 27 8 1a627 627 0 0 1 48 4V59h-54zm-98 0v276l11-1a798 798 0 0 1 43-3l1-59v-58l4 12 2 4 6-136-2-6-10-28-1-1h-54z" />
+      <path fill="#222"
+        d="m115 59 55 155 4 12 37 104 8 1a627 627 0 0 1 48 4l-54-154-5-14a129681 129681 0 0 1-38-107l-1-1h-54z" />
+    </g>
+  </g>
+</svg>
