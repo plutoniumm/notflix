@@ -1,6 +1,5 @@
 import {
   writeFileSync, readFileSync,
-  readdirSync,
   appendFileSync, appendFile
 } from "fs";
 
@@ -12,11 +11,6 @@ export const CSP = [
   "worker-src * data: blob: 'unsafe-inline' 'unsafe-eval'"
 ].join( " " );
 
-export const dir = ( path ) => readdirSync( path );
-export const read = ( path ) => {
-  if ( typeof Bun !== undefined ) return Bun.file( path );
-  else return readFileSync( path, "utf8" )
-};
 export const fwrite = ( path, data ) => writeFileSync( path,
   typeof data === "string" ? data : JSON.stringify( data )
 );

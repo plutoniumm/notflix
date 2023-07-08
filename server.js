@@ -5,23 +5,10 @@ import { vStats } from "./video";
 import { resolve } from "path";
 import { Hono } from 'hono';
 
-const port = process.env.PORT || 3000;
 const app = new Hono()
   .use( '/app/*', serve( { root: './' } ) )
-  .use( '/assets/*', serve( { root: './' } ) )
 
 app
-  .get( '/', ( c ) => {
-    return c.html( read( './index.html' ), 200, {
-      'Content-Security-Policy': CSP
-    } );
-  } )
-  .get( '/list', ( c ) => {
-    const files = dir( resolve( "video" ) )
-      .filter( f => !f.startsWith( "." ) );
-
-    return c.json( files );
-  } )
   .get( '/video/:id', ( c ) => {
     const { id } = c.req.param();
     const filepath = resolve( "video/" + id );
@@ -62,9 +49,4 @@ app
     return c.text( "ok" );
   } );
 
-
-
-console.log( `server listening on port:${ port }` );
-export default {
-  port, fetch: app.fetch,
-};
+export default app;
