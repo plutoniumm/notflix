@@ -34,9 +34,7 @@ function handleKey ( name, event ) {
       shiftKey: event.shiftKey,
       altKey: event.altKey
     } )
-  } ).catch( function ( e ) {
-    return console.log( e );
-  } );
+  } ).catch( console.log );
 
   if ( typeof player === "undefined" ) return 0;
   if ( key === "MediaPlayPause" ) player.paused() ? player.play() : player.pause();
@@ -62,10 +60,6 @@ function handleClick ( name, event ) {
   } );
 };
 
-
-window.addEventListener( 'keyup', function ( e ) {
-  return handleKey( "keyup", e );
-} );
-window.addEventListener( 'click', function ( e ) {
-  return handleClick( "click", e );
-} );
+const video = document.querySelector( 'video' );
+video.addEventListener( 'keyup', ( e ) => handleKey( "keyup", e ) );
+video.addEventListener( 'click', ( e ) => handleClick( "click", e ) );
