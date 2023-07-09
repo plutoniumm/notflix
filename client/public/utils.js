@@ -1,12 +1,5 @@
 "use strict";
 
-var dialog = document.getElementById( 'dialog' );
-if ( dialog ) fetch( '/list' ).then( function ( res ) {
-  return res.json();
-} ).then( function ( data ) {
-  console.log( data );
-} );
-
 function runCodeFunction ( num ) {
   // seek 10s back
   if ( num === 4 )
