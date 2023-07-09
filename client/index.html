@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="ie=edge">
 
-  <link rel="apple-touch-icon" href="/assets/icon.svg">
-  <link rel="icon" type="image/png" href="/assets/icon.svg">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="icon" type="image/png" href="/icon.svg">
   <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video.min.js" as="script"
     crossorigin="anonymous" referrerpolicy="no-referrer" />
 
@@ -20,16 +20,21 @@
 </head>
 
 <body class="m0 p0" style="background: #000;">
-  <video id="my-video" class="video-js" type="video/mp4" preload="auto" src="/video/bunny.mp4" autoplay controls
-    data-setup="" poster="assets/home.png"></video>
+  <!-- <video id="my-video" class="video-js" type="video/mp4" preload="auto" src="/video/bunny.mp4"
+  data-setup="" poster="assets/home.png"></video> -->
+  <video id="my-video" class="video-js" type="video/mp4" preload="auto"
+    src="https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4" data-setup=""
+    poster="/home.png"></video>
 
-  <script async src="assets/utils.js"></script>
+  <script async src="utils.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video.min.js" crossorigin="anonymous"
     referrerpolicy="no-referrer"></script>
   <script>
     videojs.Vhs.GOAL_BUFFER_LENGTH = 300;
     videojs.Vhs.MAX_GOAL_BUFFER_LENGTH = 600;
     let player = videojs( 'my-video', {
+      controls: true,
+      autoplay: true,
       html5: {
         hls: {
           overrideNative: true
