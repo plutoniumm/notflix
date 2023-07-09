@@ -19,7 +19,7 @@
   <title>Notflix</title>
 </head>
 
-<body class="m0 p0 f" style="background: #000;">
+<body class="m0 p0 f" style="background: #000;" xmlns="http://www.w3.org/2000/svg">
   <!-- <video id="my-video" class="video-js" type="video/mp4" preload="auto" src="/video/bunny.mp4"
   data-setup="" poster="assets/home.png"></video> -->
   <video id="my-video" class="video-js" type="video/mp4" preload="auto"
@@ -34,7 +34,7 @@
     videojs.Vhs.MAX_GOAL_BUFFER_LENGTH = 600;
     let player = videojs( 'my-video', {
       controls: true,
-      autoplay: true,
+      autoplay: false,
       html5: {
         hls: {
           overrideNative: true
