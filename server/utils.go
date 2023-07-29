@@ -16,5 +16,6 @@ func ParseRangeHeader(rangeHeader string, fileSize int64) (start int64, end int6
 		end = fileSize - 1
 	}
 	contentLength = strconv.FormatInt(end-start+1, 10)
-	return
+
+	return start, end, contentLength
 }

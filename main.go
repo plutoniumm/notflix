@@ -12,7 +12,6 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// get {name} & body and append to track.txt
 func postTracker(ctx *fasthttp.RequestCtx) {
 	ctx.SetContentType("text/plain; charset=utf-8")
 	ctx.SetStatusCode(fasthttp.StatusOK)
@@ -25,12 +24,12 @@ func postTracker(ctx *fasthttp.RequestCtx) {
 
 	f, err := ioutil.ReadFile("./tests.txt")
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(ctx, "Error reading tests.txt\n")
 	}
 
 	err = ioutil.WriteFile("./tests.txt", []byte(string(f)+name+"\n"), 0644)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(ctx, "Error writing to tests.txt\n")
 	}
 
 	fmt.Fprintf(ctx, "tests.txt updated\n")

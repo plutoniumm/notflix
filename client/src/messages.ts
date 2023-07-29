@@ -8,7 +8,6 @@ const addMessage = (message: Message) => {
 export const messages: Writable<Message[]> = writable([
   {
     id: 12345,
-    room: 'bunny',
     text: 'Hello, world!',
     user: {
       name: 'Manav',
@@ -17,7 +16,6 @@ export const messages: Writable<Message[]> = writable([
   },
   {
     id: 12346,
-    room: 'bunny',
     text: 'Hello, world!',
     user: {
       name: 'Demo',
@@ -26,7 +24,6 @@ export const messages: Writable<Message[]> = writable([
   },
   {
     id: 12347,
-    room: 'bunny',
     text: 'Hello, world!',
     user: {
       name: 'Demo',

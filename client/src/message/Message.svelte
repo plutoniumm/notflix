@@ -1,17 +1,19 @@
 <script>
   import { marked } from "marked";
 
-  // id: number;
-  // room: uuid;
-  // text: string;
-  // user:
-  //    name: string;
-  //    image: Image;
+  export let message = {
+    id: 1,
+    text: "Hello world",
+    user: {
+      name: "John Doe",
+      image: {},
+    },
+  };
 
-  export let message;
+  const noSpace = (str) => str.replace(/\s/g, "");
 </script>
 
-<div class="f p5 m5 message" id={`${message.room}-${message.id}`}>
+<div class="f p5 m5 message" id={noSpace(message.user.name + message.id)}>
   <div>User stuff</div>
   <div class="p5 m5">
     {@html marked(message.text)}
@@ -21,7 +23,7 @@
 
 <style>
   hr {
-    opacity: 0.1;
+    opacity: 0.05;
   }
   .message {
     width: calc(100% - 10px);

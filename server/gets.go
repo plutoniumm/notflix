@@ -45,19 +45,20 @@ func GETVideo(ctx *fasthttp.RequestCtx) {
 	var headers fasthttp.ResponseHeader
 	var stream *os.File
 
+	headers.Set("Content-Type", "video/mp4")
+
 	if rangeHeader != "" {
 		start, end, contentLength := ParseRangeHeader(rangeHeader, fileSize)
 		headers.Set(
 			"Content-Range",
 			"bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10)+"/"+strconv.FormatInt(fileSize, 10),
 		)
-		headers.Set("Content-Type", "video/mp4")
+
 		headers.Set("Accept-Ranges", "bytes")
 		headers.Set("Content-Length", contentLength)
 		stream, _ = os.Open(filepath)
 		stream.Seek(start, 0)
 	} else {
-		headers.Set("Content-Type", "video/mp4")
 		headers.Set("Content-Length", strconv.FormatInt(fileSize, 10))
 		stream, _ = os.Open(filepath)
 	}
@@ -65,5 +66,6 @@ func GETVideo(ctx *fasthttp.RequestCtx) {
 	ctx.SetStatusCode(fasthttp.StatusPartialContent)
 	ctx.Response.Header = headers
 	ctx.SendFile(filepath)
+
 	return
 }

@@ -10,7 +10,6 @@ interface User {
 
 interface Message {
   id: number;
-  room: uuid;
   text: string;
   user: User;
 };
