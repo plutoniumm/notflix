@@ -37,6 +37,10 @@ func postTracker(ctx *fasthttp.RequestCtx) {
 
 func main() {
 	r := router.New()
+	hub := server.NewHub()
+
+	go hub.Run()
+
 	r.RedirectTrailingSlash = true
 
 	var PORT string
@@ -50,6 +54,9 @@ func main() {
 
 	r.GET("/", server.GETIndex)
 	r.GET("/video/{name}", server.GETVideo)
+	r.GET("/ws", func(ctx *fasthttp.RequestCtx) {
+		server.ServeWs(ctx, hub)
+	})
 
 	r.POST("/track/{name}", postTracker)
 
