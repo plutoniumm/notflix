@@ -5,7 +5,35 @@ const addMessage = (message: Message) => {
   messages.update((msgs) => [...msgs, message]);
 };
 
-export const messages: Writable<Message[]> = writable([]);
+export const messages: Writable<Message[]> = writable([
+  {
+    id: 12345,
+    room: 'bunny',
+    text: 'Hello, world!',
+    user: {
+      name: 'Manav',
+      image: "https://api.dicebear.com/6.x/bottts/svg?seed=Manav"
+    }
+  },
+  {
+    id: 12346,
+    room: 'bunny',
+    text: 'Hello, world!',
+    user: {
+      name: 'Demo',
+      image: "https://api.dicebear.com/6.x/bottts/svg?seed=Demo"
+    }
+  },
+  {
+    id: 12347,
+    room: 'bunny',
+    text: 'Hello, world!',
+    user: {
+      name: 'Demo',
+      image: "https://api.dicebear.com/6.x/bottts/svg?seed=Demo"
+    }
+  },
+]);
 
 export const messageService = {
   addMessage,

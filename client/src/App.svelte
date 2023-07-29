@@ -1,14 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { messages } from "./messages";
+  import Message from "./message/Message.svelte";
 
-  let visible = false;
-  function toggleChat() {
-    visible = !visible;
-  }
+  const url = "ws://localhost:3001";
+  let visible = true;
+
+  const toggleChat = () => (visible = !visible);
 
   // create socket
   onMount(() => {
-    const url = "ws://localhost:3000";
     const socket = new WebSocket(url);
     socket.onopen = () => {
       console.log("connected");
@@ -27,14 +28,21 @@
         a11y-click-events-have-key-events
         a11y-no-static-element-interactions
   -->
-  <div class="rpm-5 main" on:click={toggleChat}>
-    <svg viewBox="0 0 32 32">
-      {#if visible}
-        <path d="M2 30 L30 2 M30 30 L2 2" />
-      {:else}
-        <path d="M2 4 L30 4 30 22 16 22 8 29 8 22 2 22 Z" />
-      {/if}
-    </svg>
+  <div class="rpm-5 main p-rel" on:click={toggleChat}>
+    <section class="p-abs" style="top:0;left:0;">
+      <svg viewBox="0 0 32 32">
+        {#if visible}
+          <path d="M2 30 L30 2 M30 30 L2 2" />
+        {:else}
+          <path d="M2 4 L30 4 30 22 16 22 8 29 8 22 2 22 Z" />
+        {/if}
+      </svg>
+    </section>
+    <section>
+      {#each $messages as message}
+        <Message {message} />
+      {/each}
+    </section>
   </div>
 </main>
 
