@@ -1,4 +1,4 @@
-package notflix
+package server
 
 import (
 	"bytes"

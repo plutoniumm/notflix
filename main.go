@@ -1,8 +1,7 @@
-package notflix
+package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 
@@ -22,12 +21,12 @@ func postTracker(ctx *fasthttp.RequestCtx) {
 	fmt.Fprintf(ctx, "name: %s\n", name)
 	fmt.Fprintf(ctx, "body %s\n", body)
 
-	f, err := ioutil.ReadFile("./tests.txt")
+	f, err := os.ReadFile("./tests.txt")
 	if err != nil {
 		fmt.Fprintf(ctx, "Error reading tests.txt\n")
 	}
 
-	err = ioutil.WriteFile("./tests.txt", []byte(string(f)+name+"\n"), 0644)
+	err = os.WriteFile("./tests.txt", []byte(string(f)+name+"\n"), 0644)
 	if err != nil {
 		fmt.Fprintf(ctx, "Error writing to tests.txt\n")
 	}
@@ -43,10 +42,8 @@ func main() {
 
 	r.RedirectTrailingSlash = true
 
-	var PORT string
-	if len(os.Args) > 1 {
-		PORT = os.Args[1]
-	} else {
+	PORT := os.Getenv("PORT")
+	if PORT == "" {
 		PORT = "3000"
 	}
 
