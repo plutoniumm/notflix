@@ -47,7 +47,7 @@ func main() {
 		PORT = "3000"
 	}
 
-	r.ServeFiles("/assets/{filepath:*}", "./assets/")
+	r.ServeFiles("/assets/{filepath:*}", "./dist/assets/")
 
 	r.GET("/", server.GETIndex)
 	r.GET("/video/{name}", server.GETVideo)

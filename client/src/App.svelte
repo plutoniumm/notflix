@@ -54,22 +54,31 @@
         {/if}
       </svg>
     </div>
-    <section style="flow-y-s">
-      {#each $messages as message}
-        <Message {message} />
-      {/each}
-    </section>
+    {#if visible}
+      <section style="flow-y-s">
+        {#each $messages as message}
+          <Message {message} />
+        {/each}
+      </section>
+    {/if}
     <form
       action=""
       class="p-abs f p5 rx5"
+      class:o-0={!visible}
       on:submit|preventDefault={sendMessage}
     >
-      <input style="flex:6;" bind:value placeholder="Type a message..." />
+      <input
+        type="text"
+        style="flex:6;"
+        bind:value
+        placeholder="Type a message..."
+        disabled={!visible}
+      />
       <label for="submit">
         <input type="submit" id="submit" value=">" class="d-n p-rel" />
         <img
           class="m5"
-          src="/send.svg"
+          src="/assets/send.svg"
           alt="submit"
           height="20px"
           width="20px"
@@ -88,7 +97,7 @@
     background: #000;
     box-shadow: 0 -15px 15px #000;
     input[type="text"] {
-      color: #fff;
+      color: #fff !important;
       background: transparent;
     }
     label {

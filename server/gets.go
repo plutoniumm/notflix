@@ -25,9 +25,7 @@ func GETIndex(ctx *fasthttp.RequestCtx) {
 	ctx.Response.Header.Set("Content-Security-Policy", CSP)
 	ctx.Response.Header.Set("X-Host", "Google Golang")
 
-	ctx.SendFile("./index.html")
-
-	return
+	ctx.SendFile("./dist/index.html")
 }
 
 func GETVideo(ctx *fasthttp.RequestCtx) {
@@ -66,6 +64,4 @@ func GETVideo(ctx *fasthttp.RequestCtx) {
 	ctx.SetStatusCode(fasthttp.StatusPartialContent)
 	ctx.Response.Header = headers
 	ctx.SendFile(filepath)
-
-	return
 }
