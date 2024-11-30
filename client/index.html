@@ -20,9 +20,18 @@
 </head>
 
 <body class="m0 p0 f" style="background: #000;" xmlns="http://www.w3.org/2000/svg">
-  <video id="my-video" class="video-js" type="video/mp4" preload="auto"
-    src="https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4" data-setup=""
+  <!-- <video id="my-video" class="video-js" type="video/mp4" preload="auto" src="/video/oracle.mp4" data-setup="" poster="/assets/home.png"></video> -->
+  <video id="my-video" class="video-js" type="video/mp4" preload="auto" src="/video/starwars4.mp4" data-setup=""
     poster="/assets/home.png"></video>
+
+  <script>
+    // get query params
+    const query = new URLSearchParams( window.location.search );
+    const video = query.get( 'video' );
+    if ( video ) {
+      document.querySelector( 'video' ).src = `/video/${ video }.mp4`;
+    }
+  </script>
 
   <script async src="/utils.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video.min.js" crossorigin="anonymous"
@@ -52,8 +61,8 @@
     }
   </script>
 
-  <div id="app"></div>
-  <script type="module" src="/src/main.ts"></script>
+  <!-- <div id="app"></div> -->
+  <!-- <script type="module" src="/src/main.ts"></script> -->
 </body>
 
 </html>

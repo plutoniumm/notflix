@@ -32,7 +32,7 @@
   });
 </script>
 
-<main style="width:calc({visible ? 300 : 25}px + 10px);">
+<main style="width:calc({visible ? 300 : 25}px + 10px);" class="d-n">
   <!-- svelte-ignore
         a11y-click-events-have-key-events
         a11y-no-static-element-interactions
