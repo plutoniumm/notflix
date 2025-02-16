@@ -16,37 +16,101 @@
   <link rel="stylesheet" href="https://manav.ch/css/ytvjs.css" crossorigin="anonymous" referrerpolicy="no-referrer">
   <link rel="stylesheet" href="https://manav.ch/atomic.css" crossorigin="anonymous" referrerpolicy="no-referrer">
 
-  <title>Notflix</title>
+  <style>
+    video {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #listing {
+      width: 100vw;
+      height: 100vh;
+      color: #fff;
+    }
+
+    .li {
+      padding: 1rem;
+      border-bottom: 1px solid #fff;
+    }
+
+    body {
+      overflow-y: scroll;
+      background: #000;
+    }
+  </style>
+
+  <title>Plutoniumm's Notflix</title>
 </head>
 
-<body class="m0 p0 f" style="background: #000;" xmlns="http://www.w3.org/2000/svg">
-  <!-- <video id="my-video" class="video-js" type="video/mp4" preload="auto" src="/video/oracle.mp4" data-setup="" poster="/assets/home.png"></video> -->
-  <video id="my-video" class="video-js" type="video/mp4" preload="auto" src="/video/starwars4.mp4" data-setup=""
-    poster="/assets/home.png"></video>
+<body class="m0 p0" xmlns="http://www.w3.org/2000/svg">
+  <video id="my-video" class="video-js" type="video/mp4" preload="auto" data-setup="" poster="/assets/home.png">
+    <source src="" type="video/mp4">
+    <track kind="captions" src="" srclang="en" label="English" default>
+  </video>
+
+
+  <div id="listing"></div>
 
   <script>
-    // get query params
     const query = new URLSearchParams( window.location.search );
-    const video = query.get( 'video' );
-    if ( video ) {
-      document.querySelector( 'video' ).src = `/video/${ video }.mp4`;
-    }
+    let video = query.get( 'video' ) || 'Sakamo5';
+    console.log( video );
+
+    video = video.replace( '.mp4', '' );
+    document.querySelector( 'source' ).src = `/video/${ video }.mp4`;
+    document.querySelector( 'track' ).src = `/subs/${ video }.vtt`;
+
+    // query /list to get a list of videos
+    fetch( '/list' )
+      .then( res => res.json() )
+      .then( data => {
+        const listing = document.getElementById( 'listing' );
+        data.forEach( video => {
+          const div = document.createElement( 'div' );
+          div.classList.add( 'li' );
+          div.innerHTML = `<a href="?video=${ video }">${ video }</a>`;
+          listing.appendChild( div );
+        } );
+      } );
   </script>
 
-  <script async src="/utils.js"></script>
+  <script async src="/assets/utils.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video.min.js" crossorigin="anonymous"
     referrerpolicy="no-referrer"></script>
   <script>
-    videojs.Vhs.GOAL_BUFFER_LENGTH = 300;
-    videojs.Vhs.MAX_GOAL_BUFFER_LENGTH = 600;
+    videojs.Vhs.GOAL_BUFFER_LENGTH = 20;
+    videojs.Vhs.MAX_GOAL_BUFFER_LENGTH = 3000;
     let player = videojs( 'my-video', {
       controls: true,
-      autoplay: false,
+      autoplay: true,
       html5: {
-        hls: {
-          overrideNative: true
-        }
-      }
+        // hls: {
+        //   overrideNative: true
+        // }
+      },
+      preload: true
+    } );
+
+    let lastPlayed = localStorage.getItem( 'lastPlayed' );
+    lastPlayed = JSON.parse( lastPlayed || "{}" );
+    if ( lastPlayed[ video ] ) {
+      player.currentTime( lastPlayed[ video ] );
+    } else {
+      player.currentTime( 0 );
+      lastPlayed[ video ] = 0;
+    }
+
+    setInterval( () => {
+      lastPlayed[ video ] = player.currentTime();
+      localStorage.setItem( 'lastPlayed', JSON.stringify( lastPlayed ) );
+    }, 2000 );
+
+    player.addRemoteTextTrack( {
+      kind: 'captions',
+      src: `/subs/${ video }.vtt`,
+      srclang: 'en',
+      label: 'English',
+      default: true
     } );
 
     window.onerror = function ( err ) {
@@ -60,9 +124,6 @@
       } );
     }
   </script>
-
-  <!-- <div id="app"></div> -->
-  <!-- <script type="module" src="/src/main.ts"></script> -->
 </body>
 
 </html>

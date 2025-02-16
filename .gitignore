@@ -1,4 +1,6 @@
 dist/
+local/
+subs/
 # Logs
 logs
 *.log

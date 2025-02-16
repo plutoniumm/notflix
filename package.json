@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "scripts": {
     "dev": "vite ./client",
-    "build": "vite build ./client",
+    "build": "vite build ./client --emptyOutDir",
     "server": "go build && ./notflix"
   },
   "type": "module",

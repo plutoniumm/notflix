@@ -34,6 +34,29 @@ func postTracker(ctx *fasthttp.RequestCtx) {
 	fmt.Fprintf(ctx, "tests.txt updated\n")
 }
 
+func trackList() []string {
+	files, err := os.ReadDir("./video/")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var names []string
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		if file.Name()[len(file.Name())-4:] != ".mp4" {
+			continue
+		}
+
+		names = append(names, file.Name())
+	}
+
+	return names
+}
+
+// IF YOU GET A READ SOCKET ERROR: TURN OFF THE FIREWALL
 func main() {
 	r := router.New()
 	hub := server.NewHub()
@@ -47,6 +70,7 @@ func main() {
 		PORT = "3000"
 	}
 
+	r.ServeFiles("/subs/{filepath:*}", "./subs/")
 	r.ServeFiles("/assets/{filepath:*}", "./dist/assets/")
 
 	r.GET("/", server.GETIndex)
@@ -54,9 +78,23 @@ func main() {
 	r.GET("/ws", func(ctx *fasthttp.RequestCtx) {
 		server.ServeWs(ctx, hub)
 	})
+	r.GET("/list", func(ctx *fasthttp.RequestCtx) {
+		ctx.SetContentType("application/json")
+		ctx.SetStatusCode(fasthttp.StatusOK)
+
+		names := trackList()
+		fmt.Fprintf(ctx, "[")
+		for i, name := range names {
+			fmt.Fprintf(ctx, "\"%s\"", name)
+			if i != len(names)-1 {
+				fmt.Fprintf(ctx, ",")
+			}
+		}
+		fmt.Fprintf(ctx, "]")
+	})
 
 	r.POST("/track/{name}", postTracker)
 
 	log.Println("Server started on localhost:" + PORT)
-	log.Fatal(fasthttp.ListenAndServe(":"+PORT, r.Handler))
+	log.Fatal(fasthttp.ListenAndServe("0.0.0.0:"+PORT, r.Handler))
 }
