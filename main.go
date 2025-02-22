@@ -11,29 +11,6 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-func postTracker(ctx *fasthttp.RequestCtx) {
-	ctx.SetContentType("text/plain; charset=utf-8")
-	ctx.SetStatusCode(fasthttp.StatusOK)
-
-	name := ctx.UserValue("name").(string)
-	body := string(ctx.PostBody())
-
-	fmt.Fprintf(ctx, "name: %s\n", name)
-	fmt.Fprintf(ctx, "body %s\n", body)
-
-	f, err := os.ReadFile("./tests.txt")
-	if err != nil {
-		fmt.Fprintf(ctx, "Error reading tests.txt\n")
-	}
-
-	err = os.WriteFile("./tests.txt", []byte(string(f)+name+"\n"), 0644)
-	if err != nil {
-		fmt.Fprintf(ctx, "Error writing to tests.txt\n")
-	}
-
-	fmt.Fprintf(ctx, "tests.txt updated\n")
-}
-
 func trackList() []string {
 	files, err := os.ReadDir("./video/")
 	if err != nil {
@@ -56,6 +33,37 @@ func trackList() []string {
 	return names
 }
 
+// save error to errors
+func Error(ctx *fasthttp.RequestCtx) {
+	ctx.SetContentType("text/plain")
+	ctx.SetStatusCode(fasthttp.StatusOK)
+
+	err := os.WriteFile("./config/errors", ctx.PostBody(), 0644)
+	if err != nil {
+		fmt.Fprintf(ctx, "error")
+		return
+	}
+
+	fmt.Fprintf(ctx, "success")
+}
+
+func Action(ctx *fasthttp.RequestCtx) {
+	ctx.SetContentType("text/plain")
+	ctx.SetStatusCode(fasthttp.StatusOK)
+
+	action, err := os.ReadFile("./config/action")
+	if err != nil {
+		fmt.Fprintf(ctx, "error")
+		return
+	}
+	if len(action) < 2 {
+		return
+	}
+
+	fmt.Fprintf(ctx, string(action))
+	os.WriteFile("./action", []byte(""), 0644)
+}
+
 // IF YOU GET A READ SOCKET ERROR: TURN OFF THE FIREWALL
 func main() {
 	r := router.New()
@@ -67,7 +75,7 @@ func main() {
 
 	PORT := os.Getenv("PORT")
 	if PORT == "" {
-		PORT = "3000"
+		PORT = "5173"
 	}
 
 	r.ServeFiles("/subs/{filepath:*}", "./subs/")
@@ -93,7 +101,9 @@ func main() {
 		fmt.Fprintf(ctx, "]")
 	})
 
-	r.POST("/track/{name}", postTracker)
+	// /action reads file action and sends text
+	r.GET("/action", Action)
+	r.POST("/error", Error)
 
 	log.Println("Server started on localhost:" + PORT)
 	log.Fatal(fasthttp.ListenAndServe("0.0.0.0:"+PORT, r.Handler))

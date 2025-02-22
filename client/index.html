@@ -1,128 +1,90 @@
-<!DOCTYPE html>
 <html lang="en">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self' 'unsafe-inline' 'unsafe-eval' *; img-src * data:; media-src *; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; font-src *;">
 
   <link rel="apple-touch-icon" href="/assets/icon.svg">
   <link rel="icon" type="image/png" href="/assets/icon.svg">
-  <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video.min.js" as="script"
-    crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="preload" href="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video.min.js" as="script">
 
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video-js.min.css"
-    crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link href="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video-js.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://manav.ch/css/ytvjs.css" crossorigin="anonymous" referrerpolicy="no-referrer">
   <link rel="stylesheet" href="https://manav.ch/atomic.css" crossorigin="anonymous" referrerpolicy="no-referrer">
-
-  <style>
-    video {
-      width: 100vw;
-      height: 100vh;
-    }
-
-    #listing {
-      width: 100vw;
-      height: 100vh;
-      color: #fff;
-    }
-
-    .li {
-      padding: 1rem;
-      border-bottom: 1px solid #fff;
-    }
-
-    body {
-      overflow-y: scroll;
-      background: #000;
-    }
-  </style>
+  <link rel="stylesheet" href="/assets/global.css">
 
   <title>Plutoniumm's Notflix</title>
 </head>
 
-<body class="m0 p0" xmlns="http://www.w3.org/2000/svg">
+<body class="m0 p0 p-rel" xmlns="http://www.w3.org/2000/svg">
   <video id="my-video" class="video-js" type="video/mp4" preload="auto" data-setup="" poster="/assets/home.png">
     <source src="" type="video/mp4">
     <track kind="captions" src="" srclang="en" label="English" default>
   </video>
 
+  <div id="enabler" class="p-abs" style="bottom:8%;right:4%;z-index:9999999;opacity: 0.25;">
+    <svg viewBox="0 0 32 32" width="32" height="32" fill="none" stroke-linecap="round" stroke-linejoin="round"
+      stroke-width="2">
+      <path stroke="#fff"
+        d="M13 2 L13 6 11 7 8 4 4 8 7 11 6 13 2 13 2 19 6 19 7 21 4 24 8 28 11 25 13 26 13 30 19 30 19 26 21 25 24 28 28 24 25 21 26 19 30 19 30 13 26 13 25 11 28 8 24 4 21 7 19 6 19 2 Z" />
+      <circle stroke="#fff" cx="16" cy="16" r="4" />
+    </svg>
+  </div>
 
-  <div id="listing"></div>
+  <div class="rpm-10 p-abs hidden" id="listing"></div>
 
   <script>
     const query = new URLSearchParams( window.location.search );
-    let video = query.get( 'video' ) || 'Sakamo5';
-    console.log( video );
+    let video = query.get( 'video' );
 
     video = video.replace( '.mp4', '' );
     document.querySelector( 'source' ).src = `/video/${ video }.mp4`;
-    document.querySelector( 'track' ).src = `/subs/${ video }.vtt`;
+    // document.querySelector( 'track' ).src = `/subs/${ video }.vtt`;
 
-    // query /list to get a list of videos
     fetch( '/list' )
       .then( res => res.json() )
       .then( data => {
         const listing = document.getElementById( 'listing' );
+
         data.forEach( video => {
           const div = document.createElement( 'div' );
-          div.classList.add( 'li' );
+          div.classList.add( "li" )
           div.innerHTML = `<a href="?video=${ video }">${ video }</a>`;
           listing.appendChild( div );
         } );
       } );
   </script>
 
-  <script async src="/assets/utils.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video.min.js" crossorigin="anonymous"
-    referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@videojs/http-streaming@3.15.0/dist/videojs-http-streaming.min.js"></script>
+
+  <script src="/assets/video.js"></script>
   <script>
-    videojs.Vhs.GOAL_BUFFER_LENGTH = 20;
-    videojs.Vhs.MAX_GOAL_BUFFER_LENGTH = 3000;
-    let player = videojs( 'my-video', {
-      controls: true,
-      autoplay: true,
-      html5: {
-        // hls: {
-        //   overrideNative: true
-        // }
-      },
-      preload: true
-    } );
-
-    let lastPlayed = localStorage.getItem( 'lastPlayed' );
-    lastPlayed = JSON.parse( lastPlayed || "{}" );
-    if ( lastPlayed[ video ] ) {
-      player.currentTime( lastPlayed[ video ] );
-    } else {
-      player.currentTime( 0 );
-      lastPlayed[ video ] = 0;
-    }
-
+    // every second fetch action and apply to player
     setInterval( () => {
-      lastPlayed[ video ] = player.currentTime();
-      localStorage.setItem( 'lastPlayed', JSON.stringify( lastPlayed ) );
-    }, 2000 );
-
-    player.addRemoteTextTrack( {
-      kind: 'captions',
-      src: `/subs/${ video }.vtt`,
-      srclang: 'en',
-      label: 'English',
-      default: true
-    } );
-
-    window.onerror = function ( err ) {
-      const value = typeof error === 'string' ? error : JSON.stringify( error );
-      fetch( '/track/error', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify( { error: value } )
-      } );
-    }
+      fetch( '/action' )
+        .then( res => res.text() )
+        .then( data => {
+          if ( data ) {
+            try {
+              eval( data );
+            } catch ( error ) {
+              fetch( '/error', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify( {
+                  error: error.message
+                } )
+              } );
+            }
+          };
+        } );
+    }, 1000 );
   </script>
 </body>
 

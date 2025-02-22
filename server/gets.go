@@ -23,8 +23,6 @@ func GETIndex(ctx *fasthttp.RequestCtx) {
 	CSP := strings.Join(csp, " ")
 
 	ctx.Response.Header.Set("Content-Security-Policy", CSP)
-	ctx.Response.Header.Set("X-Host", "Google Golang")
-
 	ctx.SendFile("./dist/index.html")
 }
 

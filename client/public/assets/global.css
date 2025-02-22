@@ -1,0 +1,38 @@
+video {
+  width: 100vw;
+  height: 100vh;
+}
+
+#listing {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 33vw;
+  aspect-ratio: 16/9;
+  color: #fff;
+  background: #8884;
+  backdrop-filter: blur(10px);
+}
+
+.li {
+  padding: 0.5rem;
+  border-radius: 10px;
+  border-bottom: 1px solid #fff8;
+  transition: background 0.1s ease-in-out;
+  background: #4440;
+  list-style-type: none;
+}
+
+.li:hover {
+  background: #444;
+}
+
+.hidden {
+  display: none;
+  pointer-events: none;
+}
+
+body {
+  overflow-y: scroll;
+  background: #000;
+}

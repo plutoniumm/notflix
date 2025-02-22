@@ -1,6 +1,9 @@
 dist/
 local/
 subs/
+errors
+action
+conf.json
 # Logs
 logs
 *.log
