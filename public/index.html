@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self' 'unsafe-inline' 'unsafe-eval' *; img-src * data:; media-src *; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; font-src *;">
+    content="default-src 'self' 'unsafe-inline' 'unsafe-eval' *; img-src * data:; media-src *; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; font-src * data:  'unsafe-inline' 'unsafe-eval';">
 
   <link rel="apple-touch-icon" href="/assets/icon.svg">
   <link rel="icon" type="image/png" href="/assets/icon.svg">
@@ -16,11 +16,18 @@
   <link rel="stylesheet" href="https://manav.ch/atomic.css" crossorigin="anonymous" referrerpolicy="no-referrer">
   <link rel="stylesheet" href="/assets/global.css">
 
+  <script src="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video.min.js"></script>
+  <script src="https://cdn.sc.gl/videojs-hotkeys/0.2/videojs.hotkeys.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@videojs/http-streaming@3.15.0/dist/videojs-http-streaming.min.js"></script>
+
+  <script async defer src="./assets/nf-list.js"></script>
+
   <title>Plutoniumm's Notflix</title>
 </head>
 
 <body class="m0 p0 p-rel" xmlns="http://www.w3.org/2000/svg">
-  <video id="my-video" class="video-js" type="video/mp4" preload="auto" data-setup="" poster="/assets/home.png">
+  <video id="my-video" class="video-js" type="video/mp4" preload="auto" data-setup="" poster="/assets/home.png"
+    controls>
     <source src="" type="video/mp4">
     <track kind="captions" src="" srclang="en" label="English" default>
   </video>
@@ -34,23 +41,26 @@
     </svg>
   </div>
 
-  <div class="rpm-10 p-abs hidden" id="listing"></div>
+  <nf-list class="rpm-10 p-abs hidden" id="listing"></nf-list>
 
   <script>
     const query = new URLSearchParams( window.location.search );
     let video = query.get( 'video' );
 
-    video = video.replace( '.mp4', '' );
-    document.querySelector( 'source' ).src = `/video/${ video }.mp4`;
-    // document.querySelector( 'track' ).src = `/subs/${ video }.vtt`;
+    if ( video ) {
+      console.log( `Using video: ${ video }` );
+      document.querySelector( 'source' ).src = `/video/${ video }`;
+      // document.querySelector( 'track' ).src = `/subs/${ video }.vtt`;
+    };
 
     fetch( '/list' )
       .then( res => res.json() )
       .then( data => {
         const listing = document.getElementById( 'listing' );
+        data = data || [];
 
         data.forEach( video => {
-          const div = document.createElement( 'div' );
+          const div = document.createElement( 'li' );
           div.classList.add( "li" )
           div.innerHTML = `<a href="?video=${ video }">${ video }</a>`;
           listing.appendChild( div );
@@ -58,31 +68,19 @@
       } );
   </script>
 
-  <script src="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@videojs/http-streaming@3.15.0/dist/videojs-http-streaming.min.js"></script>
-
   <script src="/assets/video.js"></script>
   <script>
-    // every second fetch action and apply to player
     setInterval( () => {
+      return;
       fetch( '/action' )
         .then( res => res.text() )
         .then( data => {
-          if ( data ) {
-            try {
-              eval( data );
-            } catch ( error ) {
-              fetch( '/error', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify( {
-                  error: error.message
-                } )
-              } );
-            }
-          };
+          if ( !data ) return;
+          try {
+            eval( data );
+          } catch ( { message } ) {
+            console.log( "[ACTION EVAL]: ", message );
+          }
         } );
     }, 1000 );
   </script>
