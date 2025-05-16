@@ -16,6 +16,13 @@ func EnsureDir(dir string) {
 	}
 }
 
+func DelFile(filePath string) {
+	err := os.Remove(filePath)
+	if err != nil {
+		log.Printf("Failed to delete file %s: %v", filePath, err)
+	}
+}
+
 func ParseRangeHeader(rangeHeader string, fileSize int64) (start int64, end int64, contentLength string) {
 	rangeParts := strings.Split(rangeHeader, "=")
 	byteRange := strings.Split(rangeParts[1], "-")

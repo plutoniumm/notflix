@@ -12,8 +12,8 @@
   <link rel="preload" href="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video.min.js" as="script">
 
   <link href="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video-js.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="https://manav.ch/css/ytvjs.css" crossorigin="anonymous" referrerpolicy="no-referrer">
   <link rel="stylesheet" href="https://manav.ch/atomic.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link rel="stylesheet" href="/assets/vjs.css" crossorigin="anonymous" referrerpolicy="no-referrer">
   <link rel="stylesheet" href="/assets/global.css">
 
   <script src="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video.min.js"></script>
@@ -31,26 +31,22 @@
     <track kind="captions" src="" srclang="en" label="English" default>
   </video>
 
-  <div id="enabler" class="p-abs" style="bottom:8%;right:4%;z-index:9999999;opacity: 0.25;">
-    <svg viewBox="0 0 32 32" width="32" height="32" fill="none" stroke-linecap="round" stroke-linejoin="round"
-      stroke-width="2">
-      <path stroke="#fff"
-        d="M13 2 L13 6 11 7 8 4 4 8 7 11 6 13 2 13 2 19 6 19 7 21 4 24 8 28 11 25 13 26 13 30 19 30 19 26 21 25 24 28 28 24 25 21 26 19 30 19 30 13 26 13 25 11 28 8 24 4 21 7 19 6 19 2 Z" />
-      <circle stroke="#fff" cx="16" cy="16" r="4" />
-    </svg>
-  </div>
+  <a href="" id="nextBtn" class="ptr p-abs rx10 hidden d-b">
+    Next
+  </a>
 
   <nf-list class="rpm-10 p-abs hidden" id="listing"></nf-list>
 
   <script>
-    console.log( `[INFO] Loading previd.js` );
-
+    const cleanSort = ( a, b ) => a.localeCompare( b, 'en', { numeric: true } )
     const query = new URLSearchParams( window.location.search );
-    let listings = document.querySelector( '#listing' );
-    let enabler = document.querySelector( '#enabler' );
 
-    enabler.addEventListener( 'click', () => {
-      listings.classList.toggle( 'hidden' );
+    let listings = document.querySelector( '#listing' );
+
+    window.addEventListener( 'keydown', ( e ) => {
+      if ( e.key === 'l' ) {
+        listings.classList.toggle( 'hidden' );
+      }
     } );
 
     let video = query.get( 'video' );
@@ -61,19 +57,37 @@
       document.querySelector( 'source' ).src = `/video/${ video }`;
     } else {
       listings.classList.remove( 'hidden' );
+    };
+
+    function delFile ( video ) {
+      fetch( `/video/${ video }`, { method: 'DELETE' } )
+        .then( res =>
+          document.querySelector( `li:has(a[href="?video=${ video }"])` )?.remove()
+        )
+        .catch( err =>
+          console.error( `[ERROR] Failed to delete ${ video }: ${ err }` )
+        );
     }
+
+    let videoList = [];
 
     fetch( '/list' )
       .then( res => res.json() )
       .then( data => {
-        data = data || [];
+        if ( !data?.length ) return;
+        videoList = data
+          .map( e => e.trim() )
+          .sort( cleanSort )
+          .map( e => [ e, `?video=${ encodeURIComponent( e ) }` ] );
 
-        data.forEach( video => {
-          const div = document.createElement( 'li' );
-          div.classList.add( "li" )
-          div.innerHTML = `<a href="?video=${ video }">${ video }</a>`;
-          listings.appendChild( div );
-        } );
+        videoList
+          .forEach( v => {
+            const div = document.createElement( 'li' );
+            div.classList.add( "li", "f", "j-bw" )
+
+            div.innerHTML = `<a class="d-b" href="${ v[ 1 ] }">${ v[ 0 ] }</a> <span class="closer o-0 ptr" onclick="delFile('${ v[ 0 ] }')">✕</span>`;
+            listings.appendChild( div );
+          } );
       } );
   </script>
 

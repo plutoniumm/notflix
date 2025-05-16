@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -64,6 +65,11 @@ func listRender(c *gin.Context) {
 
 func videoPlayer(c *gin.Context) {
 	filename := c.Param("filename")
+	filename, err := url.QueryUnescape(filename)
+	if err != nil {
+		log.Printf("Error unescaping filename: %v", err)
+		return
+	}
 
 	ext := strings.ToLower(filepath.Ext(filename))
 	if ext != ".mp4" {
@@ -176,6 +182,19 @@ func main() {
 	router.Static("/assets", assetsDir)
 	router.GET("/list", listRender)
 	router.GET("/video/:filename", videoPlayer)
+	router.DELETE("/video/:filename", func(c *gin.Context) {
+		fname := c.Param("filename")
+		videoPath := filepath.Join(videosDir, fname)
+		srtPath := filepath.Join(videosDir, strings.TrimSuffix(fname, filepath.Ext(fname))+".srt")
+		vttPath := filepath.Join(videosDir, strings.TrimSuffix(fname, filepath.Ext(fname))+".vtt")
+
+		server.DelFile(videoPath)
+		server.DelFile(srtPath)
+		server.DelFile(vttPath)
+
+		c.String(http.StatusOK, "true")
+	})
+
 	router.GET("/subs/:filename", subSend)
 
 	log.Printf("Starting server on http://localhost:%s", port)

@@ -1,11 +1,27 @@
 video {
-  width: 100vw;
-  height: 100vh;
+  border: 0 !important;
+  outline: 0 !important;
 }
 
 .my-video img,
 .vjs-poster {
   pointer-events: none;
+}
+
+#nextBtn {
+  bottom: 48px;
+  right: 48px;
+  border: 2px solid #fff8;
+  color: #fff8;
+  background: #0008;
+  padding: 12px 20px;
+  transition: all 0.1s ease-in-out;
+}
+
+#nextBtn:hover {
+  border: 2px solid #fff;
+  background: #0004;
+  color: #fff;
 }
 
 .vjs-text-track-cue div {
@@ -19,7 +35,7 @@ video {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 33vw;
-  aspect-ratio: 16/9;
+  max-height: 400px;
   color: #fff;
   background: #8884;
   backdrop-filter: blur(10px);
@@ -34,7 +50,12 @@ video {
 }
 
 .li:hover {
-  background: #444;
+  background: #4448;
+}
+
+.li:hover .closer {
+  opacity: 0.75;
+  transition: opacity 0.1s ease-in-out;
 }
 
 .hidden {

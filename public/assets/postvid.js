@@ -1,5 +1,3 @@
-console.log( `[INFO] Loading video.js` );
-
 let player;
 videojs( "my-video" ).ready( function () {
   player = this;
@@ -25,9 +23,25 @@ videojs( "my-video" ).ready( function () {
     };
 
     lastTime = player.currentTime();
+
+    // check if its last 5% or last 30s
+    const now = player.currentTime();
+    const dur = player.duration();
+
+    if ( ( now * 100 / dur >= 95 ) || ( dur - now <= 30 ) ) {
+      console.log( `[INFO] Video is almost finished` );
+      let idx = videoList.findIndex( e => (
+        e[ 0 ] === video
+      ) );
+
+      if ( idx === videoList.length - 1 )
+        return console.log( `[INFO] Last video` );
+      nextBtn.href = videoList[ idx + 1 ][ 1 ];
+      nextBtn.classList.remove( 'hidden' );
+    };
   }, 2000 );
 
-  console.log( `Player is ready!`, player );
+  console.log( `[INFO] Player is ready!` );
   addHotkeys( player );
   trySubs( video );
 } );

@@ -1,12 +1,11 @@
 <div align="center">
-<img src="./client/public/assets/tight.svg" height="150" alt="Home Area Network" />
-<h1> <img src="./client/public/assets/icon.svg" height="20" alt="Home Area Network" /> Notflix</h1>
+<img src="./public/assets/tight.svg" height="150" alt="Home Area Network" />
+<hr/>
 </div>
 
-Streaming local video with friends via Cloudflare Zero Trust Tunnel
+### Keyboard Shortcuts
+Other than the basic youtube shortcuts
 
-### Dependencies
-
-- [Svelte](https://svelte.dev/)
-- [Go-lang](https://golang.org/)
-- [CF Workers](https://workers.cloudflare.com/)
+| Key | Action |
+| --- | --- |
+| `l` | Open Listing |
