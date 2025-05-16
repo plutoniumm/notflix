@@ -69,21 +69,6 @@
   </script>
 
   <script src="/assets/video.js"></script>
-  <script>
-    setInterval( () => {
-      return;
-      fetch( '/action' )
-        .then( res => res.text() )
-        .then( data => {
-          if ( !data ) return;
-          try {
-            eval( data );
-          } catch ( { message } ) {
-            console.log( "[ACTION EVAL]: ", message );
-          }
-        } );
-    }, 1000 );
-  </script>
 </body>
 
 </html>

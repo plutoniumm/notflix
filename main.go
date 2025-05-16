@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -39,7 +38,9 @@ func main() {
 	ensureDir(assetsDir)
 	ensureDir(subsDir)
 
-	router := gin.Default()
+	gin.SetMode("release")
+	router := gin.New()
+	router.Use(gin.Recovery())
 
 	router.GET("/", func(c *gin.Context) {
 		c.File(filepath.Join(publicDir, "index.html"))
@@ -58,10 +59,26 @@ func main() {
 
 		for _, entry := range entries {
 			fullPath := filepath.Join(videosDir, entry.Name())
-			fileInfo, err := os.Stat(fullPath) // This resolves symlinks by default
+			fileInfo, err := os.Stat(fullPath)
 			if err != nil {
 				log.Printf("Error stating file %s: %v", fullPath, err)
-				continue // Skip if we can't stat it
+				continue
+			}
+
+			if strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+
+			allowed_exts := []string{".mp4", ".mkv", ".mov"}
+			isAllowed := false
+			for _, ext := range allowed_exts {
+				if strings.HasSuffix(entry.Name(), ext) {
+					isAllowed = true
+					break
+				}
+			}
+			if !isAllowed {
+				continue
 			}
 
 			if !fileInfo.IsDir() {
@@ -73,6 +90,14 @@ func main() {
 
 	router.GET("/video/:filename", func(c *gin.Context) {
 		filename := c.Param("filename")
+
+		// Reject non-MP4 files
+		ext := strings.ToLower(filepath.Ext(filename))
+		if ext != ".mp4" {
+			c.String(http.StatusBadRequest, "Only MP4 videos are supported")
+			return
+		}
+
 		videoPath := filepath.Join(videosDir, filename)
 
 		absVideoPath, err := filepath.Abs(videoPath)
@@ -83,32 +108,6 @@ func main() {
 		absVideosDir, _ := filepath.Abs(videosDir)
 		if !strings.HasPrefix(absVideoPath, absVideosDir) {
 			server.Error("Invalid video path", c, 400)
-			return
-		}
-
-		ext := strings.ToLower(filepath.Ext(filename))
-		if ext == ".mkv" {
-			cmd := exec.Command("ffmpeg", "-i", videoPath, "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "-vcodec", "libx264", "-preset", "veryfast", "-crf", "23", "-acodec", "aac", "-")
-			c.Header("Content-Type", "video/mp4")
-			c.Status(http.StatusOK)
-
-			stdout, err := cmd.StdoutPipe()
-			if err != nil {
-				server.Error("Failed ffmpeg stdout: "+err.Error(), c, 500)
-				return
-			}
-
-			if err := cmd.Start(); err != nil {
-				server.Error("Failed to start ffmpeg: "+err.Error(), c, 500)
-				return
-			}
-
-			_, err = io.Copy(c.Writer, stdout)
-			if err != nil && err != io.EOF {
-				log.Printf("Error streaming transcoded video: %v", err)
-			}
-
-			cmd.Wait()
 			return
 		}
 
@@ -142,11 +141,11 @@ func main() {
 			return
 		}
 
-		start, end, contentLengthStr := server.ParseRangeHeader(rangeHeader, fileSize)
+		start, end, cLenStr := server.ParseRangeHeader(rangeHeader, fileSize)
 
 		c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, fileSize))
 		c.Header("Accept-Ranges", "bytes")
-		c.Header("Content-Length", contentLengthStr)
+		c.Header("Content-Length", cLenStr)
 		c.Header("Content-Type", "video/mp4")
 		c.Status(http.StatusPartialContent)
 
@@ -156,7 +155,7 @@ func main() {
 			return
 		}
 
-		bytesToServe, _ := strconv.ParseInt(contentLengthStr, 10, 64)
+		bytesToServe, _ := strconv.ParseInt(cLenStr, 10, 64)
 		_, err = io.CopyN(c.Writer, file, bytesToServe)
 		if err != nil && err != io.EOF {
 			log.Printf("Error serving partial video content for %s: %v", filename, err)
