@@ -8,6 +8,18 @@ video {
   pointer-events: none;
 }
 
+.video-js.not-hover.vjs-has-started.vjs-paused.vjs-user-active .vjs-control-bar,
+.video-js.not-hover.vjs-has-started.vjs-paused.vjs-user-inactive .vjs-control-bar,
+.video-js.not-hover.vjs-has-started.vjs-playing.vjs-user-active .vjs-control-bar,
+.video-js.not-hover.vjs-has-started.vjs-playing.vjs-user-inactive .vjs-control-bar,
+.video-js.vjs-has-started.vjs-playing.vjs-user-inactive .vjs-control-bar {
+  visibility: hidden;
+  opacity: 0 !important;
+  transform: translateY(3em);
+  -webkit-backface-visibility: hidden;
+  transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
 #nextBtn {
   bottom: 48px;
   right: 48px;

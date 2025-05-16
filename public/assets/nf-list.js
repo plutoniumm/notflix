@@ -52,44 +52,43 @@ class SearchableList extends HTMLElement {
       pattern = pattern.toLowerCase();
       str = str.toLowerCase();
 
-      let patternIdx = 0;
+      let pIdx = 0;
       let strIdx = 0;
       let score = 0;
-      let consecutiveMatches = 0;
+      let consec = 0;
 
       if ( pattern.length === 0 ) return { matched: true, score: 1 };
 
-      while ( patternIdx < pattern.length && strIdx < str.length ) {
-        if ( pattern[ patternIdx ] === str[ strIdx ] ) {
-          patternIdx++;
-          consecutiveMatches++;
-          score += consecutiveMatches;
+      while ( pIdx < pattern.length && strIdx < str.length ) {
+        if ( pattern[ pIdx ] === str[ strIdx ] ) {
+          pIdx++;
+          consec++;
+          score += consec;
         } else {
-          consecutiveMatches = 0;
+          consec = 0;
           score -= 0.1;
         }
         strIdx++;
       }
 
-      let matched = patternIdx === pattern.length;
+      let matched = pIdx === pattern.length;
       return {
         matched, score: matched ? score / str.length : 0
       };
     }
 
     const results = [];
-
     items.forEach( item => {
       const link = item.querySelector( 'a' );
       if ( !link ) return;
 
       const text = link.textContent || link.innerText;
-      const matchResult = fuzzyMatch( filter, text );
+      const mRes = fuzzyMatch( filter, text );
 
-      if ( matchResult.matched ) {
+      if ( mRes.matched ) {
         results.push( {
           element: item,
-          score: matchResult.score
+          score: mRes.score
         } );
       } else {
         item.style.display = "none";
@@ -97,9 +96,7 @@ class SearchableList extends HTMLElement {
     } );
 
     results.sort( ( a, b ) => b.score - a.score );
-    results.forEach( result => {
-      result.element.style.display = "";
-    } );
+    results.forEach( r => r.element.style.display = "" );
   }
 }
 

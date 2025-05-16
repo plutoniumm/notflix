@@ -6,7 +6,7 @@ videojs( "my-video" ).ready( function () {
   lastPlayed = JSON.parse( lastPlayed || "{}" );
   if ( lastPlayed[ video ] ) {
     player.currentTime( lastPlayed[ video ] );
-    document.querySelector( 'video' )
+    $( 'video' )
   } else {
     player.currentTime( 0 );
     lastPlayed[ video ] = 0;
@@ -24,15 +24,12 @@ videojs( "my-video" ).ready( function () {
 
     lastTime = player.currentTime();
 
-    // check if its last 5% or last 30s
+    // check if its last 5% or last 60s [EQUAL AT 20min]
     const now = player.currentTime();
     const dur = player.duration();
-
     if ( ( now * 100 / dur >= 95 ) || ( dur - now <= 30 ) ) {
       console.log( `[INFO] Video is almost finished` );
-      let idx = videoList.findIndex( e => (
-        e[ 0 ] === video
-      ) );
+      let idx = videoList.findIndex( e => ( e[ 0 ] === video ) );
 
       if ( idx === videoList.length - 1 )
         return console.log( `[INFO] Last video` );
@@ -75,11 +72,21 @@ function trySubs ( video ) {
 function addHotkeys ( player ) {
   document.addEventListener( 'keydown', ( event ) => {
     console.log( `[KEY] ${ event.which }`, player.currentTime() );
-
+    ///* +TIME */
     if ( event.which === 39 ) { // +5s
       player.currentTime( player.currentTime() + 5 );
+    } else if ( event.which === 39 && event.shiftKey ) { // +30s
+      player.currentTime( player.currentTime() + 30 );
+    } else if ( event.which === 39 && event.altKey ) { // +100ms
+      player.currentTime( player.currentTime() + 0.1 );
+      /* -TIME */
     } else if ( event.which === 37 ) { // -5s
       player.currentTime( player.currentTime() - 5 );
+    } else if ( event.which === 37 && event.shiftKey ) { // +30s
+      player.currentTime( player.currentTime() - 30 );
+    } else if ( event.which === 37 && event.altKey ) { // +100ms
+      player.currentTime( player.currentTime() - 0.1 );
+      /* OTHERS */
     } else if ( event.which === 32 ) { // play/pause
       player.paused() ? player.play() : player.pause();
     } else if ( event.which === 77 ) { // mute/unmute
@@ -92,3 +99,9 @@ function addHotkeys ( player ) {
     }
   } );
 };
+
+window.addEventListener( 'keydown', ( e ) => {
+  if ( e.key === 'l' ) {
+    listings.classList.toggle( 'hidden' );
+  }
+} );
