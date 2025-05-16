@@ -1,9 +1,20 @@
 package server
 
 import (
+	"log"
+	"os"
 	"strconv"
 	"strings"
 )
+
+func EnsureDir(dir string) {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err := os.Mkdir(dir, 0755)
+		if err != nil {
+			log.Fatalf("Failed to create directory %s: %v", dir, err)
+		}
+	}
+}
 
 func ParseRangeHeader(rangeHeader string, fileSize int64) (start int64, end int64, contentLength string) {
 	rangeParts := strings.Split(rangeHeader, "=")

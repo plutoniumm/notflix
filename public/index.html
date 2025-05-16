@@ -17,10 +17,9 @@
   <link rel="stylesheet" href="/assets/global.css">
 
   <script src="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video.min.js"></script>
-  <script src="https://cdn.sc.gl/videojs-hotkeys/0.2/videojs.hotkeys.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@videojs/http-streaming@3.15.0/dist/videojs-http-streaming.min.js"></script>
 
-  <script async defer src="./assets/nf-list.js"></script>
+  <script async src="./assets/nf-list.js"></script>
 
   <title>Plutoniumm's Notflix</title>
 </head>
@@ -44,31 +43,41 @@
   <nf-list class="rpm-10 p-abs hidden" id="listing"></nf-list>
 
   <script>
+    console.log( `[INFO] Loading previd.js` );
+
     const query = new URLSearchParams( window.location.search );
+    let listings = document.querySelector( '#listing' );
+    let enabler = document.querySelector( '#enabler' );
+
+    enabler.addEventListener( 'click', () => {
+      listings.classList.toggle( 'hidden' );
+    } );
+
     let video = query.get( 'video' );
 
     if ( video ) {
-      console.log( `Using video: ${ video }` );
+      document.title = `${ video } | Notflix`;
+      console.log( document.title );
       document.querySelector( 'source' ).src = `/video/${ video }`;
-      // document.querySelector( 'track' ).src = `/subs/${ video }.vtt`;
-    };
+    } else {
+      listings.classList.remove( 'hidden' );
+    }
 
     fetch( '/list' )
       .then( res => res.json() )
       .then( data => {
-        const listing = document.getElementById( 'listing' );
         data = data || [];
 
         data.forEach( video => {
           const div = document.createElement( 'li' );
           div.classList.add( "li" )
           div.innerHTML = `<a href="?video=${ video }">${ video }</a>`;
-          listing.appendChild( div );
+          listings.appendChild( div );
         } );
       } );
   </script>
 
-  <script src="/assets/video.js"></script>
+  <script src="/assets/postvid.js"></script>
 </body>
 
 </html>

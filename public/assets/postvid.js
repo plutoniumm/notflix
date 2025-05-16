@@ -1,3 +1,5 @@
+console.log( `[INFO] Loading video.js` );
+
 let player;
 videojs( "my-video" ).ready( function () {
   player = this;
@@ -27,11 +29,38 @@ videojs( "my-video" ).ready( function () {
 
   console.log( `Player is ready!`, player );
   addHotkeys( player );
+  trySubs( video );
 } );
+
+function trySubs ( video ) {
+  let subfile = video.replace( '.mp4', '.vtt' );
+  fetch( `/subs/${ subfile }` )
+    .then( res => {
+      if ( !res.status === 200 || !player )
+        return console.log( `[ERROR] No Subs | No Player` );
+
+      player.addRemoteTextTrack( {
+        kind: 'captions',
+        src: `/subs/${ subfile }`,
+        srclang: 'en',
+        label: 'notflix-sub',
+        default: true
+      } );
+
+      let tracks = player.remoteTextTracks();
+      for ( let i = 0;i < tracks.length;i++ ) {
+        if ( tracks[ i ].label === 'notflix-sub' ) {
+          tracks[ i ].mode = 'showing';
+        } else {
+          tracks[ i ].mode = 'disabled';
+        };
+      }
+    } );
+}
 
 function addHotkeys ( player ) {
   document.addEventListener( 'keydown', ( event ) => {
-    console.log( `[KEY] ${ event.which }` );
+    console.log( `[KEY] ${ event.which }`, player.currentTime() );
 
     if ( event.which === 39 ) { // +5s
       player.currentTime( player.currentTime() + 5 );
@@ -48,23 +77,4 @@ function addHotkeys ( player ) {
       player.currentTime( player.duration() * number * 0.1 );
     }
   } );
-}
-
-
-const listings = document.querySelector( '#listing' );
-document.querySelector( '#enabler' ).addEventListener( 'click', () => {
-  listings.classList.toggle( 'hidden' );
-} );
-if ( !video ) {
-  listings.classList.remove( 'hidden' );
-}
-
-if ( video ) {
-  player.addRemoteTextTrack( {
-    kind: 'captions',
-    src: `/subs/${ video }.vtt`,
-    srclang: 'en',
-    label: 'English',
-    default: true
-  } );
-}
+};

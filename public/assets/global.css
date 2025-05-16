@@ -8,6 +8,12 @@ video {
   pointer-events: none;
 }
 
+.vjs-text-track-cue div {
+  background-color: #0006 !important;
+  border-radius: 5px;
+  padding: 5px;
+}
+
 #listing {
   top: 50%;
   left: 50%;
@@ -21,7 +27,6 @@ video {
 
 .li {
   padding: 0.5rem;
-  border-radius: 10px;
   border-bottom: 1px solid #fff8;
   transition: background 0.1s ease-in-out;
   background: #4440;

@@ -1,0 +1,66 @@
+#!/bin/bash
+
+function clean(){
+  if [ -z "$1" ]; then
+    read -p "Enter the string to remove: " from
+  else
+    from="$1"
+  fi
+
+  if [ -z "$2" ]; then
+    read -p "Enter the string to replace with: " to
+  else
+    to="$2"
+  fi
+
+
+  for f in *"$1"*; do
+    echo "[REPLACE]: '$from' -> '$to'"
+    if [ -z "$to" ]; then
+      new="${f//$from/}"
+    else
+      new="${f//$from/$to}"
+    fi
+    mv -- "$f" "$new"
+  done
+}
+
+function conv(){
+  for f in *.mkv *.avi *.mov; do
+    ./convert "$f"
+  done
+}
+
+function sub() {
+  for f in *.mp4; do
+    base="${f%.*}"
+    srt="$base.srt"
+    vtt="$base.vtt"
+    if [ -f "$srt" ] || [ -f "$vtt" ]; then
+      echo "[SKIP]: Subs Out of $f"
+      continue
+    fi
+
+    subs=$(ffprobe -hide_banner -loglevel error -select_streams s -show_entries stream=index -of csv=p=0 "$f")
+    if [ -z "$subs" ]; then
+      echo "[SKIP]: NoSubs in $f"
+      continue
+    fi
+
+    echo "[SUB]: $f"
+    ffmpeg -hide_banner -loglevel fatal -stats -y -i "$f" -map 0:s:0 "$srt"
+  done
+
+  for srt in *.srt; do
+    if [ ! -f "$srt" ]; then
+      echo "[SKIP]: $srt not found"
+      continue
+    fi
+
+    vtt="${srt%.*}.vtt"
+    echo "[CONVERT]: $srt -> $vtt"
+    ffmpeg -hide_banner -loglevel fatal -stats -y -i "$srt" "$vtt" && rm "$srt"
+  done
+}
+
+"$@"

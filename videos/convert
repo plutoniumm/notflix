@@ -1,0 +1,103 @@
+#!/bin/bash
+
+shopt -s nullglob
+
+select_audio_track() {
+  local file="$1"
+  local ainfo eng_idx en_idx first_idx
+
+  ainfo=$(ffprobe -hide_banner -loglevel fatal -select_streams a -show_entries stream=index:stream_tags=language -of csv=p=0 "$file" 2>/dev/null)
+  [ $? -ne 0 ] || [ -z "$ainfo" ] && echo "" && return
+
+  eng_idx=$(echo "$ainfo" | grep '[0-9]*,eng$' | cut -d, -f1 | head -n1)
+  [ -n "$eng_idx" ] && echo "$eng_idx" && return
+
+  en_idx=$(echo "$ainfo" | grep '[0-9]*,en$' | cut -d, -f1 | head -n1)
+  [ -n "$en_idx" ] && echo "$en_idx" && return
+
+  first_idx=$(echo "$ainfo" | cut -d, -f1 | head -n1)
+  echo "$first_idx"
+}
+
+select_subtitle_track() {
+  local file="$1"
+  local sinfo eng_idx en_idx first_idx
+
+  sinfo=$(ffprobe -hide_banner -loglevel fatal -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 "$file" 2>/dev/null)
+  [ $? -ne 0 ] || [ -z "$sinfo" ] && echo "" && return
+
+  eng_idx=$(echo "$sinfo" | grep '[0-9]*,eng$' | cut -d, -f1 | head -n1)
+  [ -n "$eng_idx" ] && echo "$eng_idx" && return
+
+  en_idx=$(echo "$sinfo" | grep '[0-9]*,en$' | cut -d, -f1 | head -n1)
+  [ -n "$en_idx" ] && echo "$en_idx" && return
+
+  first_idx=$(echo "$sinfo" | cut -d, -f1 | head -n1)
+  echo "$first_idx"
+}
+
+file="$1"
+
+if [ -z "$file" ] || [ ! -f "$file" ]; then
+  echo "Usage: $0 <input.{mkv,avi,mov}>"
+  exit 1
+fi
+
+ext="${file##*.}"
+out="${file%.*}.mp4"
+
+if [ -f "$out" ]; then
+  echo "Skip: '$out' exists."
+  exit 0
+fi
+
+echo "Proc: '$file' -> '$out'"
+
+inputs=("-i" "$file")
+map_opts=("-map" "0:v:0")
+codec_opts=("-c:v" "copy")
+
+audio_idx=$(select_audio_track "$file")
+if [ -n "$audio_idx" ]; then
+  echo "Audio: Using track index $audio_idx"
+  map_opts+=("-map" "0:$audio_idx")
+  codec_opts+=("-c:a" "aac_at" "-b:a" "192k")
+else
+  echo "Audio: No audio track selected, disabling audio."
+  codec_opts+=("-an")
+fi
+
+srt_f="${file%.*}.srt"
+if [ -f "$srt_f" ]; then
+  echo "Subs: Adding external SRT '$srt_f'."
+  inputs+=("-i" "$srt_f")
+  map_opts+=("-map" "1:s:0")
+  codec_opts+=("-c:s" "mov_text" "-metadata:s:s:0" "language=eng")
+else
+  sub_idx=$(select_subtitle_track "$file")
+  if [ -n "$sub_idx" ]; then
+    echo "Subs: Using internal subtitle track index $sub_idx"
+    map_opts+=("-map" "0:$sub_idx")
+    codec_opts+=("-c:s" "mov_text" "-metadata:s:s:0" "language=eng")
+  else
+    echo "Subs: No subtitle track found. Disabling subtitles."
+    codec_opts+=("-sn")
+  fi
+fi
+
+cmd=("ffmpeg" "-hide_banner" "-loglevel" "fatal" "-stats")
+cmd+=("${inputs[@]}" "${map_opts[@]}" "${codec_opts[@]}" "$out")
+
+echo "[RUNNING]: ${cmd[*]}"
+if "${cmd[@]}"; then
+  echo "Done: '$out'"
+  if [ -n "$sub_idx" ] && [ ! -f "${out%.*}.srt" ]; then
+    echo "Extracting SRT from internal subtitle track $sub_idx..."
+    ffmpeg -hide_banner -loglevel fatal -stats -y \
+      -i "$file" \
+      -map "0:$sub_idx" \
+      "${out%.*}.srt" && echo "SRT saved as '${out%.*}.srt'" || echo "Failed to extract subtitles."
+  fi
+else
+  echo "Fail: Could not convert '$file' (ffmpeg error code $?)."
+fi

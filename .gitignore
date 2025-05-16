@@ -1,4 +1,8 @@
-videos/
+videos/*.mp4
+videos/*.mkv
+videos/*.srt
+videos/*.vtt
+
 dist/
 local/
 subs/

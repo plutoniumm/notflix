@@ -6,13 +6,13 @@ class SearchableList extends HTMLElement {
 
   connectedCallback () {
     this.attachShadow( { mode: 'open' } );
-    this.shadowRoot.innerHTML = `
+    this.shadowRoot.innerHTML = /*html*/`
     <style>
-      .search {
+      input[type="text"] {
         width: 100%;
         font-size: 1em;
         padding: 12px;
-        border-radius: 12px
+        border-radius: 12px;
         margin-bottom: 2em;
         background: transparent;
         color: #fff;
@@ -25,12 +25,11 @@ class SearchableList extends HTMLElement {
         list-style-type: none;
         padding: 0;
         margin: 0;
-      }
+        height: 100%;
+        overflow-y: scroll;
       }
     </style>
-    <input
-      type="text" class="search" placeholder="Search..."
-    >
+    <input type="text" placeholder="Search..." />
     <ul>
       <slot></slot>
     </ul>
@@ -72,9 +71,9 @@ class SearchableList extends HTMLElement {
         strIdx++;
       }
 
+      let matched = patternIdx === pattern.length;
       return {
-        matched: patternIdx === pattern.length,
-        score: patternIdx === pattern.length ? score / str.length : 0
+        matched, score: matched ? score / str.length : 0
       };
     }
 
