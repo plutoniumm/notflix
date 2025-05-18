@@ -1,6 +1,10 @@
 let player;
+let next = null;
 videojs( "my-video" ).ready( function () {
+  console.log( `[INFO] Player ready!\nAutoplay: ${ autoplay }` );
   player = this;
+  next = null;
+  if ( autoplay ) player.play();
 
   let lastPlayed = localStorage.getItem( 'lastPlayed' );
   lastPlayed = JSON.parse( lastPlayed || "{}" );
@@ -23,11 +27,10 @@ videojs( "my-video" ).ready( function () {
     };
 
     lastTime = player.currentTime();
-
-    // check if its last 5% or last 60s [EQUAL AT 20min]
-    const now = player.currentTime();
     const dur = player.duration();
-    if ( ( now * 100 / dur >= 95 ) || ( dur - now <= 30 ) ) {
+    if (
+      ( lastTime * 100 / dur >= 95 ) || ( dur - lastTime <= 30 )
+    ) {
       console.log( `[INFO] Video is almost finished` );
       let idx = videoList.findIndex( e => ( e[ 0 ] === video ) );
 
@@ -35,57 +38,53 @@ videojs( "my-video" ).ready( function () {
         return console.log( `[INFO] Last video` );
       nextBtn.href = videoList[ idx + 1 ][ 1 ];
       nextBtn.classList.remove( 'hidden' );
+
+      next = nextBtn.href + ( autoplay ? '&autoplay=1' : '' );
+      setTimeout( () => window.location.href = next, 5e3 );
     };
   }, 2000 );
 
-  console.log( `[INFO] Player is ready!` );
   addHotkeys( player );
   trySubs( video );
 } );
 
-function trySubs ( video ) {
+async function trySubs ( video ) {
   let subfile = video.replace( '.mp4', '.vtt' );
-  fetch( `/subs/${ subfile }` )
-    .then( res => {
-      if ( !res.status === 200 || !player )
-        return console.log( `[ERROR] No Subs | No Player` );
+  const isSub = await exists( `/subs/${ subfile }` );
+  if ( !isSub ) return;
 
-      player.addRemoteTextTrack( {
-        kind: 'captions',
-        src: `/subs/${ subfile }`,
-        srclang: 'en',
-        label: 'notflix-sub',
-        default: true
-      } );
+  player.addRemoteTextTrack( {
+    kind: 'captions',
+    src: `/subs/${ subfile }`,
+    srclang: 'en',
+    label: 'notflix-sub',
+    default: true
+  } );
 
-      let tracks = player.remoteTextTracks();
-      for ( let i = 0;i < tracks.length;i++ ) {
-        if ( tracks[ i ].label === 'notflix-sub' ) {
-          tracks[ i ].mode = 'showing';
-        } else {
-          tracks[ i ].mode = 'disabled';
-        };
-      }
-    } );
+  let tracks = player.remoteTextTracks();
+  for ( let i = 0;i < tracks.length;i++ ) {
+    tracks[ i ].mode =
+      tracks[ i ].label === 'notflix-sub' ? 'showing' : 'disabled';
+  }
 }
 
 function addHotkeys ( player ) {
   document.addEventListener( 'keydown', ( event ) => {
     console.log( `[KEY] ${ event.which }`, player.currentTime() );
     ///* +TIME */
-    if ( event.which === 39 ) { // +5s
-      player.currentTime( player.currentTime() + 5 );
-    } else if ( event.which === 39 && event.shiftKey ) { // +30s
+    if ( event.which === 39 && event.shiftKey ) { // +30s
       player.currentTime( player.currentTime() + 30 );
     } else if ( event.which === 39 && event.altKey ) { // +100ms
       player.currentTime( player.currentTime() + 0.1 );
+    } else if ( event.which === 39 ) { // +5s
+      player.currentTime( player.currentTime() + 5 );
       /* -TIME */
-    } else if ( event.which === 37 ) { // -5s
-      player.currentTime( player.currentTime() - 5 );
     } else if ( event.which === 37 && event.shiftKey ) { // +30s
       player.currentTime( player.currentTime() - 30 );
     } else if ( event.which === 37 && event.altKey ) { // +100ms
       player.currentTime( player.currentTime() - 0.1 );
+    } else if ( event.which === 37 ) { // -5s
+      player.currentTime( player.currentTime() - 5 );
       /* OTHERS */
     } else if ( event.which === 32 ) { // play/pause
       player.paused() ? player.play() : player.pause();
@@ -96,12 +95,19 @@ function addHotkeys ( player ) {
     } else if ( event.which >= 48 && event.which <= 57 ) { // (0-9)0%
       let number = event.which - 48;
       player.currentTime( player.duration() * number * 0.1 );
+    } else if ( event.which === 78 ) { // n
+      if ( next ) {
+        window.location.href = next;
+      };
     }
   } );
 };
 
 window.addEventListener( 'keydown', ( e ) => {
+  const active = document.activeElement.tagName;
+
   if ( e.key === 'l' ) {
+    if ( [ 'NF-LIST', 'INPUT' ].includes( active ) ) return;
     listings.classList.toggle( 'hidden' );
-  }
+  };
 } );

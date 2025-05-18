@@ -47,7 +47,7 @@ video {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 33vw;
-  max-height: 400px;
+  height: 400px;
   color: #fff;
   background: #8884;
   backdrop-filter: blur(10px);

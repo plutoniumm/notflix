@@ -39,42 +39,42 @@ class SearchableList extends HTMLElement {
     input.addEventListener( 'keyup', this._handleSearch.bind( this ) );
   }
 
+  fuzzyMatch ( pattern, str ) {
+    pattern = pattern.toLowerCase();
+    str = str.toLowerCase();
+
+    let pIdx = 0;
+    let strIdx = 0;
+    let score = 0;
+    let consec = 0;
+
+    if ( pattern.length === 0 ) return { matched: true, score: 1 };
+
+    while ( pIdx < pattern.length && strIdx < str.length ) {
+      if ( pattern[ pIdx ] === str[ strIdx ] ) {
+        pIdx++;
+        consec++;
+        score += consec;
+      } else {
+        consec = 0;
+        score -= 0.1;
+      }
+      strIdx++;
+    }
+
+    let matched = pIdx === pattern.length;
+    return {
+      matched, score: matched ? score / str.length : 0
+    };
+  }
+
   _handleSearch ( event ) {
     const filter = event.target.value.toLowerCase();
     const items = this.querySelectorAll( 'li' );
 
     if ( !filter.trim() ) {
-      items.forEach( item => ( item.style.display = "" ) );
+      items.forEach( item => ( item.style.display = "block" ) );
       return;
-    }
-
-    function fuzzyMatch ( pattern, str ) {
-      pattern = pattern.toLowerCase();
-      str = str.toLowerCase();
-
-      let pIdx = 0;
-      let strIdx = 0;
-      let score = 0;
-      let consec = 0;
-
-      if ( pattern.length === 0 ) return { matched: true, score: 1 };
-
-      while ( pIdx < pattern.length && strIdx < str.length ) {
-        if ( pattern[ pIdx ] === str[ strIdx ] ) {
-          pIdx++;
-          consec++;
-          score += consec;
-        } else {
-          consec = 0;
-          score -= 0.1;
-        }
-        strIdx++;
-      }
-
-      let matched = pIdx === pattern.length;
-      return {
-        matched, score: matched ? score / str.length : 0
-      };
     }
 
     const results = [];
@@ -83,7 +83,7 @@ class SearchableList extends HTMLElement {
       if ( !link ) return;
 
       const text = link.textContent || link.innerText;
-      const mRes = fuzzyMatch( filter, text );
+      const mRes = this.fuzzyMatch( filter, text );
 
       if ( mRes.matched ) {
         results.push( {
@@ -91,12 +91,15 @@ class SearchableList extends HTMLElement {
           score: mRes.score
         } );
       } else {
-        item.style.display = "none";
+        item.style.setProperty( 'display', 'none', 'important' );
       }
     } );
 
     results.sort( ( a, b ) => b.score - a.score );
-    results.forEach( r => r.element.style.display = "" );
+    results.forEach( ( { element } ) => {
+      element.style.display = "";
+      element.parentNode.appendChild( element );
+    } );
   }
 }
 

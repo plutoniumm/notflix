@@ -19,6 +19,7 @@
   <script src="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@videojs/http-streaming@3.15.0/dist/videojs-http-streaming.min.js"></script>
 
+  <script src="./assets/utils.js"></script>
   <script async src="./assets/nf-list.js"></script>
   <title>Plutoniumm's Notflix</title>
 </head>
@@ -37,10 +38,8 @@
   <nf-list class="rpm-10 p-abs hidden" id="listing"></nf-list>
 
   <script>
-    const $ = ( s ) => document.querySelector( s );
-    const Sort = ( a, b ) => a.localeCompare( b, 'en', { numeric: true } )
-
-    const video = new URLSearchParams( window.location.search ).get( 'video' );
+    const video = search.get( 'video' );
+    const autoplay = search.get( 'autoplay' ) === '1';
     let listings = $( '#listing' );
 
     if ( video ) {
@@ -51,30 +50,28 @@
     };
 
     function delFile ( video ) {
-      fetch( `/video/${ video }`, { method: 'DELETE' } )
+      del( `/video/${ video }` )
         .then( res => $( `li:has(a[href*="${ video }"])` )?.remove() )
-        .catch( e => console.log( e ) );
     }
 
     let videoList = [];
-    fetch( '/list' ).then( r => r.json() )
-      .then( data => {
-        if ( !data?.length ) return;
-        videoList = data
-          .sort( Sort )
-          .map( e => [ e, `?video=${ encodeURIComponent( e ) }` ] );
+    get( '/list' ).then( data => {
+      if ( !data?.length ) return;
+      videoList = data
+        .sort( Sort )
+        .map( e => [ e, `?video=${ encodeURIComponent( e ) }` ] );
 
-        videoList.forEach( v => {
-          const div = document.createElement( 'li' );
-          div.classList.add( "li", "f", "j-bw" )
+      videoList.forEach( v => {
+        const div = document.createElement( 'li' );
+        div.classList.add( "li", "f", "j-bw" )
 
-          div.innerHTML = `
+        div.innerHTML = `
             <a class="d-b" href="${ v[ 1 ] }">${ v[ 0 ] }</a>
             <span class="closer o-0 ptr" onclick="delFile('${ v[ 0 ] }')">✕</span>
           `;
-          listings.appendChild( div );
-        } );
+        listings.appendChild( div );
       } );
+    } );
   </script>
   <script src="/assets/postvid.js"></script>
 </body>
