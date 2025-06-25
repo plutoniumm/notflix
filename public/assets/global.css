@@ -1,79 +1,84 @@
 video {
-	border: 0 !important;
-	outline: 0 !important;
-	transition: all 0.1s ease-in-out;
+    border: 0 !important;
+    outline: 0 !important;
+    transition: all 0.1s ease-in-out;
 }
 
 .hideSubs > .vjs-text-track-display {
-	display: none !important;
+    display: none !important;
 }
 
 .my-video img,
 .vjs-poster {
-	pointer-events: none;
+    pointer-events: none;
 }
 
 .bright {
-	filter: contrast(90%) brightness(110%);
+    filter: contrast(90%) brightness(110%);
 }
 
 .video-js.not-hover.vjs-has-started.vjs-paused.vjs-user-active .vjs-control-bar,
 .video-js.not-hover.vjs-has-started.vjs-paused.vjs-user-inactive
-	.vjs-control-bar,
+    .vjs-control-bar,
 .video-js.not-hover.vjs-has-started.vjs-playing.vjs-user-active
-	.vjs-control-bar,
+    .vjs-control-bar,
 .video-js.not-hover.vjs-has-started.vjs-playing.vjs-user-inactive
-	.vjs-control-bar,
+    .vjs-control-bar,
 .video-js.vjs-has-started.vjs-playing.vjs-user-inactive .vjs-control-bar {
-	visibility: hidden;
-	opacity: 0 !important;
-	transform: translateY(3em);
-	-webkit-backface-visibility: hidden;
-	transition:
-		opacity 0.5s ease,
-		visibility 0.5s ease;
+    visibility: hidden;
+    opacity: 0 !important;
+    transform: translateY(3em);
+    -webkit-backface-visibility: hidden;
+    transition:
+        opacity 0.5s ease,
+        visibility 0.5s ease;
 }
 
 .vjs-text-track-cue div {
-	background-color: #0006 !important;
-	border-radius: 5px;
-	padding: 5px;
-}
-
-#listing {
-	top: 50%;
-	left: 50%;
-	transform: translate(-50%, -50%);
-	width: 33vw;
-	height: 400px;
-	color: #fff;
-	background: #8884;
-	backdrop-filter: blur(10px);
-}
-
-.li {
-	padding: 0.5rem;
-	border-bottom: 1px solid #fff8;
-	transition: background 0.1s ease-in-out;
-	background: #4440;
-	list-style-type: none;
-}
-
-.li:hover {
-	background: #4448;
-}
-
-.li:hover .closer {
-	opacity: 0.75;
-	transition: opacity 0.1s ease-in-out;
+    background-color: #0006 !important;
+    border-radius: 5px;
+    padding: 5px;
 }
 
 .hidden {
-	display: none;
-	pointer-events: none;
+    display: none;
+    pointer-events: none;
 }
 
 body {
-	overflow-y: scroll;
-	background: #000;
+    overflow-y: scroll;
+    background: #000;
+    color: #fff;
+    width: 100vw;
+    overflow-x: hidden;
+}
+
+.movie img {
+    width: 300px;
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+    object-fit: cover;
+    overflow: hidden;
+    margin: 10px;
+}
+
+details {
+    max-width: 100%;
+    margin-bottom: 12px;
+}
+
+/*  summary::-webkit-details-marker */
+summary {
+    font-size: 1.5em;
+    font-weight: bold;
+}
+
+/* no marker */
+ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: scroll;
 }

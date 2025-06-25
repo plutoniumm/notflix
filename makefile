@@ -1,5 +1,4 @@
 all:
-	templ generate;
 	go run *.go;
 
 run:

@@ -1,11 +1,19 @@
 package server
 
 import (
+	"fmt"
+	"hash/fnv"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 )
+
+func Hash(name string) string {
+	h := fnv.New32a()
+	h.Write([]byte(name))
+	return fmt.Sprintf("%07d", h.Sum32()%1e7)
+}
 
 func EnsureDir(dir string) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {

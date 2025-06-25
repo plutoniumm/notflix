@@ -1,16 +1,32 @@
-import { net } from "./utils.js";
+export class Video {
+    constructor(dir, { name, key }) {
+        this.name = name;
+        this.id = key;
+        this.dir = dir;
+
+        name = `${dir}/${name}`;
+        this.url = `?video=${encodeURIComponent(name)}`;
+    }
+
+    get uri() {
+        const autoplay =
+            new URLSearchParams(window.location.search).get("autoplay") === "1";
+
+        return this.url + (autoplay ? "&autoplay=1" : "");
+    }
+}
 
 export class VideoList {
     constructor(data) {
         this.videos = Object.entries(data).flatMap(([dir, files]) =>
-            files.map((v) => [v, `?video=${encodeURIComponent(v)}`]),
+            files.map((v) => new Video(dir, v)),
         );
     }
 
-    getNext(current, autoplay = false) {
-        const idx = this.videos.findIndex(([v]) => v === current);
+    getNext(currentName, autoplay = false) {
+        const idx = this.videos.findIndex((v) => v.name === currentName);
         if (idx === -1 || idx === this.videos.length - 1) return null;
-        return this.videos[idx + 1][1] + (autoplay ? "&autoplay=1" : "");
+        return this.videos[idx + 1].uri;
     }
 }
 
@@ -23,33 +39,6 @@ export function move(player, n) {
         player.currentTime(0);
     } else {
         player.currentTime(time + n);
-    }
-}
-
-export async function trySubs(player, video) {
-    if (!video) {
-        console.warn("No video provided for subtitles.");
-        return;
-    }
-    const subfile = video.replace(".mp4", ".vtt");
-    if (!(await net.exists(`/subs/${subfile}`))) return;
-
-    const existing = Array.from(player.remoteTextTracks()).find(
-        (t) => t.label === "notflix-sub",
-    );
-    if (existing) return;
-    console.log("Adding subtitles", subfile);
-
-    player.addRemoteTextTrack({
-        kind: "captions",
-        src: `/subs/${subfile}`,
-        srclang: "en",
-        label: "notflix-sub",
-        default: true,
-    });
-
-    for (let track of player.remoteTextTracks()) {
-        track.mode = track.label === "notflix-sub" ? "showing" : "disabled";
     }
 }
 

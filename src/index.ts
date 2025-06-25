@@ -1,18 +1,16 @@
-import { addHotkeys, VideoList, move, trySubs } from "./player.js";
-import { $, net, search, Tracker } from "./utils.js";
+import { addHotkeys, VideoList, move } from "./player";
+import { $, net, search, Tracker } from "./utils";
 import * as videojs from "video.js";
+import { Lolomo } from "./ui";
 
-let listings = $("#listing");
+let next = null;
 let videoList = [];
 const video = search.get("video");
 const autoplay = search.get("autoplay") === "1";
-console.log(video, autoplay);
 
 if (video) {
     document.title = `${video} | Notflix`;
     $("source").src = `/video/${video}`;
-} else {
-    listings.classList.remove("hidden");
 }
 
 function delFile(video) {
@@ -23,27 +21,29 @@ function delFile(video) {
 window.delFile = delFile;
 
 net.get("/list").then((data) => {
-    if (!data?.length) return;
+    if (!data) return;
     videoList = new VideoList(data);
     next = videoList.getNext(video, autoplay);
-    data.sort((a, b) => a.localeCompare(b, "en", { numeric: true })).forEach(
-        (v) => {
-            let href = `?video=${encodeURIComponent(v)}`;
-            const div = document.createElement("li");
-            div.classList.add("li", "f", "j-bw");
 
-            div.innerHTML = `
-                <a class="d-b" href="${href}">${v}</a>
-                <span class="closer o-0 ptr" onclick="delFile('${v}')">✕</span>
-            `;
-            listings.appendChild(div);
-        },
-    );
+    const sect = document.querySelector("#series");
+    if (!sect) return;
+    sect.innerHTML = Lolomo(data);
 });
 
-let player = videojs.default("notflix");
+const subfile = video.replace(".mp4", ".vtt");
+let player = videojs.default("notflix", {
+    tracks: [
+        {
+            kind: "captions",
+            src: `/subs/${subfile}`,
+            srclang: "en",
+            label: "notflix-sub",
+            default: true,
+        },
+    ],
+});
+
 player.ready(ready);
-player = player.player_;
 
 const tracker = new Tracker();
 function ready() {
@@ -65,6 +65,5 @@ function ready() {
         lastTime = player.currentTime();
     }, 2000);
 
-    trySubs(player, video);
     addHotkeys(player);
 }

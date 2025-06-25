@@ -2,12 +2,8 @@ package server
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"io"
 	"log"
 	"math/rand"
-	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,84 +33,6 @@ func GetVids(dir string) []string {
 		}
 	}
 	return videos
-}
-
-func VideoPlayer(c *gin.Context, videosDir string) {
-	filename := c.Param("filename")
-	filename, err := url.QueryUnescape(filename)
-	if err != nil {
-		log.Printf("Error unescaping filename: %v", err)
-		return
-	}
-
-	ext := strings.ToLower(filepath.Ext(filename))
-	if ext != ".mp4" {
-		c.String(http.StatusBadRequest, "Only MP4 videos are supported")
-		return
-	}
-
-	videoPath := filepath.Join(videosDir, filename)
-
-	absVideoPath, err := filepath.Abs(videoPath)
-	if err != nil {
-		Error("Error resolving video path", c, 500)
-		return
-	}
-	absVideosDir, _ := filepath.Abs(videosDir)
-	if !strings.HasPrefix(absVideoPath, absVideosDir) {
-		Error("Invalid video path", c, 400)
-		return
-	}
-
-	file, err := os.Open(videoPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			c.String(http.StatusNotFound, "Video not found")
-		} else {
-			Error("Error opening video file: "+err.Error(), c, 500)
-		}
-		return
-	}
-	defer file.Close()
-
-	fileInfo, err := file.Stat()
-	if err != nil {
-		Error("Error stating video file: "+videoPath+":: "+err.Error(), c, 500)
-		return
-	}
-
-	fileSize := fileInfo.Size()
-	rangeHeader := c.GetHeader("Range")
-
-	if rangeHeader == "" {
-		c.Header("Content-Type", "video/mp4")
-		c.Header("Content-Length", strconv.FormatInt(fileSize, 10))
-		_, err = io.Copy(c.Writer, file)
-		if err != nil {
-			log.Printf("Error serving full video content for %s: %v", filename, err)
-		}
-		return
-	}
-
-	start, end, cLenStr := ParseRangeHeader(rangeHeader, fileSize)
-
-	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, fileSize))
-	c.Header("Accept-Ranges", "bytes")
-	c.Header("Content-Length", cLenStr)
-	c.Header("Content-Type", "video/mp4")
-	c.Status(http.StatusPartialContent)
-
-	_, err = file.Seek(start, io.SeekStart)
-	if err != nil {
-		Error("Error seeking video file: "+videoPath+":: "+err.Error(), c, 500)
-		return
-	}
-
-	bytesToServe, _ := strconv.ParseInt(cLenStr, 10, 64)
-	_, err = io.CopyN(c.Writer, file, bytesToServe)
-	if err != nil && err != io.EOF {
-		log.Printf("Error serving partial video content for %s: %v", filename, err)
-	}
 }
 
 func makeThumbnail(videoPath, thumbPath string) error {
@@ -151,7 +69,8 @@ func GenerateThumbnails(videosDir string) {
 		allowedExts := []string{".mp4", ".mkv", ".mov"}
 		for _, ext := range allowedExts {
 			if strings.HasSuffix(d.Name(), ext) {
-				thumbName := d.Name() + ".jpg"
+				id := Hash(d.Name())
+				thumbName := id + ".jpg"
 				thumbPath := filepath.Join(thumbDir, thumbName)
 				thumbsDone[thumbName] = struct{}{}
 				if _, exists := thumbsExisting[thumbName]; exists {
