@@ -9,3 +9,6 @@ Other than the basic youtube shortcuts
 | Key | Action |
 | --- | --- |
 | `l` | Open Listing |
+| `p` | picture-in-picture |
+| `b` | brightness toggle |
+| `n` | next |

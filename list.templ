@@ -1,0 +1,36 @@
+package main
+
+type Movie struct {
+	Title  string
+	URL    string
+	Poster string
+}
+
+type Serie struct {
+	Title  string
+	Movies []Movie
+}
+
+templ Movie_list(movies []Movie) {
+	<ul>
+		for _, item := range movies {
+			<li>
+				<a href="{{ item.URL }}">
+					<img src="{{ item.Poster }}" alt="{{ item.Title }}"/>
+					<h3>{{ item.Title }}</h3>
+				</a>
+			</li>
+		}
+	</ul>
+}
+
+templ Series_list(series []Serie) {
+	<ul>
+		for _, serie := range series {
+			<li>
+				<h4>{{ serie.Title }}</h4>
+				{{ Movie_list(serie.Movies) }}
+			</li>
+		}
+	</ul>
+}

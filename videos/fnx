@@ -13,15 +13,26 @@ function clean(){
     to="$2"
   fi
 
-
-  for f in *"$1"*; do
-    echo "[REPLACE]: '$from' -> '$to'"
-    if [ -z "$to" ]; then
-      new="${f//$from/}"
-    else
-      new="${f//$from/$to}"
+  for f in *; do
+    orig="$f"
+    new="${f//$from/$to}"
+    new="$(echo "$new" | sed -E 's/\[[^]]*\]//g; s/\([^)]*\)//g' | xargs)"
+    if [[ "$orig" != "$new" ]]; then
+      echo "[RENAME]: '$orig' -> '$new'"
+      mv -- "$orig" "$new"
     fi
-    mv -- "$f" "$new"
+  done
+}
+
+function checker(){
+  for f in *.mkv; do
+    mp4="${f%.*}.mp4"
+    vtt="${f%.*}.vtt"
+    if [ -f "$mp4" ]; then
+      if [ -f "$vtt" ]; then
+        rm "$f"
+      fi
+    fi
   done
 }
 
@@ -29,6 +40,9 @@ function conv(){
   for f in *.mkv *.avi *.mov; do
     ./convert "$f"
   done
+
+  sub;
+  checker;
 }
 
 function sub() {

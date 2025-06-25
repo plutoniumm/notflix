@@ -1,7 +1,10 @@
-videos/*.mp4
-videos/*.mkv
-videos/*.srt
-videos/*.vtt
+videos/*
+
+package.json
+
+*_templ.go
+images/
+notflix.js
 
 dist/
 local/

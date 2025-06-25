@@ -1,14 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	server "notflix/server"
@@ -23,8 +22,55 @@ const (
 	port      = "8080"
 )
 
+func listMovies() []Serie {
+	var series []Serie
+
+	// Root-level movies
+	rootMovies := []Movie{}
+	for _, vid := range server.GetVids(videosDir) {
+		rootMovies = append(rootMovies, Movie{
+			Title:  strings.TrimSuffix(vid, filepath.Ext(vid)),
+			URL:    "/video/" + url.PathEscape(vid),
+			Poster: "/assets/" + strings.TrimSuffix(vid, filepath.Ext(vid)) + ".jpg",
+		})
+	}
+	if len(rootMovies) > 0 {
+		series = append(series, Serie{Title: ".", Movies: rootMovies})
+	}
+
+	// Subdirectory series
+	entries, err := os.ReadDir(videosDir)
+	if err != nil {
+		log.Printf("Error reading videos directory: %v", err)
+		return series
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			subDir := filepath.Join(videosDir, entry.Name())
+			movies := []Movie{}
+			for _, vid := range server.GetVids(subDir) {
+				movies = append(movies, Movie{
+					Title:  strings.TrimSuffix(vid, filepath.Ext(vid)),
+					URL:    "/video/" + url.PathEscape(filepath.Join(entry.Name(), vid)),
+					Poster: "/assets/" + entry.Name() + "/" + strings.TrimSuffix(vid, filepath.Ext(vid)) + ".jpg",
+				})
+			}
+			if len(movies) > 0 {
+				series = append(series, Serie{Title: entry.Name(), Movies: movies})
+			}
+		}
+	}
+
+	return series
+}
+
 func listRender(c *gin.Context) {
-	var videoFiles []string
+	result := make(map[string][]string)
+
+	// vids in root
+	result["."] = server.GetVids(videosDir)
+
 	entries, err := os.ReadDir(videosDir)
 	if err != nil {
 		log.Printf("Error reading videos directory: %v", err)
@@ -33,112 +79,13 @@ func listRender(c *gin.Context) {
 	}
 
 	for _, entry := range entries {
-		fullPath := filepath.Join(videosDir, entry.Name())
-		fileInfo, err := os.Stat(fullPath)
-		if err != nil {
-			log.Printf("Error stating file %s: %v", fullPath, err)
-			continue
-		}
-
-		if strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-
-		allowed_exts := []string{".mp4", ".mkv", ".mov"}
-		isAllowed := false
-		for _, ext := range allowed_exts {
-			if strings.HasSuffix(entry.Name(), ext) {
-				isAllowed = true
-				break
-			}
-		}
-		if !isAllowed {
-			continue
-		}
-
-		if !fileInfo.IsDir() {
-			videoFiles = append(videoFiles, entry.Name())
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			subDir := filepath.Join(videosDir, entry.Name())
+			result[entry.Name()] = server.GetVids(subDir)
 		}
 	}
-	c.JSON(http.StatusOK, videoFiles)
-}
 
-func videoPlayer(c *gin.Context) {
-	filename := c.Param("filename")
-	filename, err := url.QueryUnescape(filename)
-	if err != nil {
-		log.Printf("Error unescaping filename: %v", err)
-		return
-	}
-
-	ext := strings.ToLower(filepath.Ext(filename))
-	if ext != ".mp4" {
-		c.String(http.StatusBadRequest, "Only MP4 videos are supported")
-		return
-	}
-
-	videoPath := filepath.Join(videosDir, filename)
-
-	absVideoPath, err := filepath.Abs(videoPath)
-	if err != nil {
-		server.Error("Error resolving video path", c, 500)
-		return
-	}
-	absVideosDir, _ := filepath.Abs(videosDir)
-	if !strings.HasPrefix(absVideoPath, absVideosDir) {
-		server.Error("Invalid video path", c, 400)
-		return
-	}
-
-	file, err := os.Open(videoPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			c.String(http.StatusNotFound, "Video not found")
-		} else {
-			server.Error("Error opening video file: "+err.Error(), c, 500)
-		}
-		return
-	}
-	defer file.Close()
-
-	fileInfo, err := file.Stat()
-	if err != nil {
-		server.Error("Error stating video file: "+videoPath+":: "+err.Error(), c, 500)
-		return
-	}
-
-	fileSize := fileInfo.Size()
-	rangeHeader := c.GetHeader("Range")
-
-	if rangeHeader == "" {
-		c.Header("Content-Type", "video/mp4")
-		c.Header("Content-Length", strconv.FormatInt(fileSize, 10))
-		_, err = io.Copy(c.Writer, file)
-		if err != nil {
-			log.Printf("Error serving full video content for %s: %v", filename, err)
-		}
-		return
-	}
-
-	start, end, cLenStr := server.ParseRangeHeader(rangeHeader, fileSize)
-
-	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, fileSize))
-	c.Header("Accept-Ranges", "bytes")
-	c.Header("Content-Length", cLenStr)
-	c.Header("Content-Type", "video/mp4")
-	c.Status(http.StatusPartialContent)
-
-	_, err = file.Seek(start, io.SeekStart)
-	if err != nil {
-		server.Error("Error seeking video file: "+videoPath+":: "+err.Error(), c, 500)
-		return
-	}
-
-	bytesToServe, _ := strconv.ParseInt(cLenStr, 10, 64)
-	_, err = io.CopyN(c.Writer, file, bytesToServe)
-	if err != nil && err != io.EOF {
-		log.Printf("Error serving partial video content for %s: %v", filename, err)
-	}
+	c.JSON(http.StatusOK, result)
 }
 
 func subSend(c *gin.Context) {
@@ -177,11 +124,23 @@ func main() {
 	router.Use(gin.Recovery())
 
 	router.GET("/", func(c *gin.Context) {
-		c.File(filepath.Join(publicDir, "index.html"))
+		c.File("index.html")
 	})
 	router.Static("/assets", assetsDir)
 	router.GET("/list", listRender)
-	router.GET("/video/:filename", videoPlayer)
+	router.GET("/list_ui", func(c *gin.Context) {
+		movies := listMovies()
+		component := Series_list(movies)
+		component.Render(context.Background(), os.Stdout)
+	})
+
+	router.GET("/video/:filename", func(c *gin.Context) {
+		server.VideoPlayer(c, videosDir)
+	})
+	router.GET("/images/:filename", func(c *gin.Context) {
+		c.File(filepath.Join(assetsDir, c.Param("filename")))
+	})
+
 	router.DELETE("/video/:filename", func(c *gin.Context) {
 		fname := c.Param("filename")
 		videoPath := filepath.Join(videosDir, fname)
@@ -196,6 +155,10 @@ func main() {
 	})
 
 	router.GET("/subs/:filename", subSend)
+
+	go func() {
+		server.GenerateThumbnails(videosDir)
+	}()
 
 	log.Printf("Starting server on http://localhost:%s", port)
 	if err := router.Run(":" + port); err != nil {
