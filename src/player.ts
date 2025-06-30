@@ -49,8 +49,6 @@ export function addHotkeys(player) {
         const key = event.key;
         const lkey = key.toLowerCase();
 
-        console.log(`[KEY] ${key}`, player.currentTime());
-
         // +TIME
         if (key === "ArrowRight" && shift) {
             player.move(30);
@@ -79,7 +77,7 @@ export function addHotkeys(player) {
             // OTHERS
         } else if (lkey === "n") {
             // next
-            if (next) window.location.href = next;
+            if (player.next) window.location.href = player.next();
         } else if (lkey === "p") {
             // pip
             if (document.pictureInPictureElement) {

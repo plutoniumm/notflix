@@ -2,40 +2,36 @@ import { addHotkeys, VideoList, move } from "./player";
 import { $, net, search, Tracker } from "./utils";
 import * as videojs from "video.js";
 import { Lolomo } from "./ui";
+import { Video } from "./video";
 
-let next = null;
 let videoList = [];
-const video = search.get("video");
+const video = new Video(search.get("video"));
 const autoplay = search.get("autoplay") === "1";
 
 if (video) {
-    document.title = `${video} | Notflix`;
-    $("source").src = `/video/${video}`;
+    const name = video.name;
+    document.title = `${name} | Notflix`;
+    $("source").src = `/video/${video.raw}`;
+    $(".title").innerText = `${video.dir}/${name}`;
 }
-
-function delFile(video) {
-    net.del(`/video/${video}`).then((res) =>
-        $(`li:has(a[href*="${video}"])`)?.remove(),
-    );
-}
-window.delFile = delFile;
 
 net.get("/list").then((data) => {
     if (!data) return;
     videoList = new VideoList(data);
-    next = videoList.getNext(video, autoplay);
+    player.next = () => {
+        window.location.href = videoList.getNext(video, autoplay);
+    };
 
     const sect = document.querySelector("#series");
     if (!sect) return;
-    sect.innerHTML = Lolomo(data);
+    sect.innerHTML = Lolomo(data, video);
 });
 
-const subfile = video.replace(".mp4", ".vtt");
 let player = videojs.default("notflix", {
     tracks: [
         {
             kind: "captions",
-            src: `/subs/${subfile}`,
+            src: `/subs/${video.sub}`,
             srclang: "en",
             label: "notflix-sub",
             default: true,

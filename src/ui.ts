@@ -1,6 +1,6 @@
-function renderSerie(serie) {
-    const dir = serie[0];
-    const movies = serie[1];
+import { rename } from "./video";
+
+function renderSerie(dir, movies) {
     const ENC = encodeURIComponent;
 
     return movies
@@ -9,7 +9,7 @@ function renderSerie(serie) {
     <li class="movie">
       <a href="?video=${ENC(`${dir}/${mov.name}`)}">
       <img class="rx10 m10" src="/images/${mov.key}.jpg" alt="${mov.name}" />
-      <div>${mov.name.replace(".mp4", "")}</div>
+      <div class="mname">${rename(mov.name)}</div>
       </a>
     </li>
   `,
@@ -17,23 +17,36 @@ function renderSerie(serie) {
         .join(" ");
 }
 
-export function Lolomo(series) {
-    return `
-    <ul>
-      ${Object.entries(series)
-          .map(
-              (serie) => `<li>
-          <details open>
-            <summary>
-                ${serie[0]}
-            </summary>
+type Serie = [string, string[]];
+
+export function Lolomo(series, video) {
+    let strings: string[] = [];
+    let match = -1;
+
+    const loop = Object.entries(series);
+    for (let i = 0; i < loop.length; i++) {
+        const [dir, movies] = loop[i] as Serie;
+        let open = "";
+        if (video.dir === dir) {
+            match = i;
+            open = "open";
+        }
+
+        if (!movies.length) continue;
+        strings.push(`<li>
+        <details class="p10" ${open}>
+            <summary> ${dir} </summary>
             <ul class="series f w-100">
-              ${renderSerie(serie)}
+                ${renderSerie(dir, movies)}
             </ul>
-          </details>
-        </li>`,
-          )
-          .join("")}
-    </ul>
-  `;
+        </details>
+        </li>`);
+    }
+
+    if (match > 0) {
+        const matched = strings.splice(match, 1);
+        strings = matched.concat(strings);
+    }
+
+    return `<ul>${strings.join("")}</ul>`;
 }

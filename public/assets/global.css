@@ -64,16 +64,14 @@ body {
 
 details {
     max-width: 100%;
-    margin-bottom: 12px;
+    margin-bottom: 20px;
 }
 
-/*  summary::-webkit-details-marker */
 summary {
     font-size: 1.5em;
     font-weight: bold;
 }
 
-/* no marker */
 ul {
     list-style-type: none;
     margin: 0;
@@ -81,4 +79,9 @@ ul {
     width: 100%;
     max-width: 100%;
     overflow-x: scroll;
+}
+
+.mname {
+    padding: 1px 10px;
+    line-height: 1.5;
 }
