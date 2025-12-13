@@ -73,8 +73,8 @@ func GenerateThumbnails(videosDir string) {
 				thumbName := id + ".jpg"
 				thumbPath := filepath.Join(thumbDir, thumbName)
 				thumbsDone[thumbName] = struct{}{}
-				if _, exists := thumbsExisting[thumbName]; exists {
-					continue
+				if _, statErr := os.Stat(thumbPath); statErr == nil {
+					break
 				}
 				makeThumbnail(path, thumbPath)
 				break
@@ -84,11 +84,4 @@ func GenerateThumbnails(videosDir string) {
 	}
 
 	filepath.WalkDir(videosDir, walkFunc)
-
-	// delete stale thumbs
-	for thumb := range thumbsExisting {
-		if _, ok := thumbsDone[thumb]; !ok {
-			os.Remove(filepath.Join(thumbDir, thumb))
-		}
-	}
 }

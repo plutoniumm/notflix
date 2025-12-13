@@ -5,5 +5,5 @@ build:
 	./node_modules/.bin/rolldown src/index.ts --file ./public/assets/notflix.js;
 	go build -o notflix *.go;
 
-run:
+dev:
 	./node_modules/.bin/rolldown src/index.ts --file ./public/assets/notflix.js --watch

@@ -16,6 +16,7 @@ import (
 
 func VideoPlayer(c *gin.Context, videosDir string) {
 	filename, err := getSafeFilename(c)
+	fmt.Println("Requested video filename:", filename)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return

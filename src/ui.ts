@@ -1,6 +1,6 @@
 import { rename } from "./video";
 
-function renderSerie(dir, movies) {
+function renderSerie (dir, movies) {
     const ENC = encodeURIComponent;
 
     return movies
@@ -8,7 +8,7 @@ function renderSerie(dir, movies) {
             (mov) => `
     <li class="movie">
       <a href="?video=${ENC(`${dir}/${mov.name}`)}">
-      <img class="rx10 m10" src="/images/${mov.key}.jpg" alt="${mov.name}" />
+      <img lazy="true" class="rx10 m10" src="/images/${mov.key}.jpg" alt="${mov.name}" />
       <div class="mname">${rename(mov.name)}</div>
       </a>
     </li>
@@ -19,7 +19,7 @@ function renderSerie(dir, movies) {
 
 type Serie = [string, string[]];
 
-export function Lolomo(series, video) {
+export function Lolomo (series, video) {
     let strings: string[] = [];
     let match = -1;
 
@@ -32,7 +32,7 @@ export function Lolomo(series, video) {
             open = "open";
         }
 
-        if (!movies.length) continue;
+        if (!movies?.length) continue;
         strings.push(`<li>
         <details class="p10" ${open}>
             <summary> ${dir} </summary>

@@ -3,8 +3,9 @@ import { $, net, search, Tracker } from "./utils";
 import * as videojs from "video.js";
 import { Lolomo } from "./ui";
 import { Video } from "./video";
+import { Input, BlobSource, ALL_FORMATS, Output, Mp4OutputFormat, NullTarget, Conversion } from "mediabunny";
 
-let videoList = [];
+let videoList: VideoList;
 const video = new Video(search.get("video"));
 const autoplay = search.get("autoplay") === "1";
 
@@ -15,7 +16,7 @@ if (video) {
     $(".title").innerText = `${video.dir}/${name}`;
 }
 
-net.get("/list").then((data) => {
+net.get("/list/video").then((data) => {
     if (!data) return;
     videoList = new VideoList(data);
     player.next = () => {
@@ -42,7 +43,7 @@ let player = videojs.default("notflix", {
 player.ready(ready);
 
 const tracker = new Tracker();
-function ready() {
+function ready () {
     console.log(`[INFO] Player up!\nAutoplay: ${autoplay}`);
     if (autoplay) player.play();
     player.move = (n) => move(player, n);
@@ -58,7 +59,7 @@ function ready() {
             player.currentTime(player.currentTime());
         }
 
-        lastTime = player.currentTime();
+        lastTime = player.currentTime()!;
     }, 2000);
 
     addHotkeys(player);

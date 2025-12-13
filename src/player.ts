@@ -1,4 +1,9 @@
 export class Video {
+    name: string;
+    id: string
+    dir: string;
+    url: string;
+
     constructor(dir, { name, key }) {
         this.name = name;
         this.id = key;
@@ -8,7 +13,7 @@ export class Video {
         this.url = `?video=${encodeURIComponent(name)}`;
     }
 
-    get uri() {
+    get uri () {
         const autoplay =
             new URLSearchParams(window.location.search).get("autoplay") === "1";
 
@@ -17,20 +22,27 @@ export class Video {
 }
 
 export class VideoList {
+    videos: Video[];
+
     constructor(data) {
-        this.videos = Object.entries(data).flatMap(([dir, files]) =>
-            files.map((v) => new Video(dir, v)),
-        );
+        console.log("[INFO] VideoList initialized.");
+        console.log(data);
+
+
+        this.videos = Object.entries(data).flatMap(([dir, files]) => {
+            if (!files?.length) return [];
+            return files.map((v) => new Video(dir, v));
+        });
     }
 
-    getNext(currentName, autoplay = false) {
+    getNext (currentName, autoplay = false) {
         const idx = this.videos.findIndex((v) => v.name === currentName);
         if (idx === -1 || idx === this.videos.length - 1) return null;
         return this.videos[idx + 1].uri;
     }
 }
 
-export function move(player, n) {
+export function move (player, n) {
     const time = player.currentTime();
     const dur = player.duration();
     if (time + n > dur) {
@@ -42,7 +54,7 @@ export function move(player, n) {
     }
 }
 
-export function addHotkeys(player) {
+export function addHotkeys (player) {
     document.addEventListener("keydown", (event) => {
         const shift = event.shiftKey;
         const alt = event.altKey;

@@ -1,5 +1,5 @@
-export function rename(text: string) {
-    let removes =
+export function rename (text: string) {
+    let removes: any =
         `nflx,amzn,` +
         `hevc,hdtv,hdrip,bluray,` +
         `web-dl,webrip,web,hevc-psa,` +
