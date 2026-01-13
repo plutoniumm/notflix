@@ -26,8 +26,6 @@ export class VideoList {
 
     constructor(data) {
         console.log("[INFO] VideoList initialized.");
-        console.log(data);
-
 
         this.videos = Object.entries(data).flatMap(([dir, files]) => {
             if (!files?.length) return [];
@@ -35,9 +33,19 @@ export class VideoList {
         });
     }
 
-    getNext (currentName, autoplay = false) {
-        const idx = this.videos.findIndex((v) => v.name === currentName);
+    getNext (video) {
+        const name = video.raw.split("/").pop();
+
+        let idx = -1;
+        for (let i = 0; i < this.videos.length; i++) {
+            if (this.videos[i].name.includes(name)) {
+                idx = i;
+                break;
+            }
+        };
+
         if (idx === -1 || idx === this.videos.length - 1) return null;
+
         return this.videos[idx + 1].uri;
     }
 }
@@ -89,7 +97,8 @@ export function addHotkeys (player) {
             // OTHERS
         } else if (lkey === "n") {
             // next
-            if (player.next) window.location.href = player.next();
+            if (player.next)
+                window.location.href = player.next();
         } else if (lkey === "p") {
             // pip
             if (document.pictureInPictureElement) {

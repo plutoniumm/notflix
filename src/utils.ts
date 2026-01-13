@@ -23,11 +23,16 @@ export class Tracker {
     }
 
     get (video) {
-        return this.data[video] ?? 0;
+        return this.data[video] || 0;
     }
 
     set (video, time) {
         this.data[video] = time;
+        localStorage.setItem(this.key, JSON.stringify(this.data));
+    }
+
+    del (video) {
+        delete this.data[video];
         localStorage.setItem(this.key, JSON.stringify(this.data));
     }
 }

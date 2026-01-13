@@ -1,9 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -121,22 +121,18 @@ func main() {
 	server.EnsureDir(publicDir)
 	server.EnsureDir(assetsDir)
 
+	// Ensure log directory exists
+	logDir := "./log"
+	err := os.MkdirAll(logDir, 0755)
+	if err != nil {
+		log.Fatalf("Failed to create log directory: %v", err)
+	}
+
 	gin.SetMode("release")
 	router := gin.New()
 	router.Use(gin.Recovery())
 
 	router.Use(func(c *gin.Context) {
-		fmt.Println("CSP Middleware triggered")
-		// 	c.Writer.Header().Set("Content-Security-Policy", `
-		// 	default-src 'self';
-		// 	script-src 'self' 'unsafe-inline' 'unsafe-eval' http://192.168.1.7:8080;
-		// 	script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' http://192.168.1.7:8080;
-		// 	style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://manav.ch;
-		// 	style-src-elem 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://manav.ch;
-		// 	img-src 'self' data:;
-		// 	font-src 'self' data: https:;
-		// 	media-src 'self' blob: data:;
-		// `)
 		c.Header("Content-Security-Policy", "")
 		c.Next()
 	})
@@ -144,6 +140,10 @@ func main() {
 	router.GET("/", func(c *gin.Context) {
 		pulse()
 		c.File("index.html")
+	})
+	router.GET("/embed", func(c *gin.Context) {
+		pulse()
+		c.File("embed.html")
 	})
 	router.Static("/assets", assetsDir)
 
@@ -165,7 +165,6 @@ func main() {
 		c.File(filepath.Join(imagesDir, c.Param("filename")))
 	})
 
-	// Delete across all video roots
 	router.DELETE("/video/:filename", func(c *gin.Context) {
 		pulse()
 		fname := c.Param("filename")
@@ -185,8 +184,58 @@ func main() {
 
 	router.GET("/subs/*filename", subSend)
 
+	router.GET("/remote", func(c *gin.Context) {
+		c.File("remote.html")
+	})
+
+	router.GET("/cmd", func(c *gin.Context) {
+		c.File("./log/cmd")
+		os.WriteFile("./log/cmd", []byte{}, 0644)
+	})
+
+	router.POST("/cmd", func(c *gin.Context) {
+		data, err := c.GetRawData()
+		if err != nil {
+			c.String(http.StatusBadRequest, "Could not read body")
+			return
+		}
+		err = os.WriteFile("./log/cmd", data, 0644)
+		if err != nil {
+			c.String(http.StatusInternalServerError, "Could not write file")
+			return
+		}
+		c.String(http.StatusOK, "written")
+	})
+
+	router.POST("/error", func(c *gin.Context) {
+		data, err := c.GetRawData()
+		if err != nil {
+			c.String(http.StatusBadRequest, "Could not read body")
+			return
+		}
+		errLogPath := filepath.Join(logDir, "errors.log")
+		f, err := os.OpenFile(errLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			c.String(http.StatusInternalServerError, "Log file error")
+			return
+		}
+		defer f.Close()
+		f.Write(data)
+		f.Write([]byte("\n"))
+		c.String(http.StatusOK, "logged")
+	})
+
 	log.Printf("Starting server on http://localhost:%s", port)
-	// also print address on internet also
+
+	// Print LAN address
+	addrs, err := net.InterfaceAddrs()
+	if err == nil {
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+				log.Printf("LAN URL: http://%s:%s", ipnet.IP.String(), port)
+			}
+		}
+	}
 
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("Failed to run server: %v", err)

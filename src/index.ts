@@ -3,7 +3,6 @@ import { $, net, search, Tracker } from "./utils";
 import * as videojs from "video.js";
 import { Lolomo } from "./ui";
 import { Video } from "./video";
-import { Input, BlobSource, ALL_FORMATS, Output, Mp4OutputFormat, NullTarget, Conversion } from "mediabunny";
 
 let videoList: VideoList;
 const video = new Video(search.get("video"));
@@ -14,13 +13,14 @@ if (video) {
     document.title = `${name} | Notflix`;
     $("source").src = `/video/${video.raw}`;
     $(".title").innerText = `${video.dir}/${name}`;
-}
+    console.log(`[INFO] Loaded video: ${video.dir}/${name}`);
+};
 
 net.get("/list/video").then((data) => {
     if (!data) return;
     videoList = new VideoList(data);
     player.next = () => {
-        window.location.href = videoList.getNext(video, autoplay);
+        window.location.href = videoList.getNext(video);
     };
 
     const sect = document.querySelector("#series");
@@ -42,21 +42,49 @@ let player = videojs.default("notflix", {
 
 player.ready(ready);
 
+if (window.location.pathname === "/embed") {
+    setInterval(() => {
+        fetch("/cmd").then(res => res.text())
+            .then(cmd => {
+                if (!cmd.length) return;
+
+                if (cmd === "tog") {
+                    if (player.paused())
+                        player.play();
+                    else player.pause();
+
+                    move(player, -2);
+                } else if (cmd.startsWith("+")) {
+                    const n = parseFloat(cmd.slice(1));
+                    move(player, n);
+                } else if (cmd.startsWith("-")) {
+                    const n = parseFloat(cmd.slice(1));
+                    move(player, -n);
+                };
+            });
+    }, 1000);
+}
+
+
 const tracker = new Tracker();
 function ready () {
     console.log(`[INFO] Player up!\nAutoplay: ${autoplay}`);
     if (autoplay) player.play();
     player.move = (n) => move(player, n);
-
     player.currentTime(tracker.get(video));
 
     let lastTime = 0;
     setInterval(() => {
-        tracker.set(video, player.currentTime());
+        let current = player.currentTime()!;
+        let dur = player.duration()!;
+
+        tracker.set(video, current);
+        if (dur - current > 5 * 60)
+            tracker.del(video);
 
         if (player.paused()) return;
-        if (player.currentTime() === lastTime) {
-            player.currentTime(player.currentTime());
+        if (current === lastTime) {
+            player.currentTime(current);
         }
 
         lastTime = player.currentTime()!;

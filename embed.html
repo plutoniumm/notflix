@@ -1,0 +1,63 @@
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <link rel="apple-touch-icon" href="/assets/icon.svg" />
+    <link rel="icon" type="image/png" href="/assets/icon.svg" />
+
+    <link href="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video-js.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://manav.ch/atomic.css" />
+    <link rel="stylesheet" href="https://manav.ch/css/ytvjs.css" />
+    <link rel="stylesheet" href="/assets/global.css" />
+
+    <title>Plutoniumm's Notflix</title>
+
+    <script>
+        const video = "Millers/Millers.mp4";
+        const params = new URLSearchParams( window.location.search );
+        if ( !params.has( "video" ) ) {
+            params.set( "video", video );
+            window.location.search = params.toString();
+        };
+
+        window.addEventListener( "error", ( event ) => {
+            fetch( "/error", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify( {
+                    message: event.message,
+                    filename: event.filename,
+                    lineno: event.lineno,
+                    colno: event.colno,
+                    error: event.error ? event.error.stack : null,
+                } ),
+            } );
+        } );
+    </script>
+</head>
+
+<body class="m0 p0 p-rel" xmlns="http://www.w3.org/2000/svg">
+    <video id="notflix" class="video-js" type="video/mp4" preload="auto" data-setup="" poster="/assets/home.png"
+        controls>
+        <source src="" type="video/mp4" />
+        <track kind="captions" src="" srclang="en" label="English" default />
+    </video>
+
+    <h2 class="title" style="
+                background: #fff2;
+                border-radius: 16px;
+                margin: 10px;
+                padding: 10px 15px;
+                max-width: 66%;
+            "></h2>
+
+    <section id="series" class="f-col j-ct"></section>
+
+    <script type="module" src="./assets/notflix.js"></script>
+</body>
+
+</html>
