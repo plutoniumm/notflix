@@ -19,9 +19,8 @@ if (video) {
 net.get("/list/video").then((data) => {
     if (!data) return;
     videoList = new VideoList(data);
-    player.next = () => {
-        window.location.href = videoList.getNext(video);
-    };
+
+    player.next = videoList.getNext(video);
 
     const sect = document.querySelector("#series");
     if (!sect) return;

@@ -96,9 +96,8 @@ export function addHotkeys (player) {
 
             // OTHERS
         } else if (lkey === "n") {
-            // next
             if (player.next)
-                window.location.href = player.next();
+                window.location.href = player.next;
         } else if (lkey === "p") {
             // pip
             if (document.pictureInPictureElement) {
