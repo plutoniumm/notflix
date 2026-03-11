@@ -1,12 +1,13 @@
 videos/*
 
 package.json
+cache/
 
 *_templ.go
 images/
 notflix.js
 
-dist/
+dist/``
 local/
 subs/
 errors

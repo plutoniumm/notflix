@@ -9,7 +9,7 @@
 
     <link href="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video-js.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="https://manav.ch/atomic.css" />
-    <link rel="stylesheet" href="https://manav.ch/css/ytvjs.css" />
+    <link rel="stylesheet" href="/assets/yt.css" />
     <link rel="stylesheet" href="/assets/global.css" />
 
     <title>Plutoniumm's Notflix</title>
@@ -22,7 +22,10 @@
         <track kind="captions" src="" srclang="en" label="English" default />
     </video>
 
-    <h2 class="title m10 p10" style="background: #fff2;max-width: 66%;"></h2>
+    <div style="display:flex;align-items:center;gap:10px;margin:10px;padding:10px;max-width:66%;">
+        <h2 class="title m0 p0" style="background:#fff2;padding:10px;flex:1"></h2>
+        <button id="fetch-subs-btn" style="background:#fff2;color:#fff;border:1px solid #fff;padding:10px 16px;cursor:pointer;white-space:nowrap;">Fetch Subs</button>
+    </div>
 
     <a href="/embed" target="_blank" rel="noopener">
         <button class="m10 p10 tc" style="background: #fff2;width: 200px;color:#fff;border: 1px solid #fff;">

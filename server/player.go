@@ -2,16 +2,17 @@ package server
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 func VideoPlayer(c *gin.Context, videosDir string) {
@@ -25,6 +26,20 @@ func VideoPlayer(c *gin.Context, videosDir string) {
 	videoPath, err := resolveVideoPath(videosDir, filename)
 	if err != nil {
 		Error(err.Error(), c, http.StatusBadRequest)
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext == ".mkv" || ext == ".mov" {
+		if _, err := os.Stat(videoPath); err != nil {
+			if os.IsNotExist(err) {
+				c.String(http.StatusNotFound, "Video not found")
+			} else {
+				Error("Error accessing video file: "+err.Error(), c, http.StatusInternalServerError)
+			}
+			return
+		}
+		streamTranscoded(c, videoPath)
 		return
 	}
 
@@ -51,8 +66,9 @@ func getSafeFilename(c *gin.Context) (string, error) {
 		return "", fmt.Errorf("invalid path traversal attempt")
 	}
 	ext := strings.ToLower(filepath.Ext(name))
-	if ext != ".mp4" {
-		return "", fmt.Errorf("only MP4 videos are supported")
+	allowed := map[string]bool{".mp4": true, ".mkv": true, ".mov": true}
+	if !allowed[ext] {
+		return "", fmt.Errorf("unsupported video format")
 	}
 	return name, nil
 }
@@ -115,4 +131,23 @@ func serveVideoContent(c *gin.Context, file *os.File, info os.FileInfo, filename
 	if err != nil && err != io.EOF {
 		log.Printf("Error serving partial video %s: %v", filename, err)
 	}
+}
+
+// probeCodecs uses ffprobe to detect the video and audio codec names.
+func probeCodecs(videoPath string) (videoCodec, audioCodec string) {
+	run := func(streamSpec string) string {
+		cmd := exec.Command("ffprobe",
+			"-v", "error",
+			"-select_streams", streamSpec,
+			"-show_entries", "stream=codec_name",
+			"-of", "default=noprint_wrappers=1:nokey=1",
+			videoPath,
+		)
+		out, err := cmd.Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	return run("v:0"), run("a:0")
 }

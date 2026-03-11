@@ -3,6 +3,7 @@ import { $, net, search, Tracker } from "./utils";
 import * as videojs from "video.js";
 import { Lolomo } from "./ui";
 import { Video } from "./video";
+import { initSubtitles, forceFetchSubs } from "./subs";
 
 let videoList: VideoList;
 const video = new Video(search.get("video"));
@@ -40,6 +41,12 @@ let player = videojs.default("notflix", {
 });
 
 player.ready(ready);
+
+if (video.raw) {
+    initSubtitles(player, video);
+}
+
+document.getElementById('fetch-subs-btn')?.addEventListener('click', () => forceFetchSubs(player, video));
 
 if (window.location.pathname === "/embed") {
     setInterval(() => {
