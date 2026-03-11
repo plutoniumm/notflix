@@ -36,8 +36,8 @@ export class Video {
 
         let [dir, name] = video.split("/");
         this.raw = video;
-        this.sub = name.replace(".mp4", ".vtt");
-        name = rename(name.replace(".mp4", ""));
+        this.sub = name.replace(/\.(mp4|mkv|mov)$/i, '.vtt');
+        name = rename(name.replace(/\.(mp4|mkv|mov)$/i, ""));
 
         this.dir = dir;
         this.name = name;

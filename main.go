@@ -19,13 +19,19 @@ const (
 	videosDir = "./videos"
 	publicDir = "./public"
 	assetsDir = "./public/assets"
-	port      = "8080"
+	port      = "4242"
 )
 
-var videosRoots = []string{videosDir, "/Users/gojira/Downloads/DC++"}
+var videosRoots = []string{
+	videosDir,
+	"/Users/god/Downloads/DC++",
+	"/Volumes/Ravan",
+	"/Volumes/Oni",
+	"/Volumes/Kumbhakarn",
+}
 
 func pulse() {
-	if rand.Float64() < 0.1 {
+	if rand.Float64() < 0.01 {
 		for _, root := range videosRoots {
 			go server.GenerateThumbnails(root)
 		}
@@ -100,19 +106,6 @@ func listMediaMulti(c *gin.Context, dirs []string) {
 	c.JSON(http.StatusOK, merged)
 }
 
-func subSend(c *gin.Context) {
-	pulse()
-
-	filename := c.Param("filename")
-	_, absSubtitlePath, ok := findRootFor(filename, videosRoots)
-	if !ok {
-		c.String(http.StatusNotFound, "Subtitle not found")
-		return
-	}
-
-	c.Header("Content-Type", "text/srt")
-	c.File(absSubtitlePath)
-}
 
 func main() {
 	for _, root := range videosRoots {
@@ -182,7 +175,13 @@ func main() {
 		c.String(http.StatusOK, "true")
 	})
 
-	router.GET("/subs/*filename", subSend)
+	router.GET("/subs/info", func(c *gin.Context) { server.SubsInfo(c, videosRoots) })
+	router.GET("/subs/search", func(c *gin.Context) { server.SubsSearch(c, videosRoots) })
+	router.POST("/subs/download", func(c *gin.Context) { server.SubsDownload(c, videosRoots) })
+	router.POST("/subs/extract", func(c *gin.Context) { server.SubsExtract(c, videosRoots) })
+	router.POST("/subs/whisper", func(c *gin.Context) { server.SubsWhisper(c, videosRoots) })
+	router.GET("/subs/whisper/status", server.SubsWhisperStatus)
+	router.GET("/subs/*filename", func(c *gin.Context) { server.SubsSend(c, videosRoots) })
 
 	router.GET("/remote", func(c *gin.Context) {
 		c.File("remote.html")

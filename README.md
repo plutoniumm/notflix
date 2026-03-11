@@ -12,3 +12,8 @@ Other than the basic youtube shortcuts
 | `p` | picture-in-picture |
 | `b` | brightness toggle |
 | `n` | next |
+
+<!-- opensubs -->
+api hXCVdmWClclk6NEjj9dXQAd2OUmaxRlR
+user opensubtitlesbeta
+pass Status9Thrill5
