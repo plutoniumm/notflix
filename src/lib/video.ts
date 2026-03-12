@@ -13,6 +13,8 @@ export function cleanName (name: string): string {
   };
 
   return s
+    .replace(/\[.*?\]/g, '')
+    .replace(/\(.*?\)/g, '')
     .replaceAll('-', ' ')
     .replaceAll('.', ' ')
     .replace(/\s+/g, ' ')

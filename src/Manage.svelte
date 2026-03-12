@@ -7,7 +7,6 @@
   let loading = $state(true);
   let editing = $state<string | null>(null);
   let val = $state("");
-  let open: Record<string, boolean> = $state({});
 
   function focus(el: HTMLInputElement) {
     el.focus();
@@ -30,10 +29,6 @@
       fetch("/api/manage/list").then((r) => r.json()),
       fetch("/api/manage/diskinfo").then((r) => r.json()),
     ]);
-
-    for (const dir of Object.keys(data as Record<string, string[]>)) {
-      if (!(dir in open)) open[dir] = true;
-    }
 
     loading = false;
   }
@@ -137,8 +132,8 @@
             <span class="fs-xs c-dim up" style="white-space:nowrap">
               {d.root}
             </span>
-            <div class="disk-bar">
-              <div class="disk-fill" style="width:{pct}%"></div>
+            <div class="disk-bar rx2 flow-h">
+              <div class="disk-fill h-100 rx2" style="width:{pct}%"></div>
             </div>
 
             <span class="fs-xs c-dim" style="white-space:nowrap">
@@ -155,17 +150,8 @@
       <div class="c-dim p20">Loading…</div>
     {:else}
       {#each rows as [dir, files]}
-        <div class="folder flow-h">
-          <div
-            class="folder-hd f al-ct g10 ptr"
-            role="button"
-            tabindex="0"
-            onclick={() => ((1)[dir] = !open[dir])}
-            onkeydown={(e) => e.key === "Enter" && (open[dir] = !open[dir])}
-          >
-            <span class="fs-xs c-dim sh-0" style="width:12px">
-              {open[dir] ? "▾" : "▸"}
-            </span>
+        <details class="folder rx5 flow-h">
+          <summary class="folder-hd f al-ct g10 ptr">
             <span class="sh-0" style="font-size:0.95rem">📁</span>
 
             {#if editing === dir}
@@ -192,7 +178,7 @@
                 {dir === "." ? "" : dir}
               </span>
               <span class="fs-sm c-dim sh-0" style="margin-left:auto">
-                {files.length}
+                ({files.length} files)
               </span>
 
               {#if dir !== "."}
@@ -204,7 +190,7 @@
                     startEdit(dir, dir);
                   }}
                 >
-                  ✏
+                  ✏️
                 </button>
                 <button
                   class="btn-icon danger"
@@ -216,64 +202,64 @@
                 >
                   🗑
                 </button>
+              {:else}
+                <div style="width:32px">&nbsp;</div>
               {/if}
             {/if}
-          </div>
+          </summary>
 
-          {#if open[dir]}
-            <ul class="m0 p0" style="list-style:none">
-              {#each files as f (f)}
-                {@const fpath = dir === "." ? f : `${dir}/${f}`}
-                <li class="file f al-ct g10">
-                  <span
-                    class="fs-xs c-dim sh-0 tc"
-                    style="width:16px"
-                    title={f.split(".").pop()?.toUpperCase()}
-                  >
-                    {icon(f)}
-                  </span>
+          <ul class="m0 p0" style="list-style:none">
+            {#each files as f (f)}
+              {@const fpath = dir === "." ? f : `${dir}/${f}`}
+              <li class="file f al-ct g10">
+                <span
+                  class="fs-xs c-dim sh-0 tc"
+                  style="width:16px"
+                  title={f.split(".").pop()?.toUpperCase()}
+                >
+                  {icon(f)}
+                </span>
 
-                  {#if editing === fpath}
-                    <form class="rename-form f" onsubmit={confirmEdit}>
-                      <input
-                        class="rename-input"
-                        bind:value={val}
-                        onkeydown={(e) => e.key === "Escape" && cancelEdit()}
-                        onblur={confirmEdit}
-                        use:focus
-                      />
-                    </form>
-                  {:else}
-                    <div class="file-names">
-                      <span class="d-b fs-base c-light trunc">
-                        {cleanName(f)}
-                      </span>
-                      <span class="d-b fs-xs trunc" style="color:#3a3a3a">
-                        {f}
-                      </span>
-                    </div>
-                    <div class="file-actions f g2">
-                      <button
-                        class="btn-icon"
-                        title="Rename"
-                        onclick={() => startEdit(fpath, f)}
-                      >
-                        ✏
-                      </button>
-                      <button
-                        class="btn-icon danger"
-                        title="Delete"
-                        onclick={() => delFile(dir, f)}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
+                {#if editing === fpath}
+                  <form class="rename-form f" onsubmit={confirmEdit}>
+                    <input
+                      class="rename-input"
+                      bind:value={val}
+                      onkeydown={(e) => e.key === "Escape" && cancelEdit()}
+                      onblur={confirmEdit}
+                      use:focus
+                    />
+                  </form>
+                {:else}
+                  <div class="file-names">
+                    <span class="d-b fs-base c-light trunc">
+                      {cleanName(f)}
+                    </span>
+                    <span class="d-b fs-xs trunc" style="color:#3a3a3a">
+                      {f}
+                    </span>
+                  </div>
+                  <div class="file-actions f g2">
+                    <button
+                      class="btn-icon"
+                      title="Rename"
+                      onclick={() => startEdit(fpath, f)}
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      class="btn-icon danger"
+                      title="Delete"
+                      onclick={() => delFile(dir, f)}
+                    >
+                      🗑
+                    </button>
+                  </div>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        </details>
       {/each}
     {/if}
   </main>
@@ -289,21 +275,14 @@
     z-index: 10;
   }
 
-  h1 {
-    font-size: 1.2rem;
-  }
-
   .disk-bar {
     width: 80px;
     height: 3px;
     background: #2a2a2a;
-    border-radius: 2px;
-    overflow: hidden;
   }
+
   .disk-fill {
-    height: 100%;
     background: #e50914;
-    border-radius: 2px;
     transition: width 0.3s;
   }
 
@@ -318,7 +297,6 @@
 
   .folder {
     border: 1px solid #2a2a2a;
-    border-radius: 6px;
     margin-bottom: 8px;
   }
 
@@ -328,6 +306,7 @@
     user-select: none;
     transition: background 0.1s;
   }
+
   .folder-hd:hover {
     background: #212121;
   }
@@ -359,12 +338,12 @@
     border-top: 1px solid #1e1e1e;
     transition: background 0.1s;
   }
+
   .file:hover {
     background: #191919;
   }
-  .file:hover .file-actions {
-    opacity: 1;
-  }
+
+  .file:hover .file-actions,
   .file:hover .btn-icon {
     opacity: 1;
   }
