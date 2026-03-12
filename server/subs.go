@@ -60,6 +60,12 @@ func videoToVTTPath(videoPath string) string {
 	return videoPath[:len(videoPath)-len(ext)] + ".vtt"
 }
 
+// videoToWhisperVTTPath returns the .whisper.vtt path for a video file.
+func videoToWhisperVTTPath(videoPath string) string {
+	ext := filepath.Ext(videoPath)
+	return videoPath[:len(videoPath)-len(ext)] + ".whisper.vtt"
+}
+
 // ─── SubsInfo ─────────────────────────────────────────────────────────────────
 
 type ffprobeStream struct {

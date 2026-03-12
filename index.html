@@ -1,41 +1,14 @@
+<!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-    <link rel="apple-touch-icon" href="/assets/icon.svg" />
-    <link rel="icon" type="image/png" href="/assets/icon.svg" />
-
-    <link href="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video-js.min.css" rel="stylesheet" />
-    <link rel="stylesheet" href="https://manav.ch/atomic.css" />
-    <link rel="stylesheet" href="/assets/yt.css" />
-    <link rel="stylesheet" href="/assets/global.css" />
-
-    <title>Plutoniumm's Notflix</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="stylesheet" href="/assets/notflix.css" />
+  <title>Notflix</title>
 </head>
-
-<body class="m0 p0 p-rel" xmlns="http://www.w3.org/2000/svg">
-    <video id="notflix" class="video-js" type="video/mp4" preload="auto" data-setup="" poster="/assets/home.png"
-        controls>
-        <source src="" type="video/mp4" />
-        <track kind="captions" src="" srclang="en" label="English" default />
-    </video>
-
-    <div style="display:flex;align-items:center;gap:10px;margin:10px;padding:10px;max-width:66%;">
-        <h2 class="title m0 p0" style="background:#fff2;padding:10px;flex:1"></h2>
-        <button id="fetch-subs-btn" style="background:#fff2;color:#fff;border:1px solid #fff;padding:10px 16px;cursor:pointer;white-space:nowrap;">Fetch Subs</button>
-    </div>
-
-    <a href="/embed" target="_blank" rel="noopener">
-        <button class="m10 p10 tc" style="background: #fff2;width: 200px;color:#fff;border: 1px solid #fff;">
-            Embed
-        </button>
-    </a>
-
-    <section id="series" class="f-col j-ct"></section>
-
-    <script type="module" src="./assets/notflix.js"></script>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/assets/notflix.js"></script>
 </body>
-
 </html>

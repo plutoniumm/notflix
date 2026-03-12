@@ -98,7 +98,7 @@ func SubsWhisper(c *gin.Context, roots []string) {
 	job := &WhisperJob{Status: "pending"}
 	whisperJobs.Store(body.File, job)
 
-	vttPath := videoToVTTPath(videoPath)
+	vttPath := videoToWhisperVTTPath(videoPath)
 	go runWhisperJob(videoPath, vttPath, body.File, job)
 
 	c.JSON(http.StatusOK, gin.H{"status": "pending"})

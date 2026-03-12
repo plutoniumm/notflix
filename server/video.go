@@ -19,17 +19,12 @@ func GetVids(dir string) []string {
 		return videos
 	}
 
-	allowedExts := []string{".mp4", ".mkv", ".mov"}
-
 	for _, entry := range entries {
 		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		for _, ext := range allowedExts {
-			if strings.HasSuffix(entry.Name(), ext) {
-				videos = append(videos, entry.Name())
-				break
-			}
+		if strings.HasSuffix(entry.Name(), ".mp4") {
+			videos = append(videos, entry.Name())
 		}
 	}
 	return videos
@@ -66,18 +61,13 @@ func GenerateThumbnails(videosDir string) {
 		if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
-		allowedExts := []string{".mp4", ".mkv", ".mov"}
-		for _, ext := range allowedExts {
-			if strings.HasSuffix(d.Name(), ext) {
-				id := Hash(d.Name())
-				thumbName := id + ".jpg"
-				thumbPath := filepath.Join(thumbDir, thumbName)
-				thumbsDone[thumbName] = struct{}{}
-				if _, statErr := os.Stat(thumbPath); statErr == nil {
-					break
-				}
+		if strings.HasSuffix(d.Name(), ".mp4") {
+			id := Hash(d.Name())
+			thumbName := id + ".jpg"
+			thumbPath := filepath.Join(thumbDir, thumbName)
+			thumbsDone[thumbName] = struct{}{}
+			if _, statErr := os.Stat(thumbPath); statErr != nil {
 				makeThumbnail(path, thumbPath)
-				break
 			}
 		}
 		return nil
