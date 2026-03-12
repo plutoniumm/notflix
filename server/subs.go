@@ -20,105 +20,97 @@ import (
 	"github.com/opensubtitlescli/moviehash"
 )
 
-// ─── JWT cache ────────────────────────────────────────────────────────────────
-
 var (
-	jwtToken     string
-	jwtExpiresAt time.Time
-	jwtMu        sync.Mutex
+	tok    string
+	tokExp time.Time
+	tokMu  sync.Mutex
 )
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-// findVideoPath finds the actual video file given a relative path like
-// "dir/name.mkv" across all roots. The leading "/" is stripped if present.
-func findVideoPath(file string, roots []string) (string, bool) {
-	rel := strings.TrimPrefix(file, "/")
-	for _, root := range roots {
-		absRoot, err := filepath.Abs(root)
-		if err != nil {
-			continue
-		}
-		candidate := filepath.Join(root, rel)
-		absCandidate, err := filepath.Abs(candidate)
-		if err != nil {
-			continue
-		}
-		if !strings.HasPrefix(absCandidate, absRoot) {
-			continue
-		}
-		if _, err := os.Stat(candidate); err == nil {
-			return absCandidate, true
-		}
-	}
-	return "", false
-}
-
-// videoToVTTPath replaces the video extension with .vtt.
-func videoToVTTPath(videoPath string) string {
-	ext := filepath.Ext(videoPath)
-	return videoPath[:len(videoPath)-len(ext)] + ".vtt"
-}
-
-// videoToWhisperVTTPath returns the .whisper.vtt path for a video file.
-func videoToWhisperVTTPath(videoPath string) string {
-	ext := filepath.Ext(videoPath)
-	return videoPath[:len(videoPath)-len(ext)] + ".whisper.vtt"
-}
-
-// ─── SubsInfo ─────────────────────────────────────────────────────────────────
-
-type ffprobeStream struct {
-	Index int               `json:"index"`
-	Tags  map[string]string `json:"tags"`
-	// codec_name is only present when we ask for it; use a separate struct
-	CodecName string `json:"codec_name"`
-}
-
-type ffprobeOutput struct {
-	Streams []ffprobeStream `json:"streams"`
-}
-
-type embeddedTrack struct {
+type embedTrack struct {
 	Index    int    `json:"index"`
 	Language string `json:"language"`
 }
 
-func SubsInfo(c *gin.Context, roots []string) {
-	rawFile := c.Query("file")
-	if rawFile == "" {
+type SubResult struct {
+	FileID        int    `json:"file_id"`
+	Language      string `json:"language"`
+	Release       string `json:"release"`
+	DownloadCount int    `json:"download_count"`
+	HashMatch     bool   `json:"hash_match"`
+}
+
+func findVid(file string, roots []string) (string, bool) {
+	rel := strings.TrimPrefix(file, "/")
+	for _, root := range roots {
+		absR, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+
+		candidate := filepath.Join(root, rel)
+		abs, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+
+		if !strings.HasPrefix(abs, absR) {
+			continue
+		}
+
+		if _, err := os.Stat(candidate); err == nil {
+			return abs, true
+		}
+	}
+
+	return "", false
+}
+
+func vttOf(path string) string {
+	ext := filepath.Ext(path)
+
+	return path[:len(path)-len(ext)] + ".vtt"
+}
+
+func whisperVTTOf(path string) string {
+	ext := filepath.Ext(path)
+
+	return path[:len(path)-len(ext)] + ".whisper.vtt"
+}
+
+func Subctx(c *gin.Context, roots []string) {
+	raw := c.Query("file")
+	if raw == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file param"})
 		return
 	}
 
-	videoPath, ok := findVideoPath(rawFile, roots)
+	path, ok := findVid(raw, roots)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return
 	}
 
-	base := videoPath[:len(videoPath)-len(filepath.Ext(videoPath))]
-	vttExists := false
-	srtExists := false
+	base := path[:len(path)-len(filepath.Ext(path))]
+	hasVTT := false
+	hasSRT := false
 
 	if _, err := os.Stat(base + ".vtt"); err == nil {
-		vttExists = true
+		hasVTT = true
 	}
 	if _, err := os.Stat(base + ".srt"); err == nil {
-		srtExists = true
+		hasSRT = true
 	}
 
-	// Run ffprobe to get embedded subtitle streams (codec name + language tag)
 	cmd := exec.Command("ffprobe",
 		"-v", "error",
 		"-select_streams", "s",
 		"-show_entries", "stream=index,codec_name:stream_tags=language",
 		"-of", "json",
-		videoPath,
+		path,
 	)
 	out, err := cmd.Output()
 
-	var embedded []embeddedTrack
+	var embedded []embedTrack
 	if err == nil {
 		var probe struct {
 			Streams []struct {
@@ -127,38 +119,33 @@ func SubsInfo(c *gin.Context, roots []string) {
 				Tags      map[string]string `json:"tags"`
 			} `json:"streams"`
 		}
-		if jsonErr := json.Unmarshal(out, &probe); jsonErr == nil {
+
+		if json.Unmarshal(out, &probe) == nil {
 			textCodecs := map[string]bool{
-				"subrip":   true,
-				"ass":      true,
-				"webvtt":   true,
-				"mov_text": true,
+				"subrip": true, "ass": true, "webvtt": true, "mov_text": true,
 			}
+
 			for _, s := range probe.Streams {
 				if !textCodecs[strings.ToLower(s.CodecName)] {
 					continue
 				}
+
 				lang := ""
 				if s.Tags != nil {
 					lang = s.Tags["language"]
 				}
-				embedded = append(embedded, embeddedTrack{Index: s.Index, Language: lang})
+
+				embedded = append(embedded, embedTrack{Index: s.Index, Language: lang})
 			}
 		}
 	}
 
 	if embedded == nil {
-		embedded = []embeddedTrack{}
+		embedded = []embedTrack{}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"vtt":      vttExists,
-		"srt":      srtExists,
-		"embedded": embedded,
-	})
+	c.JSON(http.StatusOK, gin.H{"vtt": hasVTT, "srt": hasSRT, "embedded": embedded})
 }
-
-// ─── SubsExtract ──────────────────────────────────────────────────────────────
 
 func SubsExtract(c *gin.Context, roots []string) {
 	var body struct {
@@ -170,16 +157,14 @@ func SubsExtract(c *gin.Context, roots []string) {
 		return
 	}
 
-	videoPath, ok := findVideoPath(body.File, roots)
+	path, ok := findVid(body.File, roots)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return
 	}
 
-	vttPath := videoToVTTPath(videoPath)
-	trackSpec := fmt.Sprintf("0:s:%d", body.Track)
-
-	cmd := exec.Command("ffmpeg", "-y", "-i", videoPath, "-map", trackSpec, vttPath)
+	spec := fmt.Sprintf("0:s:%d", body.Track)
+	cmd := exec.Command("ffmpeg", "-y", "-i", path, "-map", spec, vttOf(path))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": fmt.Sprintf("ffmpeg failed: %v — %s", err, string(out)),
@@ -190,37 +175,26 @@ func SubsExtract(c *gin.Context, roots []string) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// ─── SubsSearch ───────────────────────────────────────────────────────────────
-
-type SubResult struct {
-	FileID        int    `json:"file_id"`
-	Language      string `json:"language"`
-	Release       string `json:"release"`
-	DownloadCount int    `json:"download_count"`
-	HashMatch     bool   `json:"hash_match"`
-}
-
 func SubsSearch(c *gin.Context, roots []string) {
-	rawFile := c.Query("file")
-	if rawFile == "" {
+	raw := c.Query("file")
+	if raw == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file param"})
 		return
 	}
 
-	apiKey := os.Getenv("OPENSUBTITLES_API_KEY")
-	if apiKey == "" {
+	key := os.Getenv("OPENSUBTITLES_API_KEY")
+	if key == "" {
 		c.JSON(http.StatusOK, gin.H{"results": []SubResult{}, "error": "no_api_key"})
 		return
 	}
 
-	videoPath, ok := findVideoPath(rawFile, roots)
+	path, ok := findVid(raw, roots)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return
 	}
 
-	// Compute OSHash
-	f, err := os.Open(videoPath)
+	f, err := os.Open(path)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "cannot open video"})
 		return
@@ -231,17 +205,14 @@ func SubsSearch(c *gin.Context, roots []string) {
 	var results []SubResult
 
 	if err == nil && hash != "" {
-		results = osSearch(apiKey, "moviehash="+hash+"&languages=en&order_by=download_count", true)
+		results = osSearch(key, "moviehash="+hash+"&languages=en&order_by=download_count", true)
 	}
 
 	if len(results) == 0 {
-		// Fallback: clean title search
-		base := filepath.Base(videoPath)
+		base := filepath.Base(path)
 		ext := filepath.Ext(base)
-		name := base[:len(base)-len(ext)]
-		clean := cleanTitle(name)
-		qParam := "query=" + url.QueryEscape(clean) + "&languages=en&order_by=download_count"
-		results = osSearch(apiKey, qParam, false)
+		q := url.QueryEscape(cleanTitle(base[:len(base)-len(ext)]))
+		results = osSearch(key, "query="+q+"&languages=en&order_by=download_count", false)
 	}
 
 	if len(results) > 10 {
@@ -257,26 +228,26 @@ func SubsSearch(c *gin.Context, roots []string) {
 var tagRe = regexp.MustCompile(`(?i)\b(720p|1080p|2160p|4k|480p|bluray|blu-ray|webrip|web-dl|webdl|web|hdrip|hdtv|dvdrip|x264|x265|h264|h265|hevc|avc|aac|ac3|dd5|eac3|atmos|nflx|amzn|hdr|10bit|repack|proper|extended|theatrical|directors\.cut|unrated)\b`)
 
 func cleanTitle(name string) string {
-	// Replace dots/underscores/dashes with spaces
 	r := strings.NewReplacer(".", " ", "_", " ", "-", " ")
 	s := r.Replace(name)
-	// Strip common tags
+
 	s = tagRe.ReplaceAllString(s, " ")
-	// Collapse whitespace
-	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
-	return strings.TrimSpace(s)
+
+	return strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(s, " "))
 }
 
-func osSearch(apiKey, queryParams string, hashMatch bool) []SubResult {
-	reqURL := "https://api.opensubtitles.com/api/v1/subtitles?" + queryParams
-	req, err := http.NewRequest("GET", reqURL, nil)
+func osSearch(key, params string, byHash bool) []SubResult {
+	req, err := http.NewRequest("GET", "https://api.opensubtitles.com/api/v1/subtitles?"+params, nil)
+
 	if err != nil {
 		return nil
 	}
-	req.Header.Set("Api-Key", apiKey)
+
+	req.Header.Set("Api-Key", key)
 	req.Header.Set("User-Agent", "notflix v1.0")
 
 	resp, err := http.DefaultClient.Do(req)
+
 	if err != nil {
 		return nil
 	}
@@ -295,46 +266,45 @@ func osSearch(apiKey, queryParams string, hashMatch bool) []SubResult {
 		} `json:"data"`
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil
 	}
 
 	var out []SubResult
 	for _, item := range payload.Data {
 		a := item.Attributes
-		fileID := 0
+		fid := 0
 		if len(a.Files) > 0 {
-			fileID = a.Files[0].FileID
+			fid = a.Files[0].FileID
 		}
+
 		out = append(out, SubResult{
-			FileID:        fileID,
+			FileID:        fid,
 			Language:      a.Language,
 			Release:       a.Release,
 			DownloadCount: a.DownloadCount,
-			HashMatch:     hashMatch,
+			HashMatch:     byHash,
 		})
 	}
 	return out
 }
 
-// ─── SubsDownload ─────────────────────────────────────────────────────────────
-
-func getJWT(apiKey string) string {
+func fetchToken(key string) string {
 	user := os.Getenv("OPENSUBTITLES_USER")
 	pass := os.Getenv("OPENSUBTITLES_PASS")
 	if user == "" || pass == "" {
 		return ""
 	}
 
-	jwtMu.Lock()
-	defer jwtMu.Unlock()
+	tokMu.Lock()
+	defer tokMu.Unlock()
 
-	if jwtToken != "" && time.Now().Before(jwtExpiresAt) {
-		return jwtToken
+	if tok != "" && time.Now().Before(tokExp) {
+		return tok
 	}
 
 	body, _ := json.Marshal(map[string]string{"username": user, "password": pass})
@@ -343,7 +313,7 @@ func getJWT(apiKey string) string {
 		return ""
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-Key", apiKey)
+	req.Header.Set("Api-Key", key)
 	req.Header.Set("User-Agent", "notflix v1.0")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -355,50 +325,51 @@ func getJWT(apiKey string) string {
 	var result struct {
 		Token string `json:"token"`
 	}
+
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		return ""
 	}
 
-	jwtToken = result.Token
-	jwtExpiresAt = time.Now().Add(23 * time.Hour)
-	return jwtToken
+	tok = result.Token
+	tokExp = time.Now().Add(23 * time.Hour)
+	return tok
 }
 
-func SubsDownload(c *gin.Context, roots []string) {
+func GetSubs(c *gin.Context, roots []string) {
 	var body struct {
 		FileID int    `json:"file_id"`
 		File   string `json:"file"`
 	}
+
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
 
-	videoPath, ok := findVideoPath(body.File, roots)
+	path, ok := findVid(body.File, roots)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return
 	}
 
-	apiKey := os.Getenv("OPENSUBTITLES_API_KEY")
+	key := os.Getenv("OPENSUBTITLES_API_KEY")
 
-	// Request download link
-	dlBody, _ := json.Marshal(map[string]int{"file_id": body.FileID})
-	req, err := http.NewRequest("POST", "https://api.opensubtitles.com/api/v1/download", bytes.NewReader(dlBody))
+	rb, _ := json.Marshal(map[string]int{"file_id": body.FileID})
+	req, err := http.NewRequest("POST", "https://api.opensubtitles.com/api/v1/download", bytes.NewReader(rb))
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "request error"})
 		return
 	}
+
 	req.Header.Set("Content-Type", "application/json")
-	if apiKey != "" {
-		req.Header.Set("Api-Key", apiKey)
+	if key != "" {
+		req.Header.Set("Api-Key", key)
 	}
 	req.Header.Set("User-Agent", "notflix v1.0")
-
-	jwt := getJWT(apiKey)
-	if jwt != "" {
-		req.Header.Set("Authorization", "Bearer "+jwt)
+	if t := fetchToken(key); t != "" {
+		req.Header.Set("Authorization", "Bearer "+t)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -408,62 +379,58 @@ func SubsDownload(c *gin.Context, roots []string) {
 	}
 	defer resp.Body.Close()
 
-	var dlResp struct {
+	var dl struct {
 		Link     string `json:"link"`
 		FileName string `json:"file_name"`
 	}
-	respData, _ := io.ReadAll(resp.Body)
-	if err := json.Unmarshal(respData, &dlResp); err != nil || dlResp.Link == "" {
+
+	data, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(data, &dl); err != nil || dl.Link == "" {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid download response"})
 		return
 	}
 
-	// Download the subtitle file
-	subResp, err := http.Get(dlResp.Link)
+	sr, err := http.Get(dl.Link)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to download subtitle"})
 		return
 	}
-	defer subResp.Body.Close()
+	defer sr.Body.Close()
 
-	subData, err := io.ReadAll(subResp.Body)
+	raw, err := io.ReadAll(sr.Body)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read subtitle"})
 		return
 	}
 
-	// Convert to VTT based on extension
-	ext := strings.ToLower(filepath.Ext(dlResp.FileName))
-	var vttContent string
+	ext := strings.ToLower(filepath.Ext(dl.FileName))
+	var vtt string
 
 	switch ext {
 	case ".srt":
-		parsed, err := subtitles.NewFromSRT(string(subData))
+		parsed, err := subtitles.NewFromSRT(string(raw))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "srt parse error: " + err.Error()})
 			return
 		}
-		vttContent = parsed.AsVTT()
+		vtt = parsed.AsVTT()
 	case ".vtt":
-		parsed, err := subtitles.NewFromVTT(string(subData))
+		parsed, err := subtitles.NewFromVTT(string(raw))
 		if err != nil {
-			// If parsing fails, use raw content
-			vttContent = string(subData)
+			vtt = string(raw)
 		} else {
-			vttContent = parsed.AsVTT()
+			vtt = parsed.AsVTT()
 		}
 	default:
-		// Try SRT as fallback
-		parsed, err := subtitles.NewFromSRT(string(subData))
+		parsed, err := subtitles.NewFromSRT(string(raw))
 		if err != nil {
-			vttContent = string(subData)
+			vtt = string(raw)
 		} else {
-			vttContent = parsed.AsVTT()
+			vtt = parsed.AsVTT()
 		}
 	}
 
-	vttPath := videoToVTTPath(videoPath)
-	if err := os.WriteFile(vttPath, []byte(vttContent), 0644); err != nil {
+	if err := os.WriteFile(vttOf(path), []byte(vtt), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save vtt"})
 		return
 	}
@@ -471,41 +438,37 @@ func SubsDownload(c *gin.Context, roots []string) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// ─── SubsSend ─────────────────────────────────────────────────────────────────
-
 func SubsSend(c *gin.Context, roots []string) {
-	filename := c.Param("filename")
-	filename = strings.TrimPrefix(filename, "/")
+	filename := strings.TrimPrefix(c.Param("filename"), "/")
 
-	// Try to find the .vtt file directly
-	vttPath, ok := findVideoPath(filename, roots)
-	if ok && strings.ToLower(filepath.Ext(vttPath)) == ".vtt" {
+	path, ok := findVid(filename, roots)
+	if ok && strings.ToLower(filepath.Ext(path)) == ".vtt" {
 		c.Header("Content-Type", "text/vtt")
-		c.File(vttPath)
+		c.File(path)
 		return
 	}
 
-	// Check if .srt exists at the same base path, convert and serve
 	if strings.ToLower(filepath.Ext(filename)) == ".vtt" {
-		srtFilename := filename[:len(filename)-len(".vtt")] + ".srt"
-		srtPath, srtOk := findVideoPath(srtFilename, roots)
-		if srtOk {
-			data, err := os.ReadFile(srtPath)
+		srtName := filename[:len(filename)-len(".vtt")] + ".srt"
+		srtP, ok := findVid(srtName, roots)
+		if ok {
+			data, err := os.ReadFile(srtP)
+
 			if err == nil {
 				parsed, err := subtitles.NewFromSRT(string(data))
 				if err == nil {
-					vttContent := parsed.AsVTT()
-					// Determine vtt output path next to the srt file
-					outVTT := srtPath[:len(srtPath)-len(".srt")] + ".vtt"
-					if writeErr := os.WriteFile(outVTT, []byte(vttContent), 0644); writeErr == nil {
-						os.Remove(srtPath)
+					vtt := parsed.AsVTT()
+					out := srtP[:len(srtP)-len(".srt")] + ".vtt"
+
+					if os.WriteFile(out, []byte(vtt), 0644) == nil {
+						os.Remove(srtP)
 						c.Header("Content-Type", "text/vtt")
-						c.File(outVTT)
+						c.File(out)
 						return
 					}
-					// If write failed, still serve the content
+
 					c.Header("Content-Type", "text/vtt")
-					c.String(http.StatusOK, "%s", vttContent)
+					c.String(http.StatusOK, "%s", vtt)
 					return
 				}
 			}

@@ -7,7 +7,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
+
+func Error(message string, c *gin.Context, statusCode int) {
+	fmt.Println("Error:", message)
+	c.String(statusCode, message)
+}
 
 func Hash(name string) string {
 	h := fnv.New32a()
@@ -24,24 +31,23 @@ func EnsureDir(dir string) {
 	}
 }
 
-func DelFile(filePath string) {
-	err := os.Remove(filePath)
-	if err != nil {
-		log.Printf("Failed to delete file %s: %v", filePath, err)
+func DelFile(path string) {
+	if err := os.Remove(path); err != nil {
+		log.Printf("Failed to delete file %s: %v", path, err)
 	}
 }
 
-func ParseRangeHeader(rangeHeader string, fileSize int64) (start int64, end int64, contentLength string) {
-	rangeParts := strings.Split(rangeHeader, "=")
-	byteRange := strings.Split(rangeParts[1], "-")
+func Range(hdr string, size int64) (start int64, end int64, clen string) {
+	parts := strings.Split(hdr, "=")
+	lr := strings.Split(parts[1], "-")
 
-	start, _ = strconv.ParseInt(byteRange[0], 10, 64)
-	if byteRange[1] != "" {
-		end, _ = strconv.ParseInt(byteRange[1], 10, 64)
+	start, _ = strconv.ParseInt(lr[0], 10, 64)
+	if lr[1] != "" {
+		end, _ = strconv.ParseInt(lr[1], 10, 64)
 	} else {
-		end = fileSize - 1
+		end = size - 1
 	}
-	contentLength = strconv.FormatInt(end-start+1, 10)
+	clen = strconv.FormatInt(end-start+1, 10)
 
-	return start, end, contentLength
+	return start, end, clen
 }

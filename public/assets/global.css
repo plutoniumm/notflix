@@ -4,7 +4,7 @@ video {
     transition: all 0.1s ease-in-out;
 }
 
-.hideSubs > .vjs-text-track-display {
+.hideSubs>.vjs-text-track-display {
     display: none !important;
 }
 
@@ -18,12 +18,9 @@ video {
 }
 
 .video-js.not-hover.vjs-has-started.vjs-paused.vjs-user-active .vjs-control-bar,
-.video-js.not-hover.vjs-has-started.vjs-paused.vjs-user-inactive
-    .vjs-control-bar,
-.video-js.not-hover.vjs-has-started.vjs-playing.vjs-user-active
-    .vjs-control-bar,
-.video-js.not-hover.vjs-has-started.vjs-playing.vjs-user-inactive
-    .vjs-control-bar,
+.video-js.not-hover.vjs-has-started.vjs-paused.vjs-user-inactive .vjs-control-bar,
+.video-js.not-hover.vjs-has-started.vjs-playing.vjs-user-active .vjs-control-bar,
+.video-js.not-hover.vjs-has-started.vjs-playing.vjs-user-inactive .vjs-control-bar,
 .video-js.vjs-has-started.vjs-playing.vjs-user-inactive .vjs-control-bar {
     visibility: hidden;
     opacity: 0 !important;

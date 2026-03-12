@@ -16,9 +16,6 @@ Other than the basic youtube shortcuts
 | `c` | toggle subtitles |
 | `f` | toggle fullscreen |
 | digit | seek to that*10 percent of vid |
-
-
-<!-- opensubs -->
-api hXCVdmWClclk6NEjj9dXQAd2OUmaxRlR
-user opensubtitlesbeta
-pass Status9Thrill5
+| `d` | speed +0.1 |
+| `s` | speed -0.1 |
+| `w` | whisper subs |

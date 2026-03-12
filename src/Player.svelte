@@ -2,40 +2,40 @@
   import { onMount } from 'svelte'
   import videojs from 'video.js'
   import 'video.js/dist/video-js.css'
-  import { cleanName, subPath, parseRaw, videoUrl, type VideoData } from './lib/video'
+  import { cleanName, subPath, parseRaw, vidURL } from './lib/video'
   import { Tracker } from './lib/tracker'
-  import { initSubtitles, fetchSubResults, startWhisper, reloadTrack } from './lib/subs'
+  import { initSubs, searchSubs, startWhisper, reloadTrack } from './lib/subs'
   import { addHotkeys } from './lib/hotkeys'
   import SubsPicker from './SubsPicker.svelte'
 
   let { videoParam }: { videoParam: string } = $props()
 
   const { dir, name } = parseRaw(videoParam)
-  const displayName = cleanName(name)
+  const title = cleanName(name)
   const sub = subPath(videoParam)
 
   let videoEl = $state<HTMLVideoElement | undefined>(undefined)
   let player: any = null
-  let subsResults = $state<any[] | null>(null)
-  let whisperMsg = $state('')
-  let nextUrl = $state<string | null>(null)
+  let subs = $state<any[] | null>(null)
+  let wMsg = $state('')
+  let nextURL = $state<string | null>(null)
   let rows = $state<[string, any[]][]>([])
   let paused = $state(true)
-  let hideUi = $state(false)
-  let uiTimer: ReturnType<typeof setTimeout>
+  let hideUI = $state(false)
+  let timer: ReturnType<typeof setTimeout>
 
   const tracker = new Tracker()
   const autoplay = new URLSearchParams(window.location.search).get('autoplay') === '1'
-  const isEmbed = window.location.pathname === '/embed'
+  const embed = window.location.pathname === '/embed'
 
-  function showUi() {
-    hideUi = false
-    clearTimeout(uiTimer)
-    if (!paused) uiTimer = setTimeout(() => { hideUi = true }, 3000)
+  function showUI() {
+    hideUI = false
+    clearTimeout(timer)
+    if (!paused) timer = setTimeout(() => { hideUI = true }, 3000)
   }
 
   onMount(() => {
-    document.title = `${displayName} | Notflix`
+    document.title = `${title} | Notflix`
 
     player = videojs(videoEl!, {
       controls: true,
@@ -52,15 +52,8 @@
       false,
     )
 
-    player.on('play', () => {
-      paused = false
-      showUi()
-    })
-    player.on('pause', () => {
-      paused = true
-      hideUi = false
-      clearTimeout(uiTimer)
-    })
+    player.on('play', () => { paused = false; showUI() })
+    player.on('pause', () => { paused = true; hideUI = false; clearTimeout(timer) })
 
     player.ready(async () => {
       if (autoplay) player.play()
@@ -69,9 +62,8 @@
 
       addHotkeys(
         player,
-        () => { if (nextUrl) window.location.href = nextUrl },
+        () => { if (nextURL) window.location.href = nextURL },
         () => {
-          // Disable any active subtitle track before whisper starts
           const tracks = player.textTracks()
           for (let i = 0; i < tracks.length; i++) {
             const t = tracks[i]
@@ -79,7 +71,7 @@
               t.mode = 'hidden'
             }
           }
-          handleWhisper()
+          runWhisper()
         },
       )
 
@@ -91,75 +83,71 @@
       }, 2000)
     })
 
-    initSubtitles(player, videoParam, sub)
+    initSubs(player, videoParam, sub)
 
-    if (isEmbed) {
+    if (embed) {
       setInterval(async () => {
         const cmd = await fetch('/cmd').then(r => r.text()).catch(() => '')
         if (!cmd.trim()) return
         if (cmd === 'tog') {
           player.paused() ? player.play() : player.pause()
         } else if (cmd.startsWith('+')) {
-          seekBy(parseFloat(cmd.slice(1)))
+          seek(parseFloat(cmd.slice(1)))
         } else if (cmd.startsWith('-')) {
-          seekBy(-parseFloat(cmd.slice(1)))
+          seek(-parseFloat(cmd.slice(1)))
         }
       }, 1000)
     }
 
-    if (!isEmbed) {
+    if (!embed) {
       fetch('/list/video').then(r => r.json()).then((data: VideoData) => {
         rows = Object.entries(data).filter(([, files]) => files?.length > 0)
-        nextUrl = getNext(data)
+        nextURL = nextVid(data)
       }).catch(() => {})
     }
 
-    return () => {
-      clearTimeout(uiTimer)
-      player?.dispose()
-    }
+    return () => { clearTimeout(timer); player?.dispose() }
   })
 
-  function seekBy(n: number) {
+  function seek(n: number) {
     const t = player.currentTime() ?? 0
     const d = player.duration() ?? 0
     player.currentTime(Math.max(0, Math.min(d - 0.1, t + n)))
   }
 
-  function getNext(data: VideoData): string | null {
+  function nextVid(data: VideoData): string | null {
     const files = data[dir] ?? []
     const idx = files.findIndex(f => f.name === name)
     if (idx === -1 || idx === files.length - 1) return null
-    const next = files[idx + 1]
-    return videoUrl(dir, next.name, autoplay)
+    return vidURL(dir, files[idx + 1].name, autoplay)
   }
 
-  async function handleFetchSubs() {
-    const results = await fetchSubResults(videoParam)
+  async function fetchSubs() {
+    const results = await searchSubs(videoParam)
     if (!results) { alert('No subtitles found on OpenSubtitles.'); return }
-    subsResults = results
+    subs = results
   }
 
-  async function handleSubSelect(fileId: number) {
+  async function selectSub(fid: number) {
     const res = await fetch('/api/subs/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_id: fileId, file: videoParam }),
+      body: JSON.stringify({ file_id: fid, file: videoParam }),
     }).then(r => r.json()).catch(() => ({ ok: false }))
 
     if (res.ok) {
-      subsResults = null
+      subs = null
       reloadTrack(player, `/subs/${sub}`, 'English')
     }
   }
 
-  async function handleWhisper() {
+  async function runWhisper() {
     await startWhisper(
       videoParam,
-      (msg) => { whisperMsg = msg },
+      (msg) => { wMsg = msg },
       () => {
-        whisperMsg = ''
-        reloadTrack(player, `/subs/${sub.replace(/\.vtt$/, '.whisper.vtt')}`, 'Whisper')
+        wMsg = ''
+        reloadTrack(player, `/subs/${sub.replace(/\.vtt$/, '.whisper.vtt')}`, 'Whisper', true)
       },
     )
   }
@@ -168,21 +156,17 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="player-page"
-  class:playing={!paused}
-  class:hide-ui={hideUi}
-  class:embed={isEmbed}
-  onmousemove={showUi}
+  class:hide-ui={hideUI}
+  class:embed
+  onmousemove={showUI}
 >
-  {#if !isEmbed}
+  {#if !embed}
     <div class="player-bar">
       <a href="/" class="back">← Back</a>
-      <h1 class="title">{dir !== '.' ? `${dir} / ` : ''}{displayName}</h1>
+      <h1 class="title">{dir !== '.' ? `${dir} / ` : ''}{title}</h1>
       <div class="sub-controls">
-        <button onclick={handleFetchSubs}>Fetch Subs</button>
-        <button onclick={handleWhisper}>Whisper</button>
-        {#if nextUrl}
-          <a href={nextUrl} class="next-btn">Next →</a>
-        {/if}
+        <button onclick={fetchSubs}>Fetch Subs</button>
+        <button onclick={runWhisper}>Whisper</button>
       </div>
     </div>
   {/if}
@@ -191,11 +175,11 @@
     <video bind:this={videoEl} class="video-js vjs-default-skin vjs-big-play-centered"></video>
   </div>
 
-  {#if whisperMsg}
-    <div class="whisper-msg">{whisperMsg}</div>
+  {#if wMsg}
+    <div class="whisper-msg">{wMsg}</div>
   {/if}
 
-  {#if !isEmbed && rows.length > 0 && paused}
+  {#if !embed && rows.length > 0 && paused}
     <div class="related">
       {#each rows as [rowDir, files]}
         {#if rowDir === dir && files.length > 1}
@@ -203,7 +187,7 @@
           <div class="related-list">
             {#each files as f (f.key)}
               <a
-                href={videoUrl(rowDir, f.name)}
+                href={vidURL(rowDir, f.name)}
                 class="related-item"
                 class:active={f.name === name}
               >
@@ -218,163 +202,98 @@
   {/if}
 </div>
 
-{#if subsResults}
+{#if subs}
   <SubsPicker
-    results={subsResults}
-    onSelect={handleSubSelect}
-    onClose={() => subsResults = null}
+    results={subs}
+    onSelect={selectSub}
+    onClose={() => subs = null}
   />
 {/if}
 
 <style>
   .player-page {
-    background: #000;
-    min-height: 100vh;
-  }
-
-  /* When playing: fill entire viewport */
-  .player-page.playing {
     position: fixed;
     inset: 0;
+    background: #000;
     overflow: hidden;
-    z-index: 50;
   }
 
-  .player-page.playing .video-wrap {
+  .player-page.hide-ui { cursor: none; }
+
+  .video-wrap {
     position: absolute;
     inset: 0;
   }
 
-  /* Hide cursor when playing and idle */
-  .player-page.playing.hide-ui {
-    cursor: none;
-  }
-
-  /* Player bar */
   .player-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    z-index: 10;
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 14px 32px;
-    background: #0a0a0a;
-    border-bottom: 1px solid #222;
-  }
-
-  /* When playing, overlay bar at top with gradient */
-  .player-page.playing .player-bar {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 10;
+    padding: 20px 32px 48px;
     background: linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%);
-    border-bottom: none;
-    padding: 20px 32px 40px;
     transition: opacity 0.3s;
   }
 
-  .player-page.playing.hide-ui .player-bar {
+  .player-page.hide-ui .player-bar {
     opacity: 0;
     pointer-events: none;
   }
 
-  .back {
-    color: #aaa;
-    font-size: 13px;
-    white-space: nowrap;
-    flex-shrink: 0;
-    transition: color 0.15s;
-  }
+  .back { color: #ddd; font-size: 13px; white-space: nowrap; flex-shrink: 0; transition: color 0.15s; }
   .back:hover { color: #fff; }
 
   .title {
-    flex: 1;
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 500;
-    color: #e5e5e5;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    flex: 1; margin: 0; font-size: 1rem; font-weight: 500;
+    color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 
-  .sub-controls {
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
-  }
+  .sub-controls { display: flex; gap: 8px; flex-shrink: 0; }
 
-  .sub-controls button, .next-btn {
+  .sub-controls button {
     background: rgba(255,255,255,0.1);
-    border: 1px solid #444;
-    color: #ccc;
-    padding: 6px 14px;
-    border-radius: 3px;
-    font-size: 13px;
+    border: 1px solid rgba(255,255,255,0.3);
+    color: #ccc; padding: 6px 14px; border-radius: 3px; font-size: 13px;
     transition: background 0.15s, color 0.15s;
   }
-  .sub-controls button:hover, .next-btn:hover {
-    background: rgba(255,255,255,0.2);
-    color: #fff;
-  }
-
-  /* Video wrap — default state */
-  .video-wrap {
-    width: 100%;
-    aspect-ratio: 16/9;
-    background: #000;
-  }
+  .sub-controls button:hover { background: rgba(255,255,255,0.2); color: #fff; }
 
   .whisper-msg {
-    padding: 10px 32px;
-    font-size: 13px;
-    color: #e50914;
+    position: absolute; bottom: 80px; left: 32px; z-index: 10;
+    font-size: 13px; color: #e50914;
+    background: rgba(0,0,0,0.6); padding: 6px 12px; border-radius: 4px;
   }
 
-  .related { padding: 32px; }
-  .related h2 {
-    font-size: 1rem;
-    color: #aaa;
-    margin: 0 0 16px;
-    font-weight: 400;
+  .related {
+    position: absolute; bottom: 0; left: 0; right: 0; z-index: 10;
+    padding: 16px 32px 24px;
+    background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%);
   }
+
+  .related h2 { font-size: 0.9rem; color: #aaa; margin: 0 0 10px; font-weight: 400; }
 
   .related-list {
-    display: flex;
-    gap: 10px;
-    overflow-x: auto;
-    padding-bottom: 12px;
-    scrollbar-width: thin;
+    display: flex; gap: 10px; overflow-x: auto;
+    padding-bottom: 4px; scrollbar-width: none;
   }
+  .related-list::-webkit-scrollbar { display: none; }
 
   .related-item {
-    flex-shrink: 0;
-    width: 160px;
-    border-radius: 3px;
-    overflow: hidden;
-    border: 2px solid transparent;
-    transition: border-color 0.15s, transform 0.15s;
+    flex-shrink: 0; width: 140px; border-radius: 3px; overflow: hidden;
+    border: 2px solid transparent; transition: border-color 0.15s, transform 0.15s;
   }
   .related-item:hover { transform: scale(1.04); }
   .related-item.active { border-color: #e50914; }
 
   .related-item img {
-    width: 100%;
-    aspect-ratio: 16/9;
-    object-fit: cover;
-    display: block;
-    background: #222;
+    width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: #222;
   }
 
   .related-item span {
-    display: block;
-    font-size: 11px;
-    color: #aaa;
-    padding: 4px 4px 6px;
-    background: #1a1a1a;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: block; font-size: 11px; color: #aaa; padding: 4px 4px 6px;
+    background: #1a1a1a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .related-item.active span { color: #fff; }
 </style>

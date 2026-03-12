@@ -2,12 +2,11 @@ videos/*
 
 package.json
 cache/
+.vscode/
 
-*_templ.go
 images/
 notflix.js
 
-dist/``
 local/
 subs/
 errors

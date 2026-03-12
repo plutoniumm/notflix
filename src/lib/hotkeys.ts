@@ -1,4 +1,8 @@
-export function addHotkeys(player: any, onNext: () => void, onWhisper?: () => void) {
+export function addHotkeys (
+  player: any,
+  onNext: () => void,
+  onWhisper: () => void
+) {
   document.addEventListener('keydown', (e) => {
     if ((e.target as HTMLElement).tagName === 'INPUT') return
 
@@ -17,6 +21,12 @@ export function addHotkeys(player: any, onNext: () => void, onWhisper?: () => vo
       seek(player, -0.1)
     } else if (key === 'ArrowLeft') {
       seek(player, -5)
+    } else if (key === 'ArrowUp') {
+      e.preventDefault()
+      player.volume(Math.min(1, Math.round((player.volume() + 0.1) * 10) / 10))
+    } else if (key === 'ArrowDown') {
+      e.preventDefault()
+      player.volume(Math.max(0, Math.round((player.volume() - 0.1) * 10) / 10))
     } else if (key === ' ') {
       e.preventDefault()
       player.paused() ? player.play() : player.pause()
@@ -29,7 +39,7 @@ export function addHotkeys(player: any, onNext: () => void, onWhisper?: () => vo
     } else if (lkey === 's') {
       player.playbackRate(Math.max(0.1, Math.round((player.playbackRate() - 0.1) * 10) / 10))
     } else if (lkey === 'w') {
-      onWhisper?.()
+      onWhisper()
     } else if (lkey === 'l') {
       window.location.href = '/'
     } else if (lkey === 'n') {
@@ -56,7 +66,7 @@ export function addHotkeys(player: any, onNext: () => void, onWhisper?: () => vo
   })
 }
 
-function seek(player: any, n: number) {
+function seek (player: any, n: number) {
   const t = player.currentTime() ?? 0
   const d = player.duration() ?? 0
   player.currentTime(Math.max(0, Math.min(d - 0.1, t + n)))
