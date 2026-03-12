@@ -6,7 +6,7 @@ CGO_LDFLAGS_WHISPER := -L$(BREW_LIB) -L$(WHISPER_PREFIX)/lib
 
 .PHONY: run whisper clean
 
-whisper:
+whisper: clean
 	CGO_ENABLED=1 \
 	CGO_CFLAGS="$(CGO_CFLAGS_WHISPER)" \
 	CGO_LDFLAGS="$(CGO_LDFLAGS_WHISPER)" \

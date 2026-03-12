@@ -48,7 +48,10 @@
 
 <div style="min-height: 100vh;">
   <header class="f al-ct g20">
-    <a href="/" class="logo fw7">NOTFLIX</a>
+    <!-- <a href="/" class="logo fw7">NOTFLIX</a> -->
+    <a href="/">
+      <img src="/assets/tight.svg" alt="Notflix" height="50" />
+    </a>
 
     <div class="search-wrap">
       <input
@@ -82,7 +85,16 @@
         {#each results as item (item.dir + "/" + item.name)}
           <a href={vidURL(item.dir, item.name)} class="card">
             <div class="thumb">
-              <img src="/images/{item.key}.jpg" alt="" loading="lazy" />
+              <img
+                src="/images/{item.key}.jpg"
+                alt=""
+                loading="lazy"
+                onerror={(event) => {
+                  const img = event.currentTarget as HTMLImageElement;
+                  img.src = "/assets/tight.svg";
+                  img.onerror = null;
+                }}
+              />
               <div class="play-icon">▶</div>
             </div>
 
@@ -126,7 +138,7 @@
                     href={vidURL(dir, f.name)}
                     class="card ptr rx5 flow-h p-rel"
                   >
-                    <div class="thum p-rel flow-h">
+                    <div class="thumb p-rel flow-h">
                       <img
                         class="h-100 w-100 d-b"
                         src="/images/{f.key}.jpg"
@@ -193,13 +205,6 @@
     z-index: 100;
     background: linear-gradient(to bottom, #000 80%, transparent);
     padding: 18px 48px;
-  }
-
-  .logo {
-    color: #e50914;
-    font-size: 1.8rem;
-    letter-spacing: -1px;
-    flex-shrink: 0;
   }
 
   .search-wrap {
@@ -334,7 +339,7 @@
   }
 
   .thumb {
-    aspect-ratio: 16/9;
+    aspect-ratio: 16/9 !important;
     background: #222;
   }
 
