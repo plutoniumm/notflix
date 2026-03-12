@@ -69,5 +69,6 @@ export function addHotkeys (
 function seek (player: any, n: number) {
   const t = player.currentTime() ?? 0
   const d = player.duration() ?? 0
+
   player.currentTime(Math.max(0, Math.min(d - 0.1, t + n)))
 }

@@ -1,210 +1,125 @@
+/* ── video.js overrides ── */
 video {
-    border: 0 !important;
-    outline: 0 !important;
-    transition: all 0.1s ease-in-out;
-}
-
-.hideSubs>.vjs-text-track-display {
-    display: none !important;
-}
-
-.my-video img,
-.vjs-poster {
-    pointer-events: none;
-}
-
-.bright {
-    filter: contrast(90%) brightness(110%);
-}
-
-.video-js.not-hover.vjs-has-started.vjs-paused.vjs-user-active .vjs-control-bar,
-.video-js.not-hover.vjs-has-started.vjs-paused.vjs-user-inactive .vjs-control-bar,
-.video-js.not-hover.vjs-has-started.vjs-playing.vjs-user-active .vjs-control-bar,
-.video-js.not-hover.vjs-has-started.vjs-playing.vjs-user-inactive .vjs-control-bar,
-.video-js.vjs-has-started.vjs-playing.vjs-user-inactive .vjs-control-bar {
-    visibility: hidden;
-    opacity: 0 !important;
-    transform: translateY(3em);
-    -webkit-backface-visibility: hidden;
-    transition:
-        opacity 0.5s ease,
-        visibility 0.5s ease;
+  border: 0 !important;
+  outline: 0 !important;
+  transition: all 0.1s ease-in-out;
 }
 
 .vjs-text-track-cue div {
-    background-color: #0006 !important;
-    border-radius: 5px;
-    padding: 5px;
+  background-color: #0006 !important;
+  border-radius: 5px;
+  padding: 5px;
 }
 
-.hidden {
-    display: none;
-    pointer-events: none;
+.video-js.vjs-has-started.vjs-playing.vjs-user-inactive .vjs-control-bar {
+  visibility: hidden;
+  opacity: 0 !important;
+  transform: translateY(3em);
+  transition: opacity 0.5s ease, visibility 0.5s ease;
 }
 
-body {
-    overflow-y: scroll;
-    background: #000;
-    color: #fff;
-    width: 100vw;
-    overflow-x: hidden;
+.fs-xs {
+  font-size: 11px;
 }
 
-.movie img {
-    width: 300px;
-    aspect-ratio: 16 / 9;
-    border-radius: 10px;
-    object-fit: cover;
-    overflow: hidden;
-    margin: 10px;
+.fs-sm {
+  font-size: 12px;
 }
 
-details {
-    max-width: 100%;
-    margin-bottom: 20px;
+.fs-base {
+  font-size: 13px;
 }
 
-summary {
-    font-size: 1.5em;
-    font-weight: bold;
+.fs-md {
+  font-size: 14px;
 }
 
-ul {
-    list-style-type: none;
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    max-width: 100%;
-    overflow-x: scroll;
+.c-red {
+  color: #e50914;
 }
 
-.mname {
-    padding: 1px 10px;
-    line-height: 1.5;
+.c-dim {
+  color: #555;
 }
 
-/* ── Subtitle picker modal ── */
-#subs-picker {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+.c-sub {
+  color: #666;
 }
 
-.subs-backdrop {
-    position: absolute;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.7);
+.c-muted {
+  color: #aaa;
 }
 
-.subs-modal {
-    position: relative;
-    background: #1a1a1a;
-    color: #fff;
-    border: 1px solid #444;
-    border-radius: 8px;
-    padding: 24px;
-    max-width: 600px;
-    width: 90vw;
-    max-height: 80vh;
-    overflow-y: auto;
-    z-index: 1;
+.c-light {
+  color: #ddd;
 }
 
-.subs-modal h3 {
-    margin: 0 0 16px;
-    font-size: 1.2em;
+.trunc {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.subs-list {
-    list-style: none;
-    margin: 0 0 16px;
-    padding: 0;
-    overflow-x: unset;
+.sh-0 {
+  flex-shrink: 0;
 }
 
-.subs-list li {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 10px;
-    border-bottom: 1px solid #333;
-    cursor: pointer;
-    transition: background 0.15s;
+.up {
+  text-transform: uppercase;
 }
 
-.subs-list li:hover {
-    background: #2a2a2a;
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ccc;
+  padding: 6px 14px;
+  border-radius: 3px;
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s;
 }
 
-.subs-match {
-    color: #4caf50;
-    font-size: 0.8em;
-    font-weight: bold;
-    white-space: nowrap;
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
 }
 
-.subs-release {
-    flex: 1;
-    font-size: 0.9em;
-    word-break: break-word;
+.btn-outline {
+  background: none;
+  border: 1px solid #444;
+  color: #999;
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  transition: color 0.15s, border-color 0.15s;
 }
 
-.subs-dl {
-    font-size: 0.8em;
-    color: #aaa;
-    white-space: nowrap;
+.btn-outline:hover {
+  color: #fff;
+  border-color: #888;
 }
 
-.subs-whisper-btn,
-.subs-close {
-    background: #333;
-    color: #fff;
-    border: 1px solid #555;
-    padding: 8px 16px;
-    cursor: pointer;
-    border-radius: 4px;
-    margin-right: 8px;
-    transition: background 0.15s;
+.btn-icon {
+  background: none;
+  border: none;
+  color: #555;
+  padding: 3px 7px;
+  border-radius: 3px;
+  font-size: 12px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: color 0.15s, background 0.15s;
 }
 
-.subs-whisper-btn:hover,
-.subs-close:hover {
-    background: #444;
+.btn-icon:hover {
+  background: #333;
+  color: #ccc;
 }
 
-.subs-close {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    padding: 4px 10px;
+.btn-icon.danger:hover {
+  color: #e50914;
+  background: rgba(229, 9, 20, 0.1);
 }
 
-/* ── Whisper generation button / status ── */
-.whisper-gen-btn {
-    display: block;
-    background: #fff2;
-    color: #fff;
-    border: 1px solid #fff;
-    padding: 10px 16px;
-    margin: 4px 10px;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background 0.15s;
-}
-
-.whisper-gen-btn:hover {
-    background: #fff3;
-}
-
-#whisper-status {
-    margin: 4px 10px;
-    padding: 10px 16px;
-    background: #fff1;
-    border-radius: 4px;
-    color: #fff;
-    font-size: 0.95em;
+.bright {
+  filter: contrast(90%) brightness(110%);
 }
