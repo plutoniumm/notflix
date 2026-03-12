@@ -4,21 +4,22 @@
     onSelect,
     onClose,
   }: {
-    results: any[]
-    onSelect: (fileId: number) => void
-    onClose: () => void
-  } = $props()
+    results: any[];
+    onSelect: (fid: number) => void;
+    onClose: () => void;
+  } = $props();
 
-  let downloading = $state<number | null>(null)
+  let busy = $state<number | null>(null);
 
-  async function pick(fileId: number) {
-    downloading = fileId
-    await onSelect(fileId)
-    downloading = null
+  async function pick(fid: number) {
+    busy = fid;
+    await onSelect(fid);
+    busy = null;
   }
 </script>
 
 <div class="backdrop" onclick={onClose} role="presentation">
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
     class="modal"
     role="dialog"
@@ -33,11 +34,17 @@
     <ul class="list">
       {#each results as r (r.file_id)}
         <li>
-          <button class="sub-item" class:downloading={downloading === r.file_id} onclick={() => pick(r.file_id)}>
+          <button
+            class="sub-item"
+            class:downloading={busy === r.file_id}
+            onclick={() => pick(r.file_id)}
+          >
             {#if r.hash_match}<span class="badge">✓ exact match</span>{/if}
-            <span class="release">{r.release || 'Unknown release'}</span>
-            <span class="count">{r.download_count?.toLocaleString() ?? 0} dl</span>
-            {#if downloading === r.file_id}
+            <span class="release">{r.release || "Unknown release"}</span>
+            <span class="count"
+              >{r.download_count?.toLocaleString() ?? 0} dl</span
+            >
+            {#if busy === r.file_id}
               <span class="spinner">↻</span>
             {/if}
           </button>
@@ -51,7 +58,7 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.8);
+    background: rgba(0, 0, 0, 0.8);
     z-index: 1000;
     display: flex;
     align-items: center;
@@ -77,7 +84,11 @@
     border-bottom: 1px solid #333;
   }
 
-  h3 { margin: 0; font-size: 1rem; font-weight: 600; }
+  h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+  }
 
   .close {
     background: none;
@@ -86,7 +97,9 @@
     font-size: 1rem;
     padding: 4px 8px;
   }
-  .close:hover { color: #fff; }
+  .close:hover {
+    color: #fff;
+  }
 
   .list {
     list-style: none;
@@ -95,7 +108,9 @@
     overflow-y: auto;
   }
 
-  li { list-style: none; }
+  li {
+    list-style: none;
+  }
 
   .sub-item {
     display: flex;
@@ -115,8 +130,13 @@
     font-family: inherit;
     text-align: left;
   }
-  .sub-item:hover { background: #2a2a2a; }
-  .sub-item.downloading { opacity: 0.7; pointer-events: none; }
+  .sub-item:hover {
+    background: #2a2a2a;
+  }
+  .sub-item.downloading {
+    opacity: 0.7;
+    pointer-events: none;
+  }
 
   .badge {
     background: #1a5c1a;
@@ -127,13 +147,27 @@
     flex-shrink: 0;
   }
 
-  .release { flex: 1; color: #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .count { color: #666; font-size: 12px; flex-shrink: 0; }
+  .release {
+    flex: 1;
+    color: #ddd;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .count {
+    color: #666;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
 
   .spinner {
     color: #e50914;
     animation: spin 0.8s linear infinite;
     display: inline-block;
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
 </style>

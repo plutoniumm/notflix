@@ -14,41 +14,42 @@ import (
 	"sync"
 )
 
-// ─── Progress registry ────────────────────────────────────────────────────────
-
-type ConversionProgress struct {
+type Progress struct {
 	Name    string  `json:"name"`
 	Percent float64 `json:"percent"`
 }
 
 var (
-	convMu     sync.Mutex
-	convActive = map[string]float64{} // display name → percent
+	mut    sync.Mutex
+	active = map[string]float64{}
 )
 
-func GetConversions() []ConversionProgress {
-	convMu.Lock()
-	defer convMu.Unlock()
-	out := make([]ConversionProgress, 0, len(convActive))
-	for name, pct := range convActive {
-		out = append(out, ConversionProgress{Name: name, Percent: pct})
+func GetProgress() []Progress {
+	mut.Lock()
+	defer mut.Unlock()
+	out := make([]Progress, 0, len(active))
+
+	for name, pct := range active {
+		out = append(out, Progress{
+			Name:    name,
+			Percent: pct,
+		})
 	}
+
 	return out
 }
 
 func setProgress(name string, pct float64) {
-	convMu.Lock()
-	convActive[name] = pct
-	convMu.Unlock()
+	mut.Lock()
+	active[name] = pct
+	mut.Unlock()
 }
 
 func clearProgress(name string) {
-	convMu.Lock()
-	delete(convActive, name)
-	convMu.Unlock()
+	mut.Lock()
+	delete(active, name)
+	mut.Unlock()
 }
-
-// ─── Walk & dispatch ──────────────────────────────────────────────────────────
 
 func ConvertAll(roots []string) {
 	var wg sync.WaitGroup
@@ -56,12 +57,15 @@ func ConvertAll(roots []string) {
 		if _, err := os.Stat(root); err != nil {
 			continue
 		}
+
 		wg.Add(1)
 		go func(root string) {
 			defer wg.Done()
 			convertRoot(root)
 		}(root)
+
 	}
+
 	wg.Wait()
 	log.Println("ConvertAll: done")
 }
@@ -71,26 +75,30 @@ func convertRoot(root string) {
 	var wg sync.WaitGroup
 
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") {
+		inValid := d.IsDir() || strings.HasPrefix(d.Name(), ".")
+		if err != nil || inValid {
 			return nil
 		}
+
 		ext := strings.ToLower(filepath.Ext(d.Name()))
 		if ext != ".mkv" && ext != ".mov" {
 			return nil
 		}
+
 		sem <- struct{}{}
 		wg.Add(1)
+
 		go func(p string) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			convertToMP4(p)
 		}(path)
+
 		return nil
 	})
+
 	wg.Wait()
 }
-
-// ─── Per-file conversion ─────────────────────────────────────────────────────
 
 func convertToMP4(srcPath string) {
 	ext := filepath.Ext(srcPath)
@@ -98,8 +106,6 @@ func convertToMP4(srcPath string) {
 	mp4Path := base + ".mp4"
 	name := filepath.Base(srcPath)
 
-	// If an .mp4 already exists alongside the source, the previous run was killed
-	// midway — the file is incomplete. Delete it and reconvert.
 	if _, err := os.Stat(mp4Path); err == nil {
 		log.Printf("Incomplete conversion detected, restarting: %s", name)
 		os.Remove(mp4Path)
@@ -110,13 +116,13 @@ func convertToMP4(srcPath string) {
 
 	vttPath := base + ".vtt"
 	if _, err := os.Stat(vttPath); os.IsNotExist(err) {
-		extractEnglishSubs(srcPath, vttPath)
+		extractSubs(srcPath, vttPath)
 	}
 
-	dur := probeDuration(srcPath)
-	videoCodec, audioCodec := probeCodecs(srcPath)
+	dur := duration(srcPath)
+	videoCodec, audioCodec := codecs(srcPath)
 
-	if err := remuxToMp4(srcPath, mp4Path, videoCodec, audioCodec, dur, name); err != nil {
+	if err := remux(srcPath, mp4Path, videoCodec, audioCodec, dur, name); err != nil {
 		log.Printf("Conversion failed %s: %v", name, err)
 		return
 	}
@@ -124,12 +130,8 @@ func convertToMP4(srcPath string) {
 	os.Remove(srcPath)
 }
 
-// ─── ffmpeg progress parsing ──────────────────────────────────────────────────
-
 var timeRe = regexp.MustCompile(`time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
 
-// progressWriter is attached to ffmpeg's stderr. It buffers output for error
-// reporting and updates the global progress map on each time= line.
 type progressWriter struct {
 	name        string
 	durationSec float64
@@ -153,24 +155,25 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// ─── ffprobe / ffmpeg helpers ─────────────────────────────────────────────────
-
-func probeDuration(path string) float64 {
+func duration(path string) float64 {
 	cmd := exec.Command("ffprobe",
 		"-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		path,
 	)
+
 	out, err := cmd.Output()
 	if err != nil {
 		return 0
 	}
+
 	d, _ := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+
 	return d
 }
 
-func probeCodecs(videoPath string) (videoCodec, audioCodec string) {
+func codecs(videoPath string) (videoCodec, audioCodec string) {
 	run := func(streamSpec string) string {
 		cmd := exec.Command("ffprobe",
 			"-v", "error",
@@ -179,16 +182,19 @@ func probeCodecs(videoPath string) (videoCodec, audioCodec string) {
 			"-of", "default=noprint_wrappers=1:nokey=1",
 			videoPath,
 		)
+
 		out, err := cmd.Output()
 		if err != nil {
 			return ""
 		}
+
 		return strings.TrimSpace(string(out))
 	}
+
 	return run("v:0"), run("a:0")
 }
 
-func remuxToMp4(src, dst, videoCodec, audioCodec string, durationSec float64, name string) error {
+func remux(src, dst, videoCodec, audioCodec string, durationSec float64, name string) error {
 	tmp := dst + ".tmp"
 
 	args := []string{"-nostdin", "-i", src}
@@ -198,6 +204,7 @@ func remuxToMp4(src, dst, videoCodec, audioCodec string, durationSec float64, na
 	pw := &progressWriter{name: name, durationSec: durationSec}
 	cmd := exec.Command("ffmpeg", args...)
 	cmd.Stderr = pw
+
 	if devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0); err == nil {
 		cmd.Stdin = devNull
 		cmd.Stdout = devNull
@@ -209,12 +216,14 @@ func remuxToMp4(src, dst, videoCodec, audioCodec string, durationSec float64, na
 		os.Remove(tmp)
 		return err
 	}
+
 	return os.Rename(tmp, dst)
 }
 
-func codecArgs(videoCodec, audioCodec string) []string {
+func codecArgs(video, audio string) []string {
 	var args []string
-	switch videoCodec {
+
+	switch video {
 	case "h264":
 		args = append(args, "-c:v", "copy")
 	case "hevc":
@@ -222,16 +231,18 @@ func codecArgs(videoCodec, audioCodec string) []string {
 	default:
 		args = append(args, "-c:v", "libx264", "-preset", "fast", "-crf", "23")
 	}
-	switch audioCodec {
+
+	switch audio {
 	case "aac", "mp3":
 		args = append(args, "-c:a", "copy")
 	default:
 		args = append(args, "-c:a", "aac")
 	}
+
 	return args
 }
 
-func extractEnglishSubs(srcPath, vttPath string) {
+func extractSubs(srcPath, vttPath string) {
 	cmd := exec.Command("ffprobe",
 		"-v", "error",
 		"-select_streams", "s",
@@ -251,35 +262,40 @@ func extractEnglishSubs(srcPath, vttPath string) {
 			Tags      map[string]string `json:"tags"`
 		} `json:"streams"`
 	}
+
 	if err := json.Unmarshal(out, &probe); err != nil {
 		return
 	}
 
-	englishLangs := map[string]bool{"en": true, "eng": true, "english": true, "sdh": true}
+	english := map[string]bool{"en": true, "eng": true, "english": true, "sdh": true}
 	textCodecs := map[string]bool{"subrip": true, "ass": true, "webvtt": true, "mov_text": true}
 
-	trackIdx := -1
+	idx := -1
 	for _, s := range probe.Streams {
 		if !textCodecs[strings.ToLower(s.CodecName)] {
 			continue
 		}
+
 		lang := ""
 		if s.Tags != nil {
 			lang = strings.ToLower(s.Tags["language"])
 		}
-		if englishLangs[lang] {
-			trackIdx = s.Index
+
+		if english[lang] {
+			idx = s.Index
 			break
 		}
 	}
-	if trackIdx < 0 {
+
+	if idx < 0 {
 		return
 	}
 
 	extractCmd := exec.Command("ffmpeg", "-y", "-i", srcPath,
-		"-map", fmt.Sprintf("0:%d", trackIdx),
+		"-map", fmt.Sprintf("0:%d", idx),
 		vttPath,
 	)
+
 	if err := extractCmd.Run(); err != nil {
 		log.Printf("Sub extraction failed for %s: %v", filepath.Base(srcPath), err)
 		os.Remove(vttPath)

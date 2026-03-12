@@ -1,43 +1,62 @@
 <script lang="ts">
-  import Home from './Home.svelte'
-  import Player from './Player.svelte'
-  import Manage from './Manage.svelte'
+  import Home from "./Home.svelte";
+  import Player from "./Player.svelte";
+  import Manage from "./Manage.svelte";
 
-  const path = window.location.pathname
-  const params = new URLSearchParams(window.location.search)
-  const videoParam = params.get('video')
+  const loc = window.location;
+
+  const path = loc.pathname;
+  const vidParam = new URLSearchParams(loc.search).get("video");
 </script>
 
-{#if path === '/manage'}
+{#if path === "/manage"}
   <Manage />
-{:else if videoParam}
-  <Player {videoParam} />
+{:else if vidParam}
+  <Player videoParam={vidParam} />
 {:else}
   <Home />
 {/if}
 
-<style>
-  :global(*) { box-sizing: border-box; }
+<style lang="scss">
+  :global {
+    * {
+      box-sizing: border-box;
+    }
 
-  :global(body) {
-    background: #141414;
-    color: #fff;
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    margin: 0;
-    min-height: 100vh;
+    body {
+      background: #141414;
+      color: #fff;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+    button {
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .video-js {
+      width: 100% !important;
+      height: auto !important;
+      aspect-ratio: 16/9;
+    }
+    .video-wrap .video-js {
+      height: 100% !important;
+      aspect-ratio: unset !important;
+    }
+    .vjs-poster {
+      background-size: cover;
+    }
+    .video-js.hideSubs .vjs-text-track-display {
+      display: none !important;
+    }
+    video.bright {
+      filter: brightness(1.4);
+    }
   }
-
-  :global(a) { color: inherit; text-decoration: none; }
-  :global(button) { cursor: pointer; font-family: inherit; }
-
-  :global(::-webkit-scrollbar) { width: 6px; height: 6px; }
-  :global(::-webkit-scrollbar-track) { background: transparent; }
-  :global(::-webkit-scrollbar-thumb) { background: #444; border-radius: 3px; }
-  :global(::-webkit-scrollbar-thumb:hover) { background: #666; }
-
-  /* video.js overrides */
-  :global(.video-js) { width: 100% !important; height: auto !important; aspect-ratio: 16/9; }
-  :global(.vjs-poster) { background-size: cover; }
-  :global(.video-js.hideSubs .vjs-text-track-display) { display: none !important; }
-  :global(video.bright) { filter: brightness(1.4); }
 </style>

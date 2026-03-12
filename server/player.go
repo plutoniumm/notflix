@@ -15,19 +15,19 @@ import (
 )
 
 func VideoPlayer(c *gin.Context, videosDir string) {
-	filename, err := getfname(c)
+	name, err := getfname(c)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 
-	videoPath, err := resolve(videosDir, filename)
+	path, err := resolve(videosDir, name)
 	if err != nil {
 		Error(err.Error(), c, http.StatusBadRequest)
 		return
 	}
 
-	file, fileInfo, err := openVid(videoPath)
+	file, info, err := openVid(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			c.String(http.StatusNotFound, "Video not found")
@@ -38,7 +38,7 @@ func VideoPlayer(c *gin.Context, videosDir string) {
 	}
 	defer file.Close()
 
-	serve(c, file, fileInfo, filename)
+	serve(c, file, info, name)
 }
 
 func getfname(c *gin.Context) (string, error) {
@@ -58,19 +58,18 @@ func getfname(c *gin.Context) (string, error) {
 	return name, nil
 }
 
-func resolve(baseDir, filename string) (string, error) {
-	videoPath := filepath.Join(baseDir, filename)
-	absVideoPath, err := filepath.Abs(videoPath)
+func resolve(base, name string) (string, error) {
+	abs, err := filepath.Abs(filepath.Join(base, name))
 	if err != nil {
 		return "", fmt.Errorf("error resolving path")
 	}
 
-	absBaseDir, _ := filepath.Abs(baseDir)
-	if !strings.HasPrefix(absVideoPath, absBaseDir) {
+	absBase, _ := filepath.Abs(base)
+	if !strings.HasPrefix(abs, absBase) {
 		return "", fmt.Errorf("invalid video path")
 	}
 
-	return absVideoPath, nil
+	return abs, nil
 }
 
 func openVid(path string) (*os.File, os.FileInfo, error) {
@@ -88,46 +87,48 @@ func openVid(path string) (*os.File, os.FileInfo, error) {
 	return file, info, nil
 }
 
-func serve(c *gin.Context, file *os.File, info os.FileInfo, filename string) {
-	fileSize := info.Size()
-	rangeHeader := c.GetHeader("Range")
+func serve(c *gin.Context, file *os.File, info os.FileInfo, name string) {
+	size := info.Size()
+	rng := c.GetHeader("Range")
 
-	if rangeHeader == "" {
+	if rng == "" {
 		c.Header("Content-Type", "video/mp4")
-		c.Header("Content-Length", strconv.FormatInt(fileSize, 10))
+		c.Header("Content-Length", strconv.FormatInt(size, 10))
 		c.Header("Accept-Ranges", "bytes")
-		_, err := io.Copy(c.Writer, file)
-		if err != nil && !isClientGone(err) {
-			log.Printf("Error serving full video %s: %v", filename, err)
+
+		if _, err := io.Copy(c.Writer, file); err != nil && !clientGone(err) {
+			log.Printf("Error serving full video %s: %v", name, err)
 		}
+
 		return
 	}
 
-	start, end, cLenStr := ParseRangeHeader(rangeHeader, fileSize)
-	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, fileSize))
+	start, end, clen := Range(rng, size)
+	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
 	c.Header("Accept-Ranges", "bytes")
-	c.Header("Content-Length", cLenStr)
+	c.Header("Content-Length", clen)
 	c.Header("Content-Type", "video/mp4")
 	c.Status(http.StatusPartialContent)
 
-	_, err := file.Seek(start, io.SeekStart)
-	if err != nil {
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
 		Error("seek error: "+err.Error(), c, http.StatusInternalServerError)
 		return
 	}
 
-	bytesToServe, _ := strconv.ParseInt(cLenStr, 10, 64)
-	_, err = io.CopyN(c.Writer, file, bytesToServe)
-	if err != nil && err != io.EOF && !isClientGone(err) {
-		log.Printf("Error serving partial video %s: %v", filename, err)
+	blen, _ := strconv.ParseInt(clen, 10, 64)
+
+	if _, err := io.CopyN(c.Writer, file, blen); err != nil && err != io.EOF && !clientGone(err) {
+		log.Printf("Error serving partial video %s: %v", name, err)
 	}
 }
 
-func isClientGone(err error) bool {
+func clientGone(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	s := err.Error()
+
 	return strings.Contains(s, "broken pipe") ||
 		strings.Contains(s, "connection reset by peer") ||
 		strings.Contains(s, "write: connection timed out")
