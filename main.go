@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	imgDir    = "./images"
-	pubDir    = "./public"
-	assDir    = "./public/assets"
-	port      = "4242"
+	imgDir = "./images"
+	pubDir = "./public"
+	assDir = "./public/assets"
+	port   = "4242"
 )
 
 var roots = []string{
@@ -43,6 +43,7 @@ func findRoot(name string, rts []string) (string, string, bool) {
 		absR, _ := filepath.Abs(r)
 		candidate := filepath.Join(r, rel)
 		abs, err := filepath.Abs(candidate)
+
 		if err != nil {
 			continue
 		}
@@ -53,6 +54,7 @@ func findRoot(name string, rts []string) (string, string, bool) {
 			return r, abs, true
 		}
 	}
+
 	return "", "", false
 }
 
@@ -70,6 +72,7 @@ func buildList(dir string) map[string][]map[string]string {
 		for _, name := range files {
 			out = append(out, map[string]string{"name": name, "key": server.Hash(name)})
 		}
+
 		return out
 	}
 
@@ -97,6 +100,7 @@ func listAll(c *gin.Context, dirs []string) {
 			out[k] = append(out[k], v...)
 		}
 	}
+
 	c.JSON(http.StatusOK, out)
 }
 
@@ -160,6 +164,7 @@ func main() {
 			Path    string `json:"path"`
 			NewName string `json:"name"`
 		}
+
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
@@ -191,6 +196,7 @@ func main() {
 			if ext == ".mp4" {
 				base := candidate[:len(candidate)-len(ext)]
 				nbase := dst[:len(dst)-len(filepath.Ext(dst))]
+
 				for _, suf := range []string{".vtt", ".whisper.vtt", ".srt"} {
 					old := base + suf
 					if _, err := os.Stat(old); err == nil {
@@ -202,6 +208,7 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{"ok": true})
 			return
 		}
+
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 	})
 
@@ -214,10 +221,12 @@ func main() {
 		listVids := func(dir string) []string {
 			var files []string
 			entries, _ := os.ReadDir(dir)
+
 			for _, f := range entries {
 				if f.IsDir() || strings.HasPrefix(f.Name(), ".") {
 					continue
 				}
+
 				ext := strings.ToLower(filepath.Ext(f.Name()))
 				if ext == ".mp4" || ext == ".mkv" || ext == ".mov" {
 					files = append(files, f.Name())
@@ -225,14 +234,17 @@ func main() {
 			}
 			return files
 		}
+
 		for _, d := range roots {
 			entries, err := os.ReadDir(d)
 			if err != nil {
 				continue
 			}
+
 			if files := listVids(d); len(files) > 0 {
 				out["."] = append(out["."], files...)
 			}
+
 			for _, e := range entries {
 				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
 					if files := listVids(filepath.Join(d, e.Name())); len(files) > 0 {
@@ -251,11 +263,13 @@ func main() {
 			Total uint64 `json:"total"`
 		}
 		var out []DiskInfo
+
 		for _, root := range roots {
 			var stat syscall.Statfs_t
 			if err := syscall.Statfs(root, &stat); err != nil {
 				continue
 			}
+
 			out = append(out, DiskInfo{
 				Root:  filepath.Base(root),
 				Free:  stat.Bavail * uint64(stat.Bsize),
@@ -271,6 +285,7 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 			return
 		}
+
 		for _, root := range roots {
 			absR, _ := filepath.Abs(root)
 			candidate := filepath.Join(root, path)
@@ -278,6 +293,7 @@ func main() {
 			if err != nil || !strings.HasPrefix(abs, absR) {
 				continue
 			}
+
 			info, err := os.Stat(candidate)
 			if err != nil || !info.IsDir() {
 				continue
@@ -286,6 +302,7 @@ func main() {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
+
 			c.JSON(http.StatusOK, gin.H{"ok": true})
 			return
 		}
@@ -306,9 +323,11 @@ func main() {
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
 		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
-				log.Printf("LAN URL: http://%s:%s", ipnet.IP.String(), port)
+			ipnert, ok := addr.(*net.IPNet)
+			if !ok || ipnert.IP.IsLoopback() || ipnert.IP.To4() == nil {
+				continue
 			}
+			log.Printf("LAN URL: http://%s:%s", ipnert.IP.String(), port)
 		}
 	}
 

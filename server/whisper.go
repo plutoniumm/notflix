@@ -1,5 +1,3 @@
-//go:build whisper
-
 package server
 
 import (

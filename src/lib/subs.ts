@@ -1,7 +1,10 @@
-export async function initSubs(player: any, raw: string, sub: string) {
-  const info = await fetch(`/api/subs/info?file=${encodeURIComponent(raw)}`)
-    .then(r => r.json())
-    .catch(() => null)
+import { GET } from '.';
+
+const Enc = encodeURIComponent
+
+export async function initSubs (player: any, raw: string, sub: string) {
+  const info = await GET(`/api/subs/info?file=${Enc(raw)}`)
+
   if (!info || info.vtt) return
 
   if (info.srt) {
@@ -18,18 +21,18 @@ export async function initSubs(player: any, raw: string, sub: string) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file: raw, track: eng.index }),
     })
+
     reloadTrack(player, `/subs/${sub}`, 'English')
   }
 }
 
-export async function searchSubs(raw: string): Promise<any[] | null> {
-  const res = await fetch(`/api/subs/search?file=${encodeURIComponent(raw)}`)
-    .then(r => r.json())
-    .catch(() => ({ results: [] }))
-  return res.results?.length ? res.results : null
+export async function searchSubs (raw: string): Promise<any[] | null> {
+  const res = await GET(`/api/subs/search?file=${Enc(raw)}`)
+
+  return res?.results?.length ? res.results : null
 }
 
-export async function startWhisper(
+export async function startWhisper (
   raw: string,
   onMsg: (s: string) => void,
   onDone: () => void,
@@ -42,10 +45,9 @@ export async function startWhisper(
   })
 
   const timer = setInterval(async () => {
-    const s = await fetch(`/api/subs/whisper/status?file=${encodeURIComponent(raw)}`)
-      .then(r => r.json())
-      .catch(() => null)
+    const s = await GET(`/api/subs/whisper/status?file=${Enc(raw)}`)
     if (!s) return
+
     if (s.status === 'done') {
       clearInterval(timer)
       onDone()
@@ -56,17 +58,33 @@ export async function startWhisper(
   }, 3000)
 }
 
-export function reloadTrack(player: any, src: string, label: string, show = label === 'English') {
+export function reloadTrack (
+  player: any,
+  src: string,
+  label: string,
+  show = label === 'English'
+) {
   const tracks = player.remoteTextTracks()
+
   for (let i = tracks.length - 1; i >= 0; i--) {
-    if (tracks[i].label === label) player.removeRemoteTextTrack(tracks[i])
+    if (tracks[i].label === label)
+      player.removeRemoteTextTrack(tracks[i])
   }
-  player.addRemoteTextTrack({ kind: 'captions', src, srclang: 'en', label, default: show }, false)
+
+  player.addRemoteTextTrack({
+    kind: 'captions',
+    src,
+    srclang: 'en',
+    label,
+    default: show
+  }, false)
+
   if (show) {
     setTimeout(() => {
       const all = player.textTracks()
       for (let i = 0; i < all.length; i++) {
-        if (all[i].label === label) all[i].mode = 'showing'
+        if (all[i].label === label)
+          all[i].mode = 'showing'
       }
     }, 100)
   }
