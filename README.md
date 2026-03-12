@@ -12,6 +12,11 @@ Other than the basic youtube shortcuts
 | `p` | picture-in-picture |
 | `b` | brightness toggle |
 | `n` | next |
+|  `m` | mute |
+| `c` | toggle subtitles |
+| `f` | toggle fullscreen |
+| digit | seek to that*10 percent of vid |
+
 
 <!-- opensubs -->
 api hXCVdmWClclk6NEjj9dXQAd2OUmaxRlR

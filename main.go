@@ -8,23 +8,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	server "notflix/server"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 const (
 	imagesDir = "./images"
-	videosDir = "./videos"
 	publicDir = "./public"
 	assetsDir = "./public/assets"
 	port      = "4242"
 )
 
 var videosRoots = []string{
-	videosDir,
-	"/Users/god/Downloads/DC++",
 	"/Volumes/Ravan",
 	"/Volumes/Oni",
 	"/Volumes/Kumbhakarn",
@@ -106,8 +105,10 @@ func listMediaMulti(c *gin.Context, dirs []string) {
 	c.JSON(http.StatusOK, merged)
 }
 
-
 func main() {
+	// Load .env if present (silently ignored if missing)
+	_ = godotenv.Load()
+
 	for _, root := range videosRoots {
 		server.EnsureDir(root)
 	}
@@ -120,6 +121,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create log directory: %v", err)
 	}
+
+	go server.ConvertAll(videosRoots)
 
 	gin.SetMode("release")
 	router := gin.New()
@@ -138,6 +141,9 @@ func main() {
 		pulse()
 		c.File("embed.html")
 	})
+	router.GET("/manage", func(c *gin.Context) {
+		c.File("index.html")
+	})
 	router.Static("/assets", assetsDir)
 
 	router.GET("/list/video", func(c *gin.Context) {
@@ -147,41 +153,182 @@ func main() {
 	router.GET("/video/*filename", func(c *gin.Context) {
 		pulse()
 		fname := c.Param("filename")
-		if root, _, ok := findRootFor(fname, videosRoots); ok {
-			server.VideoPlayer(c, root)
+		root, _, ok := findRootFor(fname, videosRoots)
+		if !ok {
+			c.String(http.StatusNotFound, "Video not found")
 			return
 		}
-		server.VideoPlayer(c, videosDir)
+		server.VideoPlayer(c, root)
 	})
 	router.GET("/images/:filename", func(c *gin.Context) {
 		pulse()
 		c.File(filepath.Join(imagesDir, c.Param("filename")))
 	})
 
-	router.DELETE("/video/:filename", func(c *gin.Context) {
-		pulse()
+	router.DELETE("/video/*filename", func(c *gin.Context) {
 		fname := c.Param("filename")
 		rel := strings.TrimPrefix(fname, "/")
+		base := strings.TrimSuffix(rel, filepath.Ext(rel))
 		for _, root := range videosRoots {
-			videoPath := filepath.Join(root, rel)
-			srtPath := filepath.Join(root, strings.TrimSuffix(rel, filepath.Ext(rel))+".srt")
-			vttPath := filepath.Join(root, strings.TrimSuffix(rel, filepath.Ext(rel))+".vtt")
-
-			server.DelFile(videoPath)
-			server.DelFile(srtPath)
-			server.DelFile(vttPath)
+			server.DelFile(filepath.Join(root, rel))
+			server.DelFile(filepath.Join(root, base+".srt"))
+			server.DelFile(filepath.Join(root, base+".vtt"))
+			server.DelFile(filepath.Join(root, base+".whisper.vtt"))
 		}
-
 		c.String(http.StatusOK, "true")
 	})
 
-	router.GET("/subs/info", func(c *gin.Context) { server.SubsInfo(c, videosRoots) })
-	router.GET("/subs/search", func(c *gin.Context) { server.SubsSearch(c, videosRoots) })
-	router.POST("/subs/download", func(c *gin.Context) { server.SubsDownload(c, videosRoots) })
-	router.POST("/subs/extract", func(c *gin.Context) { server.SubsExtract(c, videosRoots) })
-	router.POST("/subs/whisper", func(c *gin.Context) { server.SubsWhisper(c, videosRoots) })
-	router.GET("/subs/whisper/status", server.SubsWhisperStatus)
+	router.POST("/api/rename", func(c *gin.Context) {
+		var body struct {
+			Path    string `json:"path"`
+			NewName string `json:"name"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+		if body.NewName == "" || strings.ContainsAny(body.NewName, "/\\") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name"})
+			return
+		}
+
+		rel := strings.TrimPrefix(body.Path, "/")
+		for _, root := range videosRoots {
+			absRoot, _ := filepath.Abs(root)
+			candidate := filepath.Join(root, rel)
+			absCandidate, err := filepath.Abs(candidate)
+			if err != nil || !strings.HasPrefix(absCandidate, absRoot) {
+				continue
+			}
+			if _, err := os.Stat(candidate); err != nil {
+				continue
+			}
+
+			newPath := filepath.Join(filepath.Dir(candidate), body.NewName)
+			if err := os.Rename(candidate, newPath); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+
+			// Also rename associated subtitle files for video renames
+			oldExt := strings.ToLower(filepath.Ext(candidate))
+			if oldExt == ".mp4" {
+				oldBase := candidate[:len(candidate)-len(oldExt)]
+				newBase := newPath[:len(newPath)-len(filepath.Ext(newPath))]
+				for _, suf := range []string{".vtt", ".whisper.vtt", ".srt"} {
+					old := oldBase + suf
+					if _, err := os.Stat(old); err == nil {
+						os.Rename(old, newBase+suf)
+					}
+				}
+			}
+
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+	})
+
+	router.GET("/api/conversions", func(c *gin.Context) {
+		c.JSON(http.StatusOK, server.GetConversions())
+	})
+
+	// All video files (mp4/mkv/mov) for the manage view
+	router.GET("/api/manage/list", func(c *gin.Context) {
+		merged := make(map[string][]string)
+		for _, d := range videosRoots {
+			entries, err := os.ReadDir(d)
+			if err != nil {
+				continue
+			}
+			allVids := func(dir string) []string {
+				var out []string
+				e, _ := os.ReadDir(dir)
+				for _, f := range e {
+					if f.IsDir() || strings.HasPrefix(f.Name(), ".") {
+						continue
+					}
+					ext := strings.ToLower(filepath.Ext(f.Name()))
+					if ext == ".mp4" || ext == ".mkv" || ext == ".mov" {
+						out = append(out, f.Name())
+					}
+				}
+				return out
+			}
+			if files := allVids(d); len(files) > 0 {
+				merged["."] = append(merged["."], files...)
+			}
+			for _, entry := range entries {
+				if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+					if files := allVids(filepath.Join(d, entry.Name())); len(files) > 0 {
+						merged[entry.Name()] = append(merged[entry.Name()], files...)
+					}
+				}
+			}
+		}
+		c.JSON(http.StatusOK, merged)
+	})
+
+	// Disk space info per root
+	router.GET("/api/manage/diskinfo", func(c *gin.Context) {
+		type DiskInfo struct {
+			Root  string `json:"root"`
+			Free  uint64 `json:"free"`
+			Total uint64 `json:"total"`
+		}
+		var infos []DiskInfo
+		for _, root := range videosRoots {
+			var stat syscall.Statfs_t
+			if err := syscall.Statfs(root, &stat); err != nil {
+				continue
+			}
+			infos = append(infos, DiskInfo{
+				Root:  filepath.Base(root),
+				Free:  stat.Bavail * uint64(stat.Bsize),
+				Total: stat.Blocks * uint64(stat.Bsize),
+			})
+		}
+		c.JSON(http.StatusOK, infos)
+	})
+
+	// Delete an entire folder (top-level dirs only)
+	router.DELETE("/api/dir", func(c *gin.Context) {
+		path := c.Query("path")
+		if path == "" || strings.ContainsAny(path, "/\\") || path == "." {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+			return
+		}
+		for _, root := range videosRoots {
+			absRoot, _ := filepath.Abs(root)
+			candidate := filepath.Join(root, path)
+			absCandidate, err := filepath.Abs(candidate)
+			if err != nil || !strings.HasPrefix(absCandidate, absRoot) {
+				continue
+			}
+			info, err := os.Stat(candidate)
+			if err != nil || !info.IsDir() {
+				continue
+			}
+			if err := os.RemoveAll(candidate); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+	})
+
+	// Subtitle file serving — wildcard must be alone under /subs/
 	router.GET("/subs/*filename", func(c *gin.Context) { server.SubsSend(c, videosRoots) })
+
+	// Subtitle API — separate prefix avoids wildcard conflict
+	router.GET("/api/subs/info", func(c *gin.Context) { server.SubsInfo(c, videosRoots) })
+	router.GET("/api/subs/search", func(c *gin.Context) { server.SubsSearch(c, videosRoots) })
+	router.POST("/api/subs/download", func(c *gin.Context) { server.SubsDownload(c, videosRoots) })
+	router.POST("/api/subs/extract", func(c *gin.Context) { server.SubsExtract(c, videosRoots) })
+	router.POST("/api/subs/whisper", func(c *gin.Context) { server.SubsWhisper(c, videosRoots) })
+	router.GET("/api/subs/whisper/status", server.SubsWhisperStatus)
 
 	router.GET("/remote", func(c *gin.Context) {
 		c.File("remote.html")
