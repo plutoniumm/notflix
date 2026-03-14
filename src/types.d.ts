@@ -15,3 +15,13 @@ interface DiskInfo {
   free: number
   total: number
 }
+
+interface DownloadRecord {
+  videoParam: string
+  title: string
+  key: string
+  size: number
+  status: 'downloading' | 'done' | 'error'
+  downloadedAt: number | null
+  bgFetchId: string | null
+}

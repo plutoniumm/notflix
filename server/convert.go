@@ -81,6 +81,9 @@ func convertRoot(root string) {
 		}
 
 		ext := strings.ToLower(filepath.Ext(d.Name()))
+		if ext == ".mp4" || ext == ".webm" {
+			return nil
+		}
 		if ext != ".mkv" && ext != ".mov" {
 			return nil
 		}
@@ -91,7 +94,7 @@ func convertRoot(root string) {
 		go func(p string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			convertToMP4(p)
+			toWebM(p)
 		}(path)
 
 		return nil
@@ -100,15 +103,15 @@ func convertRoot(root string) {
 	wg.Wait()
 }
 
-func convertToMP4(srcPath string) {
+func toWebM(srcPath string) {
 	ext := filepath.Ext(srcPath)
 	base := srcPath[:len(srcPath)-len(ext)]
-	mp4Path := base + ".mp4"
+	webmPath := base + ".webm"
 	name := filepath.Base(srcPath)
 
-	if _, err := os.Stat(mp4Path); err == nil {
+	if _, err := os.Stat(webmPath); err == nil {
 		log.Printf("Incomplete conversion detected, restarting: %s", name)
-		os.Remove(mp4Path)
+		os.Remove(webmPath)
 	}
 
 	setProgress(name, 0)
@@ -120,9 +123,8 @@ func convertToMP4(srcPath string) {
 	}
 
 	dur := duration(srcPath)
-	videoCodec, audioCodec := codecs(srcPath)
 
-	if err := remux(srcPath, mp4Path, videoCodec, audioCodec, dur, name); err != nil {
+	if err := remux(srcPath, webmPath, dur, name); err != nil {
 		log.Printf("Conversion failed %s: %v", name, err)
 		return
 	}
@@ -194,12 +196,17 @@ func codecs(videoPath string) (videoCodec, audioCodec string) {
 	return run("v:0"), run("a:0")
 }
 
-func remux(src, dst, videoCodec, audioCodec string, durationSec float64, name string) error {
+func remux(src, dst string, durationSec float64, name string) error {
 	tmp := dst + ".tmp"
 
-	args := []string{"-nostdin", "-i", src}
-	args = append(args, codecArgs(videoCodec, audioCodec)...)
-	args = append(args, "-movflags", "+faststart", "-f", "mp4", tmp)
+	args := []string{
+		"-nostdin", "-i", src,
+		"-map", "0:v:0", "-map", "0:a:0",
+		"-c:v", "libvpx-vp9", "-quality", "good", "-cpu-used", "4",
+		"-b:v", "0", "-crf", "28", "-row-mt", "1",
+		"-c:a", "libopus", "-b:a", "128k", "-ac", "2",
+		"-f", "webm", tmp,
+	}
 
 	pw := &progressWriter{name: name, durationSec: durationSec}
 	cmd := exec.Command("ffmpeg", args...)

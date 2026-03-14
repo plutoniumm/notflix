@@ -1,91 +1,75 @@
-import { GET } from '.';
+import { GET, POST } from '.';
 
-const Enc = encodeURIComponent
+const E = encodeURIComponent;
 
-export async function initSubs (player: any, raw: string, sub: string) {
-  const info = await GET(`/api/subs/info?file=${Enc(raw)}`)
+export default {
+  async start (player: any, raw: string, sub: string) {
+    const info = await GET(`/api/subs/info?file=${E(raw)}`);
+    if (!info || info.vtt) return;
 
-  if (!info || info.vtt) return
-
-  if (info.srt) {
-    reloadTrack(player, `/subs/${sub}`, 'English')
-    return
-  }
-
-  if (info.embedded?.length > 0) {
-    const eng =
-      info.embedded.find((t: any) => ['en', 'eng'].includes(t.language)) ??
-      info.embedded[0]
-    await fetch('/api/subs/extract', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file: raw, track: eng.index }),
-    })
-
-    reloadTrack(player, `/subs/${sub}`, 'English')
-  }
-}
-
-export async function searchSubs (raw: string): Promise<any[] | null> {
-  const res = await GET(`/api/subs/search?file=${Enc(raw)}`)
-
-  return res?.results?.length ? res.results : null
-}
-
-export async function startWhisper (
-  raw: string,
-  onMsg: (s: string) => void,
-  onDone: () => void,
-) {
-  onMsg('Generating subtitles with Whisper…')
-  await fetch('/api/subs/whisper', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ file: raw }),
-  })
-
-  const timer = setInterval(async () => {
-    const s = await GET(`/api/subs/whisper/status?file=${Enc(raw)}`)
-    if (!s) return
-
-    if (s.status === 'done') {
-      clearInterval(timer)
-      onDone()
-    } else if (s.status === 'error') {
-      clearInterval(timer)
-      onMsg('Whisper failed: ' + (s.error || 'unknown'))
+    if (info.srt) {
+      this.reload(player, `/subs/${sub}`, 'English');
+      return;
     }
-  }, 3000)
-}
 
-export function reloadTrack (
-  player: any,
-  src: string,
-  label: string,
-  show = label === 'English'
-) {
-  const tracks = player.remoteTextTracks()
+    if (!info.embedded?.length) return;
+    const L = info.embedded;
 
-  for (let i = tracks.length - 1; i >= 0; i--) {
-    if (tracks[i].label === label)
-      player.removeRemoteTextTrack(tracks[i])
-  }
+    const eng = L.find((t: any) => ['en', 'eng'].includes(t.language)) ?? L[0];
+    await POST('/api/subs/extract', {
+      file: raw,
+      track: eng.index
+    });
 
-  player.addRemoteTextTrack({
-    kind: 'captions',
-    src,
-    srclang: 'en',
-    label,
-    default: show
-  }, false)
+    this.reload(player, `/subs/${sub}`, 'English');
+  },
 
-  if (show) {
-    setTimeout(() => {
-      const all = player.textTracks()
-      for (let i = 0; i < all.length; i++) {
-        if (all[i].label === label)
-          all[i].mode = 'showing'
+  async search (raw: string): Promise<any[] | null> {
+    let res = await GET(`/api/subs/search?file=${E(raw)}`);
+
+    return res?.results?.length ? res.results : null;
+  },
+
+  reload (player: any, src: string, label: string, show = label === 'English') {
+    const tracks = player.remoteTextTracks();
+    for (let i = tracks.length - 1; i >= 0; i--) {
+      if (tracks[i].label === label)
+        player.removeRemoteTextTrack(tracks[i]);
+    }
+
+    player.addRemoteTextTrack({
+      kind: 'captions',
+      src, srclang: 'en',
+      label,
+      default: show
+    }, false);
+
+    if (show) {
+      setTimeout(() => {
+        const all = player.textTracks();
+        for (let i = 0; i < all.length; i++) {
+          if (all[i].label === label)
+            all[i].mode = 'showing';
+        }
+      }, 100);
+    }
+  },
+
+  async whisper (raw: string, onMsg: (s: string) => void, onDone: () => void) {
+    onMsg('Generating subtitles with Whisper…');
+    await POST('/api/subs/whisper', { file: raw });
+
+    const timer = setInterval(async () => {
+      const s = await GET(`/api/subs/whisper/status?file=${E(raw)}`);
+
+      if (!s) return;
+      if (s.status === 'done') {
+        clearInterval(timer);
+        onDone();
+      } else if (s.status === 'error') {
+        clearInterval(timer);
+        onMsg('Whisper failed: ' + (s.error || 'unknown'));
       }
-    }, 100)
-  }
-}
+    }, 3000);
+  },
+} as const;

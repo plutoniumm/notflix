@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { cleanName } from "./lib/video";
+  import { clean } from "./lib/video";
+  import { POST, GET, DEL } from "./lib";
 
   let data: Record<string, string[]> = $state({});
   let disks: DiskInfo[] = $state([]);
@@ -9,7 +10,7 @@
   let val = $state("");
 
   function focus(el: HTMLInputElement) {
-    el.focus();
+    el.focus()
     el.select();
   }
 
@@ -26,8 +27,8 @@
     loading = true;
 
     [data, disks] = await Promise.all([
-      fetch("/api/manage/list").then((r) => r.json()),
-      fetch("/api/manage/diskinfo").then((r) => r.json()),
+      GET("/api/manage/list"),
+      GET("/api/manage/diskinfo"),
     ]);
 
     loading = false;
@@ -51,13 +52,7 @@
 
     if (!path || !name) return;
 
-    const res = await fetch("/api/rename", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, name }),
-    })
-      .then((r) => r.json())
-      .catch(() => ({ ok: false }));
+    const res = await POST("/api/rename", { path, name });
 
     if (res.ok) {
       await load();
@@ -70,7 +65,7 @@
     const rel = dir === "." ? filename : `${dir}/${filename}`;
     if (!confirm(`Delete "${filename}"?`)) return;
 
-    await fetch(`/video/${rel}`, { method: "DELETE" });
+    await DEL(`/video/${rel}`);
     await load();
   }
 
@@ -82,11 +77,7 @@
     )
       return;
 
-    const res = await fetch(`/api/dir?path=${encodeURIComponent(dir)}`, {
-      method: "DELETE",
-    })
-      .then((r) => r.json())
-      .catch(() => ({ ok: false }));
+    const res = await DEL(`/api/dir?path=${encodeURIComponent(dir)}`);
 
     if (!res.ok) {
       alert("Delete failed: " + (res.error ?? "unknown"));
@@ -116,7 +107,7 @@
 </script>
 
 <div style="min-height:100vh">
-  <header class="f fw al-ct g10">
+  <header class="f fw al-ct g10 p-stx">
     <a href="/" class="back fs-base c-muted"> ← Home </a>
     <h1 class="m0 fw6">Manage Library</h1>
     <span class="fs-base c-dim">
@@ -149,8 +140,8 @@
     {#if loading}
       <div class="c-dim p20">Loading…</div>
     {:else}
-      {#each rows as [dir, files]}
-        <details class="folder rx5 flow-h">
+      {#each rows as [dir, files], idx}
+        <details class="folder rx5 flow-h" style="--i:{idx}">
           <summary class="folder-hd f al-ct g10 ptr">
             <span class="sh-0" style="font-size:0.95rem">📁</span>
 
@@ -172,7 +163,7 @@
               </form>
             {:else}
               <span class="fw5 fs-md">
-                {dir === "." ? "Root" : cleanName(dir) || dir}
+                {dir === "." ? "Root" : clean(dir) || dir}
               </span>
               <span class="folder-raw fs-xs c-dim trunc">
                 {dir === "." ? "" : dir}
@@ -233,7 +224,7 @@
                 {:else}
                   <div class="file-names">
                     <span class="d-b fs-base c-light trunc">
-                      {cleanName(f)}
+                      {clean(f)}
                     </span>
                     <span class="d-b fs-xs trunc" style="color:#3a3a3a">
                       {f}
@@ -270,7 +261,6 @@
     padding: 20px 40px;
     background: #0a0a0a;
     border-bottom: 1px solid #222;
-    position: sticky;
     top: 0;
     z-index: 10;
   }
@@ -293,11 +283,14 @@
   main {
     padding: 24px 40px 60px;
     max-width: 960px;
+    --i: 0;
   }
 
   .folder {
     border: 1px solid #2a2a2a;
     margin-bottom: 8px;
+    animation: slide-up 0.25s ease both;
+    animation-delay: calc(var(--i) * 40ms);
   }
 
   .folder-hd {

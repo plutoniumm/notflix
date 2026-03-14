@@ -1,42 +1,135 @@
 <script lang="ts">
   import { onMount } from "svelte";
+
   import videojs from "video.js";
   import "video.js/dist/video-js.css";
-  import { cleanName, subPath, parseRaw, vidURL } from "./lib/video";
-  import { Tracker } from "./lib/tracker";
-  import { initSubs, searchSubs, startWhisper, reloadTrack } from "./lib/subs";
-  import { addHotkeys } from "./lib/hotkeys";
-  import SubsPicker from "./SubsPicker.svelte";
+  import SubsPicker from "./Subs.svelte";
+  import DownloadButton from "./Download.svelte";
 
-  let { videoParam }: { videoParam: string } = $props();
+  import { clean, parseRaw, vidURL, nextVid } from "./lib/video";
+  import { Quality, Subs, GET, POST, Tracker } from "./lib";
+  import { Touch, Hotkeys } from "./lib/ux";
+
+  let { videoParam }: any = $props();
 
   const { dir, name } = parseRaw(videoParam);
-  const title = cleanName(name);
-  const sub = subPath(videoParam);
+  const title = clean(name);
+  const sub = videoParam.replace(/\.mp4$/i, ".vtt");
 
-  let videoEl = $state<HTMLVideoElement | undefined>(undefined);
+  const autoplay =
+    new URLSearchParams(window.location.search).get("autoplay") === "1";
+  const embed = window.location.pathname === "/embed";
+  const tracker = new Tracker();
+
+  let videoEl: HTMLVideoElement | undefined;
+  let pageEl: HTMLElement | undefined;
   let player: any = null;
   let subs = $state<any[] | null>(null);
   let wMsg = $state("");
   let nextURL = $state<string | null>(null);
   let rows = $state<[string, any[]][]>([]);
+  let videoKey = $state("");
   let paused = $state(true);
   let hideUI = $state(false);
-  let timer: ReturnType<typeof setTimeout>;
+  let quality = $state(localStorage.getItem(Quality.key) ?? "auto");
+  let maxHeight = $state<number | null>(null);
+  let autoQ = $state("original");
+  let speedMbps = $state<number | null>(null);
+  let videoDuration = $state(0);
 
-  const tracker = new Tracker();
-  const autoplay =
-    new URLSearchParams(window.location.search).get("autoplay") === "1";
-  const embed = window.location.pathname === "/embed";
+  let player_ready = false;
+  let switching = false;
+  let uiTimer: ReturnType<typeof setTimeout>;
+  let waitingDebounce: ReturnType<typeof setTimeout>;
+  let speedWorker: Worker | null = null;
+
+  let availableLevels = $derived(
+    Quality.levels.filter((l) => maxHeight === null || l.h <= maxHeight),
+  );
+  let autoLabel = $derived(
+    Quality.levels.find((l) => l.q === autoQ)?.label ?? "Original",
+  );
+
+  function applyQualityAt(q: string, seek = 0) {
+    if (!player || !player_ready) return;
+
+    switching = true;
+    player.src({
+      src: Quality.src(videoParam, q, seek),
+      type: Quality.type(q),
+    });
+
+    player.ready(() => {
+      if (q === "original" && seek > 0) player.currentTime(seek);
+      switching = false;
+      player.play().catch(() => {});
+    });
+  }
+
+  function tryAutoSwitch() {
+    if (quality !== "auto" || speedMbps === null || maxHeight === null) return;
+
+    const aq = Quality.auto(speedMbps, maxHeight);
+    if (aq !== autoQ) {
+      autoQ = aq;
+      applyQualityAt(aq, player?.currentTime() ?? 0);
+    }
+  }
+
+  function setQuality(q: string) {
+    quality = q;
+    localStorage.setItem(Quality.key, q);
+    if (q === "auto") {
+      tryAutoSwitch();
+      return;
+    }
+
+    applyQualityAt(q, player?.currentTime() ?? 0);
+  }
 
   function showUI() {
     hideUI = false;
-    clearTimeout(timer);
-
+    clearTimeout(uiTimer);
     if (!paused)
-      timer = setTimeout(() => {
+      uiTimer = setTimeout(() => {
         hideUI = true;
       }, 3000);
+  }
+
+  async function fetchSubs() {
+    const results = await Subs.search(videoParam);
+    if (!results) {
+      alert("No subtitles found on OpenSubtitles.");
+      return;
+    }
+    subs = results;
+  }
+
+  async function selectSub(fid: number) {
+    const res = await POST("/api/subs/download", {
+      file_id: fid,
+      file: videoParam,
+    });
+    if (res?.ok) {
+      subs = null;
+      Subs.reload(player, `/subs/${sub}`, "English");
+    }
+  }
+
+  async function runWhisper() {
+    await Subs.whisper(
+      videoParam,
+      (msg) => (wMsg = msg),
+      () => {
+        wMsg = "";
+        Subs.reload(
+          player,
+          `/subs/${sub.replace(/\.vtt$/, ".whisper.vtt")}`,
+          "Whisper",
+          true,
+        );
+      },
+    );
   }
 
   onMount(() => {
@@ -50,7 +143,11 @@
       playbackRates: [0.5, 1, 1.25, 1.5, 2],
     });
 
-    player.src({ src: `/video/${videoParam}`, type: "video/mp4" });
+    const initQ = quality === "auto" ? "480p" : quality;
+    player.src({
+      src: Quality.src(videoParam, initQ),
+      type: Quality.type(initQ),
+    });
 
     player.addRemoteTextTrack(
       {
@@ -71,15 +168,34 @@
     player.on("pause", () => {
       paused = true;
       hideUI = false;
-      clearTimeout(timer);
+      clearTimeout(uiTimer);
     });
 
-    player.ready(async () => {
+    player.on("loadedmetadata", () => {
+      if (videoDuration > 0 && player.duration() === Infinity)
+        player.duration(videoDuration);
+    });
+
+    player.on("waiting", () => {
+      if (switching) return;
+      clearTimeout(waitingDebounce);
+      waitingDebounce = setTimeout(
+        () => speedWorker?.postMessage({ type: "measure" }),
+        3000,
+      );
+    });
+
+    player.on("playing", () => clearTimeout(waitingDebounce));
+
+    player.ready(() => {
+      player_ready = true;
+      tryAutoSwitch();
       if (autoplay) player.play();
       const saved = tracker.get(videoParam);
       if (saved > 0) player.currentTime(saved);
 
-      addHotkeys(
+      Touch(player, pageEl!);
+      Hotkeys(
         player,
         () => {
           if (nextURL) window.location.href = nextURL;
@@ -91,11 +207,9 @@
             if (
               (t.kind === "captions" || t.kind === "subtitles") &&
               t.mode === "showing"
-            ) {
+            )
               t.mode = "hidden";
-            }
           }
-
           runWhisper();
         },
       );
@@ -109,80 +223,64 @@
       }, 2000);
     });
 
-    initSubs(player, videoParam, sub);
+    Subs.start(player, videoParam, sub);
 
-    fetch("/list/video")
-      .then((r) => r.json())
-      .then((data: VideoData) => {
+    const heightFallback = setTimeout(() => {
+      if (maxHeight === null) {
+        maxHeight = 1080;
+        tryAutoSwitch();
+      }
+    }, 5000);
+
+    GET(`/api/video/info?file=${encodeURIComponent(videoParam)}`)
+      .then((info: { height: number; duration: number }) => {
+        clearTimeout(heightFallback);
+
+        maxHeight = info.height > 0 ? info.height : 1080;
+        if (info.duration > 0) videoDuration = info.duration;
+
+        tryAutoSwitch();
+      })
+      .catch(() => {
+        clearTimeout(heightFallback);
+        maxHeight = 1080;
+        tryAutoSwitch();
+      });
+
+    speedWorker = new Worker(new URL("./lib/speedWorker.ts", import.meta.url), {
+      type: "module",
+    });
+    speedWorker.onmessage = (e: MessageEvent<number>) => {
+      speedMbps = e.data;
+      tryAutoSwitch();
+    };
+
+    GET("/list/video")
+      .then((data) => {
         rows = Object.entries(data).filter(([, files]) => files?.length > 0);
-        nextURL = nextVid(data);
+
+        nextURL = nextVid(data, dir, name, autoplay);
+        videoKey = data[dir]?.find((f) => f.name === name)?.key ?? "";
       })
       .catch(() => {});
 
     return () => {
-      clearTimeout(timer);
+      clearTimeout(uiTimer);
+      clearTimeout(waitingDebounce);
+      speedWorker?.terminate();
       player?.dispose();
     };
   });
-
-  function nextVid(data: VideoData): string | null {
-    const files = data[dir] ?? [];
-    const idx = files.findIndex((f) => f.name === name);
-
-    if (idx === -1 || idx === files.length - 1) return null;
-
-    return vidURL(dir, files[idx + 1].name, autoplay);
-  }
-
-  async function fetchSubs() {
-    const results = await searchSubs(videoParam);
-
-    if (!results) {
-      alert("No subtitles found on OpenSubtitles.");
-      return;
-    }
-
-    subs = results;
-  }
-
-  async function selectSub(fid: number) {
-    const res = await fetch("/api/subs/download", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_id: fid, file: videoParam }),
-    })
-      .then((r) => r.json())
-      .catch(() => ({ ok: false }));
-
-    if (res.ok) {
-      subs = null;
-      reloadTrack(player, `/subs/${sub}`, "English");
-    }
-  }
-
-  async function runWhisper() {
-    await startWhisper(
-      videoParam,
-      (msg) => (wMsg = msg),
-      () => {
-        wMsg = "";
-        reloadTrack(
-          player,
-          `/subs/${sub.replace(/\.vtt$/, ".whisper.vtt")}`,
-          "Whisper",
-          true,
-        );
-      },
-    );
-  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+  bind:this={pageEl}
   class="player-page"
   class:hide-ui={hideUI}
   class:embed
   onmousemove={showUI}
+  ontouchstart={showUI}
 >
   {#if !embed}
     <div class="player-bar f al-ct g10">
@@ -191,9 +289,30 @@
         {dir !== "." ? `${dir} / ` : ""}{title}
       </h1>
 
-      <div class="f g5 sh-0">
+      <div class="f g5 sh-0 al-ct">
+        <select
+          class="quality-select"
+          onchange={(e) => setQuality(e.currentTarget.value)}
+        >
+          <option value="auto" selected={quality === "auto"}>
+            Auto ({autoLabel})
+          </option>
+          <option value="original" selected={quality === "original"}>
+            Original
+          </option>
+
+          {#each availableLevels as lvl (lvl.q)}
+            <option value={lvl.q} selected={quality === lvl.q}>
+              {lvl.label}
+            </option>
+          {/each}
+        </select>
         <button class="btn-ghost" onclick={fetchSubs}> Fetch Subs </button>
         <button class="btn-ghost" onclick={runWhisper}> Whisper </button>
+
+        {#if videoKey}
+          <DownloadButton {videoParam} {title} key={videoKey} />
+        {/if}
       </div>
     </div>
   {/if}
@@ -206,9 +325,7 @@
   </div>
 
   {#if wMsg}
-    <div class="whisper-msg p-abs fs-base c-red rx5">
-      {wMsg}
-    </div>
+    <div class="whisper-msg p-abs fs-base c-red rx5">{wMsg}</div>
   {/if}
 
   {#if !embed && rows.length > 0 && paused}
@@ -233,7 +350,7 @@
                   class="w-100"
                 />
                 <span class="d-b fs-xs c-muted trunc">
-                  {cleanName(f.name)}
+                  {clean(f.name)}
                 </span>
               </a>
             {/each}
@@ -280,6 +397,7 @@
       transparent 100%
     );
     transition: opacity 0.3s;
+    animation: slide-down 0.3s ease;
   }
   .player-page.hide-ui .player-bar {
     opacity: 0;
@@ -320,6 +438,7 @@
       rgba(0, 0, 0, 0.9) 0%,
       transparent 100%
     );
+    animation: slide-up 0.25s ease;
   }
 
   .related-list {
@@ -346,7 +465,6 @@
   .serie.active span {
     color: #fff;
   }
-
   .serie img {
     aspect-ratio: 16/9;
     background: #222;
@@ -354,5 +472,22 @@
   .serie span {
     padding: 4px 4px 6px;
     background: #1a1a1a;
+  }
+
+  .quality-select {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: #ddd;
+    font-size: 0.8rem;
+    padding: 3px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .quality-select:hover {
+    border-color: #fff;
+    color: #fff;
+  }
+  .quality-select option {
+    background: #141414;
   }
 </style>
