@@ -126,6 +126,8 @@ func main() {
 
 	router.GET("/", func(c *gin.Context) { pulse(); c.File("index.html") })
 	router.GET("/manage", func(c *gin.Context) { c.File("index.html") })
+	router.StaticFile("/manifest.json", "./public/manifest.json")
+	router.StaticFile("/sw.js", "./public/sw.js")
 	router.Static("/assets", assDir)
 
 	router.GET("/list/video", func(c *gin.Context) { listAll(c, roots) })
@@ -139,6 +141,16 @@ func main() {
 			return
 		}
 		server.VideoPlayer(c, root)
+	})
+
+	router.HEAD("/video/*filename", func(c *gin.Context) {
+		fname := c.Param("filename")
+		root, _, ok := findRoot(fname, roots)
+		if !ok {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		server.VideoHead(c, root)
 	})
 
 	router.GET("/images/:filename", func(c *gin.Context) {
@@ -311,6 +323,7 @@ func main() {
 
 	router.GET("/subs/*filename", func(c *gin.Context) { server.SubsSend(c, roots) })
 
+	router.GET("/api/video/info", func(c *gin.Context) { server.VideoInfo(c, roots) })
 	router.GET("/api/subs/info", func(c *gin.Context) { server.Subctx(c, roots) })
 	router.GET("/api/subs/search", func(c *gin.Context) { server.SubsSearch(c, roots) })
 	router.POST("/api/subs/download", func(c *gin.Context) { server.GetSubs(c, roots) })

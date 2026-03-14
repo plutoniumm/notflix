@@ -21,6 +21,8 @@ lerna-debug.log*
 .pnpm-debug.log*
 pnpm-lock.*
 tests.txt
+speedWorker-*.js
+*.map
 
 *.br
 *.gz

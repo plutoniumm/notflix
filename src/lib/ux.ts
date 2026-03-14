@@ -1,4 +1,45 @@
-export function addHotkeys (
+export function Touch (player: any, el: HTMLElement) {
+  let [last, prev] = [0, 0];
+
+  el.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    const touch = e.changedTouches[0];
+    const x = touch.clientX;
+    const w = el.clientWidth;
+
+    if (
+      now - last < 300
+      && Math.abs(x - prev) < 80
+    ) {
+      e.preventDefault();
+      if (x < w / 3) {
+        seek(player, -10);
+        ripple(el, x, touch.clientY, '−10s');
+      } else if (x > (2 * w) / 3) {
+        seek(player, 10);
+        ripple(el, x, touch.clientY, '+10s');
+      } else {
+        player.paused() ? player.play() : player.pause();
+      }
+      last = 0;
+    } else {
+      last = now;
+      prev = x;
+    }
+  }, { passive: false });
+}
+
+function ripple (el: HTMLElement, x: number, y: number, label: string) {
+  const r = document.createElement('div');
+  r.className = 'tap-ripple';
+  r.textContent = label;
+  r.style.cssText = `left:${x}px;top:${y}px`;
+  el.appendChild(r);
+
+  setTimeout(() => r.remove(), 700);
+}
+
+export function Hotkeys (
   player: any,
   onNext: () => void,
   onWhisper: () => void

@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { cleanName, vidURL } from "./lib/video";
+  import { clean, vidURL } from "./lib/video";
   import { GET } from "./lib";
+  import { Down } from "./lib/dl";
 
   let data: VideoData = $state({});
   let search = $state("");
   let loading = $state(true);
   let jobs: Job[] = $state([]);
+  let downloadedSet = $state(new Set<string>());
 
   async function pollJobs() {
     jobs = (await GET("/api/conversions")) || [];
@@ -18,8 +20,27 @@
 
     pollJobs();
 
+    Down.all().then((records) => {
+      downloadedSet = new Set(
+        records.filter((r) => r.status === "done").map((r) => r.videoParam),
+      );
+    });
+
+    const unsubSW = Down.on((videoParam, record) => {
+      const next = new Set(downloadedSet);
+      if (record?.status === "done") {
+        next.add(videoParam);
+      } else {
+        next.delete(videoParam);
+      }
+      downloadedSet = next;
+    });
+
     const timer = setInterval(pollJobs, 2000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      unsubSW();
+    };
   });
 
   let rows = $derived(
@@ -35,7 +56,7 @@
         .filter((f) => {
           const name = f.name.toLowerCase();
 
-          cleanName(name).includes(q) || name.includes(q);
+          clean(name).includes(q) || name.includes(q);
         })
         .map((f) => ({ dir, ...f })),
     );
@@ -47,7 +68,7 @@
 </script>
 
 <div style="min-height: 100vh;">
-  <header class="f al-ct g20">
+  <header class="f al-ct g20 p-stx">
     <!-- <a href="/" class="logo fw7">NOTFLIX</a> -->
     <a href="/">
       <img src="/assets/tight.svg" alt="Notflix" height="50" />
@@ -100,7 +121,7 @@
 
             <div class="card-info">
               <span class="card-name">
-                {cleanName(item.name)}
+                {clean(item.name)}
               </span>
               {#if item.dir !== "."}
                 <span class="card-dir">
@@ -120,7 +141,7 @@
         {#if files?.length}
           <section class="row">
             <h2>
-              {dir === "." ? "Movies" : cleanName(dir) || dir}
+              {dir === "." ? "Movies" : clean(dir) || dir}
             </h2>
 
             <div class="row-wrap f al-ct p-rel">
@@ -134,6 +155,7 @@
 
               <div class="cards f flow-x-s g5">
                 {#each files as f (f.key)}
+                  {@const vidParam = dir === "." ? f.name : `${dir}/${f.name}`}
                   <a
                     href={vidURL(dir, f.name)}
                     class="card ptr rx5 flow-h p-rel"
@@ -146,10 +168,16 @@
                         loading="lazy"
                       />
                       <div class="play-icon p-abs cc o-0">▶</div>
+                      {#if downloadedSet.has(vidParam)}
+                        <div
+                          class="offline-dot p-abs"
+                          title="Available offline"
+                        ></div>
+                      {/if}
                     </div>
 
                     <div class="card-name">
-                      {cleanName(f.name)}
+                      {clean(f.name)}
                     </div>
                   </a>
                 {/each}
@@ -200,7 +228,6 @@
 
 <style>
   header {
-    position: sticky;
     top: 0;
     z-index: 100;
     background: linear-gradient(to bottom, #000 80%, transparent);
@@ -315,6 +342,11 @@
   .row-wrap:hover .arrow {
     opacity: 1;
   }
+  @media (hover: none) {
+    .arrow {
+      opacity: 0.5;
+    }
+  }
   .arrow:hover {
     background: rgba(0, 0, 0, 0.9);
   }
@@ -331,6 +363,31 @@
       transform 0.2s,
       box-shadow 0.2s;
     z-index: 1;
+    animation: slide-up 0.3s ease both;
+  }
+  .cards .card:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .cards .card:nth-child(2) {
+    animation-delay: 30ms;
+  }
+  .cards .card:nth-child(3) {
+    animation-delay: 60ms;
+  }
+  .cards .card:nth-child(4) {
+    animation-delay: 90ms;
+  }
+  .cards .card:nth-child(5) {
+    animation-delay: 120ms;
+  }
+  .cards .card:nth-child(6) {
+    animation-delay: 150ms;
+  }
+  .cards .card:nth-child(7) {
+    animation-delay: 180ms;
+  }
+  .cards .card:nth-child(8) {
+    animation-delay: 210ms;
   }
   .card:hover {
     transform: scale(1.08);
@@ -351,6 +408,16 @@
   }
   .card:hover .play-icon {
     opacity: 1;
+  }
+
+  .offline-dot {
+    bottom: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4ade80;
+    box-shadow: 0 0 4px rgba(74, 222, 128, 0.8);
   }
 
   .card-name {
@@ -380,6 +447,7 @@
     border: 1px solid #333;
     z-index: 200;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    animation: slide-in-r 0.3s ease;
   }
 
   .header {

@@ -1,14 +1,5 @@
 <script lang="ts">
-  let {
-    results,
-    onSelect,
-    onClose,
-  }: {
-    results: any[];
-    onSelect: (fid: number) => void;
-    onClose: () => void;
-  } = $props();
-
+  let { results, onSelect, onClose }: any = $props();
   let busy = $state<number | null>(null);
 
   async function pick(fid: number) {
@@ -66,6 +57,7 @@
     inset: 0;
     background: rgba(0, 0, 0, 0.8);
     z-index: 1000;
+    animation: fade-in 0.2s ease;
   }
 
   .modal {
@@ -74,6 +66,7 @@
     width: 560px;
     max-width: 90vw;
     max-height: 70vh;
+    animation: slide-up 0.25s ease;
   }
 
   .modal-hd {
@@ -101,11 +94,9 @@
 
   .sub-item {
     padding: 10px 20px;
-    border-bottom: 1px solid #2a2a2a;
     background: none;
-    border-top: none;
-    border-left: none;
-    border-right: none;
+    border: none;
+    border-bottom: 1px solid #2a2a2a;
     color: #fff;
     text-align: left;
     transition: background 0.1s;

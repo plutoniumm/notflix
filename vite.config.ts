@@ -7,6 +7,7 @@ export default defineConfig({
   build: {
     outDir: 'public',
     emptyOutDir: false,
+    sourcemap: true,
     rollupOptions: {
       input: 'src/main.ts',
       output: {
