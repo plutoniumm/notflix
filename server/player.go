@@ -74,7 +74,7 @@ func serveTranscoded(c *gin.Context, path string, quality string) {
 	seek, _ := strconv.ParseFloat(c.Query("seek"), 64)
 
 	ctx := c.Request.Context()
-	args := []string{}
+	args := []string{"-v", "error"}
 	if seek > 0 {
 		args = append(args, "-ss", fmt.Sprintf("%.3f", seek))
 	}

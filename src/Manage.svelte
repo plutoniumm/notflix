@@ -10,7 +10,7 @@
   let val = $state("");
 
   function focus(el: HTMLInputElement) {
-    el.focus()
+    el.focus();
     el.select();
   }
 
