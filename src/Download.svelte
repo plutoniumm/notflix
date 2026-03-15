@@ -96,12 +96,57 @@
 {#if show}
   <div class="dl-wrap f al-ct g5">
     {#if !bgfetch}
-      <a class="btn-ghost" href="/video/{videoParam}" download={title}>
-        ⬇ Download
+      <a
+        class="icon-btn"
+        href="/video/{videoParam}"
+        download={title}
+        title="Download"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 3v13M5 12l7 7 7-7" /><line
+            x1="4"
+            y1="21"
+            x2="20"
+            y2="21"
+          />
+        </svg>
       </a>
     {:else if state === "idle" || state === "error"}
-      <button class="btn-ghost" onclick={download} title={storageHint}>
-        {state === "error" ? "Retry ⬇" : "⬇ Download"}
+      <button
+        class="icon-btn"
+        onclick={download}
+        title={state === "error"
+          ? `Retry — ${storageHint}`
+          : storageHint || "Download"}
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={state === "error" ? "#f87171" : "currentColor"}
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 3v13M5 12l7 7 7-7" /><line
+            x1="4"
+            y1="21"
+            x2="20"
+            y2="21"
+          />
+        </svg>
       </button>
     {:else if state === "downloading"}
       <div class="f al-ct g5">
@@ -129,6 +174,26 @@
 {/if}
 
 <style>
+  .icon-btn {
+    background: none;
+    border: none;
+    color: #ccc;
+    cursor: pointer;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition:
+      color 0.15s,
+      background 0.15s;
+    text-decoration: none;
+  }
+  .icon-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+  }
+
   .prog-bar {
     width: 80px;
     height: 4px;

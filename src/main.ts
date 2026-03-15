@@ -3,16 +3,12 @@ import App from './App.svelte'
 
 mount(App, { target: document.getElementById('app')! });
 
-const splash = document.getElementById('splash');
-if (splash) {
-  splash.style.opacity = '0';
-
-  splash.addEventListener(
-    'transitionend', () => splash.remove(),
-    { once: true }
-  );
-}
-
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js')
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController)
+      window.location.reload();
+  });
+
+  navigator.serviceWorker.register('/sw.js');
 }

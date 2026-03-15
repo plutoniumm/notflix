@@ -9,7 +9,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	astiffprobe "github.com/asticode/go-astiffprobe"
 )
+
+var prober = astiffprobe.New(astiffprobe.Configuration{BinaryPath: "ffprobe"})
 
 func Error(message string, c *gin.Context, statusCode int) {
 	fmt.Println("Error:", message)

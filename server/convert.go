@@ -1,7 +1,7 @@
 package server
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -160,42 +160,28 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 }
 
 func duration(path string) float64 {
-	cmd := exec.Command("ffprobe",
-		"-v", "error",
-		"-show_entries", "format=duration",
-		"-of", "default=noprint_wrappers=1:nokey=1",
-		path,
-	)
-
-	out, err := cmd.Output()
+	f, err := prober.Format(context.Background(), path)
 	if err != nil {
 		return 0
 	}
-
-	d, _ := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-
-	return d
+	return f.Duration.Duration.Seconds()
 }
 
 func codecs(videoPath string) (videoCodec, audioCodec string) {
-	run := func(streamSpec string) string {
-		cmd := exec.Command("ffprobe",
-			"-v", "error",
-			"-select_streams", streamSpec,
-			"-show_entries", "stream=codec_name",
-			"-of", "default=noprint_wrappers=1:nokey=1",
-			videoPath,
-		)
-
-		out, err := cmd.Output()
-		if err != nil {
-			return ""
-		}
-
-		return strings.TrimSpace(string(out))
+	streams, err := prober.Streams(context.Background(), videoPath)
+	if err != nil {
+		return "", ""
 	}
-
-	return run("v:0"), run("a:0")
+	
+	for _, s := range streams {
+		switch s.CodecType {
+		case "video":
+			videoCodec = s.CodecName
+		case "audio":
+			audioCodec = s.CodecName
+		}
+	}
+	return
 }
 
 func remux(src, dst string, durationSec float64, name string) error {
@@ -252,27 +238,8 @@ func codecArgs(video, audio string) []string {
 }
 
 func extractSubs(srcPath, vttPath string) {
-	cmd := exec.Command("ffprobe",
-		"-v", "error",
-		"-select_streams", "s",
-		"-show_entries", "stream=index,codec_name:stream_tags=language",
-		"-of", "json",
-		srcPath,
-	)
-	out, err := cmd.Output()
+	streams, err := prober.Streams(context.Background(), srcPath)
 	if err != nil {
-		return
-	}
-
-	var probe struct {
-		Streams []struct {
-			Index     int               `json:"index"`
-			CodecName string            `json:"codec_name"`
-			Tags      map[string]string `json:"tags"`
-		} `json:"streams"`
-	}
-
-	if err := json.Unmarshal(out, &probe); err != nil {
 		return
 	}
 
@@ -280,17 +247,11 @@ func extractSubs(srcPath, vttPath string) {
 	textCodecs := map[string]bool{"subrip": true, "ass": true, "webvtt": true, "mov_text": true}
 
 	idx := -1
-	for _, s := range probe.Streams {
-		if !textCodecs[strings.ToLower(s.CodecName)] {
+	for _, s := range streams {
+		if s.CodecType != "subtitle" || !textCodecs[strings.ToLower(s.CodecName)] {
 			continue
 		}
-
-		lang := ""
-		if s.Tags != nil {
-			lang = strings.ToLower(s.Tags["language"])
-		}
-
-		if english[lang] {
+		if lang, ok := s.Tags["language"]; ok && english[strings.ToLower(lang)] {
 			idx = s.Index
 			break
 		}
