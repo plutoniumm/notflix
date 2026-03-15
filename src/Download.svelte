@@ -12,7 +12,10 @@
     key: string;
   } = $props();
 
-  type State = "unsupported" | "idle" | "downloading" | "done" | "error";
+  type State = "idle" | "downloading" | "done" | "error";
+
+  const bgfetch = isSupported();
+  const show = videoParam.endsWith(".mp4");
 
   let state = $state<State>("idle");
   let progress = $state(0);
@@ -20,13 +23,8 @@
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let unsub: (() => void) | null = null;
 
-  const show = isSupported() && videoParam.endsWith(".mp4");
-
   async function init() {
-    if (!show) {
-      state = "unsupported";
-      return;
-    }
+    if (!bgfetch) return;
 
     const record = await Down.get(videoParam);
     if (record) {
@@ -64,6 +62,7 @@
       state = "downloading";
       progress = 0;
       await Down.start(videoParam, title, key);
+
       const record = await Down.get(videoParam);
       if (record?.bgFetchId) startPolling(record.bgFetchId);
     } catch (e) {
@@ -96,7 +95,11 @@
 
 {#if show}
   <div class="dl-wrap f al-ct g5">
-    {#if state === "idle" || state === "error"}
+    {#if !bgfetch}
+      <a class="btn-ghost" href="/video/{videoParam}" download={title}>
+        ⬇ Download
+      </a>
+    {:else if state === "idle" || state === "error"}
       <button class="btn-ghost" onclick={download} title={storageHint}>
         {state === "error" ? "Retry ⬇" : "⬇ Download"}
       </button>
@@ -105,6 +108,7 @@
         <div class="prog-bar rx2">
           <div class="prog-fill" style="width:{progress}%"></div>
         </div>
+
         <span class="prog-pct">{progress}%</span>
         <button
           class="btn-ghost"

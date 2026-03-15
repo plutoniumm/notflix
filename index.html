@@ -17,9 +17,23 @@
   <link rel="stylesheet" href="/assets/atomic.css">
 
   <title>Notflix</title>
+  <style>
+    #splash {
+      inset: 0;
+      background: #141414;
+      z-index: 9999;
+      transition: opacity 0.4s ease;
+    }
+
+    #splash img {
+      width: 320px;
+      max-width: 80vw;
+    }
+  </style>
 </head>
 
 <body>
+  <div id="splash" class="p-fix cc"><img src="/assets/tight.svg" alt="Notflix" /></div>
   <div id="app"></div>
   <script type="module" src="/assets/notflix.js"></script>
 </body>

@@ -39,6 +39,7 @@
 
   let player_ready = false;
   let switching = false;
+  let streamStart = 0;
   let uiTimer: ReturnType<typeof setTimeout>;
   let waitingDebounce: ReturnType<typeof setTimeout>;
   let speedWorker: Worker | null = null;
@@ -54,6 +55,7 @@
     if (!player || !player_ready) return;
 
     switching = true;
+    streamStart = q === "original" ? 0 : seek;
     player.src({
       src: Quality.src(videoParam, q, seek),
       type: Quality.type(q),
@@ -176,6 +178,16 @@
         player.duration(videoDuration);
     });
 
+    player.on("seeking", () => {
+      if (switching || quality === "original") return;
+
+      const t = player.currentTime() ?? 0;
+      if (t < streamStart - 1) {
+        const q = quality === "auto" ? autoQ : quality;
+        applyQualityAt(q, t);
+      }
+    });
+
     player.on("waiting", () => {
       if (switching) return;
       clearTimeout(waitingDebounce);
@@ -257,7 +269,7 @@
 
     GET("/list/video")
       .then((data) => {
-        rows = Object.entries(data).filter(([, files]) => files?.length > 0);
+        rows = Object.entries(data).filter(([, files]) => files?.length);
 
         nextURL = nextVid(data, dir, name, autoplay);
         videoKey = data[dir]?.find((f) => f.name === name)?.key ?? "";

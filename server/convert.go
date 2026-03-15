@@ -104,10 +104,13 @@ func convertRoot(root string) {
 }
 
 func toWebM(srcPath string) {
-	ext := filepath.Ext(srcPath)
-	base := srcPath[:len(srcPath)-len(ext)]
-	webmPath := base + ".webm"
-	name := filepath.Base(srcPath)
+	dir := filepath.Dir(srcPath)
+	srcName := filepath.Base(srcPath)
+	cleanedBase := CleanName(srcName)
+
+	webmPath := filepath.Join(dir, cleanedBase+".webm")
+	vttPath := filepath.Join(dir, cleanedBase+".vtt")
+	name := srcName
 
 	if _, err := os.Stat(webmPath); err == nil {
 		log.Printf("Incomplete conversion detected, restarting: %s", name)
@@ -117,7 +120,6 @@ func toWebM(srcPath string) {
 	setProgress(name, 0)
 	defer clearProgress(name)
 
-	vttPath := base + ".vtt"
 	if _, err := os.Stat(vttPath); os.IsNotExist(err) {
 		extractSubs(srcPath, vttPath)
 	}
@@ -200,7 +202,7 @@ func remux(src, dst string, durationSec float64, name string) error {
 	tmp := dst + ".tmp"
 
 	args := []string{
-		"-nostdin", "-i", src,
+		"-nostdin", "-v", "error", "-i", src,
 		"-map", "0:v:0", "-map", "0:a:0",
 		"-c:v", "libvpx-vp9", "-quality", "good", "-cpu-used", "4",
 		"-b:v", "0", "-crf", "28", "-row-mt", "1",
@@ -298,7 +300,7 @@ func extractSubs(srcPath, vttPath string) {
 		return
 	}
 
-	extractCmd := exec.Command("ffmpeg", "-y", "-i", srcPath,
+	extractCmd := exec.Command("ffmpeg", "-y", "-v", "quiet", "-i", srcPath,
 		"-map", fmt.Sprintf("0:%d", idx),
 		vttPath,
 	)
