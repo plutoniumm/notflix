@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -250,20 +251,19 @@ func VideoInfo(c *gin.Context, roots []string) {
 		return
 	}
 
-	out, err := exec.Command("ffprobe",
-		"-v", "quiet",
-		"-select_streams", "v:0",
-		"-show_entries", "stream=height",
-		"-of", "csv=p=0",
-		path,
-	).Output()
+	streams, err := prober.Streams(context.Background(), path)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	height, _ := strconv.Atoi(strings.TrimSpace(string(out)))
-	dur := duration(path) // reuses duration() from convert.go
+	height := 0
+	for _, s := range streams {
+		if s.CodecType == "video" {
+			height = s.Height
+			break
+		}
+	}
+	dur := duration(path)
 	c.JSON(http.StatusOK, gin.H{"height": height, "duration": dur})
 }
 

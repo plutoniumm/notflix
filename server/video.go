@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/rand"
@@ -8,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -62,18 +62,16 @@ func GetVids(dir string) []string {
 }
 
 func makeThumb(src, dst string) error {
-	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration",
-		"-of", "default=noprint_wrappers=1:nokey=1", src)
-	out, err := cmd.Output()
+	f, err := prober.Format(context.Background(), src)
 	if err != nil {
 		return err
 	}
-	dur, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-	if err != nil || dur == 0 {
+	dur := f.Duration.Duration.Seconds()
+	if dur == 0 {
 		return fmt.Errorf("invalid duration")
 	}
 	ts := fmt.Sprintf("%.2f", dur/2+rand.Float64()*10-5)
-	cmd = exec.Command("ffmpeg", "-y", "-v", "quiet", "-ss", ts, "-i", src, "-vframes", "1", dst)
+	cmd := exec.Command("ffmpeg", "-y", "-v", "quiet", "-ss", ts, "-i", src, "-vframes", "1", dst)
 	return cmd.Run()
 }
 

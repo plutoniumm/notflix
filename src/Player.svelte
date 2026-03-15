@@ -42,7 +42,10 @@
   let streamStart = 0;
   let uiTimer: ReturnType<typeof setTimeout>;
   let waitingDebounce: ReturnType<typeof setTimeout>;
+  let idleTimer: ReturnType<typeof setTimeout>;
   let speedWorker: Worker | null = null;
+  let streamKilled = false;
+  let killedAt = 0;
 
   let availableLevels = $derived(
     Quality.levels.filter((l) => maxHeight === null || l.h <= maxHeight),
@@ -64,7 +67,7 @@
     player.ready(() => {
       if (q === "original" && seek > 0) player.currentTime(seek);
       switching = false;
-      player.play().catch(() => {});
+      if (!paused) player.play().catch(() => {});
     });
   }
 
@@ -72,10 +75,10 @@
     if (quality !== "auto" || speedMbps === null || maxHeight === null) return;
 
     const aq = Quality.auto(speedMbps, maxHeight);
-    if (aq !== autoQ) {
-      autoQ = aq;
-      applyQualityAt(aq, player?.currentTime() ?? 0);
-    }
+    if (aq === autoQ) return;
+    autoQ = aq;
+
+    if (!paused) applyQualityAt(aq, player?.currentTime() ?? 0);
   }
 
   function setQuality(q: string) {
@@ -163,6 +166,15 @@
     );
 
     player.on("play", () => {
+      clearTimeout(idleTimer);
+      if (streamKilled) {
+        streamKilled = false;
+        paused = false;
+        const q = quality === "auto" ? autoQ : quality;
+        applyQualityAt(q, killedAt);
+        return;
+      }
+
       paused = false;
       showUI();
     });
@@ -171,6 +183,15 @@
       paused = true;
       hideUI = false;
       clearTimeout(uiTimer);
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        killedAt = player.currentTime() ?? 0;
+        streamKilled = true;
+
+        const vid = player.el().querySelector("video");
+        vid.removeAttribute("src");
+        vid.load();
+      }, 60_000);
     });
 
     player.on("loadedmetadata", () => {
@@ -279,6 +300,7 @@
     return () => {
       clearTimeout(uiTimer);
       clearTimeout(waitingDebounce);
+      clearTimeout(idleTimer);
       speedWorker?.terminate();
       player?.dispose();
     };
@@ -296,31 +318,109 @@
 >
   {#if !embed}
     <div class="player-bar f al-ct g10">
-      <a href="/" class="back fs-base sh-0">← Back</a>
+      <a href="/" class="back fs-base sh-0">←</a>
       <h1 class="title fw5 m0 trunc">
-        {dir !== "." ? `${dir} / ` : ""}{title}
+        {title}
       </h1>
 
       <div class="f g5 sh-0 al-ct">
-        <select
-          class="quality-select"
-          onchange={(e) => setQuality(e.currentTarget.value)}
+        <div
+          class="icon-btn gear-wrap"
+          title="Quality: {quality === 'auto'
+            ? `Auto (${autoLabel})`
+            : quality}"
         >
-          <option value="auto" selected={quality === "auto"}>
-            Auto ({autoLabel})
-          </option>
-          <option value="original" selected={quality === "original"}>
-            Original
-          </option>
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.64l-1.92-3.32a.49.49 0 0 0-.6-.22l-2.39.96a7.02 7.02 0 0 0-1.62-.94l-.36-2.54A.484.484 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.6.22L2.62 8.72a.48.48 0 0 0 .12.64l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.64l1.92 3.32c.12.22.37.29.6.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.36-2.54a6.9 6.9 0 0 0 1.62-.94l2.39.96c.23.08.48 0 .6-.22l1.92-3.32a.49.49 0 0 0-.12-.64l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"
+            />
+          </svg>
 
-          {#each availableLevels as lvl (lvl.q)}
-            <option value={lvl.q} selected={quality === lvl.q}>
-              {lvl.label}
+          <select
+            class="gear-select"
+            onchange={(e) => setQuality(e.currentTarget.value)}
+          >
+            <option value="auto" selected={quality === "auto"}>
+              Auto ({autoLabel})
             </option>
-          {/each}
-        </select>
-        <button class="btn-ghost" onclick={fetchSubs}> Fetch Subs </button>
-        <button class="btn-ghost" onclick={runWhisper}> Whisper </button>
+
+            <option value="original" selected={quality === "original"}>
+              Original
+            </option>
+
+            {#each availableLevels as lvl (lvl.q)}
+              <option value={lvl.q} selected={quality === lvl.q}>
+                {lvl.label}
+              </option>
+            {/each}
+          </select>
+        </div>
+
+        <!-- Subtitles -->
+        <button class="icon-btn" onclick={fetchSubs} title="Fetch subtitles">
+          <svg
+            width="20"
+            height="15"
+            viewBox="0 0 20 15"
+            fill="none"
+            aria-hidden="true"
+          >
+            <rect
+              x="0.75"
+              y="0.75"
+              width="18.5"
+              height="13.5"
+              rx="2"
+              stroke="currentColor"
+              stroke-width="1.5"
+            />
+            <rect
+              x="2.5"
+              y="9"
+              width="6"
+              height="2"
+              rx="1"
+              fill="currentColor"
+            />
+            <rect
+              x="10.5"
+              y="9"
+              width="7"
+              height="2"
+              rx="1"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
+
+        <button
+          class="icon-btn"
+          onclick={runWhisper}
+          title="Whisper transcription"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="9" y="2" width="6" height="12" rx="3" />
+            <path d="M5 10a7 7 0 0 0 14 0" />
+            <line x1="12" y1="17" x2="12" y2="21" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+          </svg>
+        </button>
 
         {#if videoKey}
           <DownloadButton {videoParam} {title} key={videoKey} />
@@ -486,20 +586,38 @@
     background: #1a1a1a;
   }
 
-  .quality-select {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.35);
-    color: #ddd;
-    font-size: 0.8rem;
-    padding: 3px 6px;
-    border-radius: 4px;
+  .icon-btn {
+    background: none;
+    border: none;
+    color: #ccc;
     cursor: pointer;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition:
+      color 0.15s,
+      background 0.15s;
   }
-  .quality-select:hover {
-    border-color: #fff;
+  .icon-btn:hover {
     color: #fff;
+    background: rgba(255, 255, 255, 0.12);
   }
-  .quality-select option {
+
+  .gear-wrap {
+    position: relative;
+  }
+  .gear-select {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+  .gear-select option {
     background: #141414;
+    color: #ddd;
   }
 </style>
