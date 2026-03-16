@@ -1,19 +1,7 @@
 <script lang="ts">
   import { clean, vidURL } from "../lib/video";
 
-  let {
-    rows,
-    dir,
-    name,
-    paused,
-    embed,
-  }: {
-    rows: [string, any[]][];
-    dir: string;
-    name: string;
-    paused: boolean;
-    embed: boolean;
-  } = $props();
+  let { rows, dir, name, paused, embed }: any = $props();
 
   let contentEl: HTMLDivElement | undefined = $state();
   let isOpen = $state(false);
@@ -69,9 +57,9 @@
 {#if !embed && rows.length > 0 && paused}
   {#each rows as [rowDir, files]}
     {#if rowDir === dir && files.length > 1}
-      <details open={isOpen || closing}>
+      <details class="p-fix" open={isOpen || closing}>
         <summary
-          class="fs-sm c-muted m0 fw4 f al-ct g5 ptr p-fix p20"
+          class="fs-sm tx-3 m0 fw4 f al-ct g5 ptr p20"
           onclick={toggle}
         >
           <span class="chevron d-ib" class:open={isOpen && !closing}></span>
@@ -91,7 +79,7 @@
                   loading="lazy"
                   class="w-100"
                 />
-                <span class="d-b fs-xs p5 c-muted trunc">{clean(f.name)}</span>
+                <span class="d-b fs-xs p5 tx-3 trunc">{clean(f.name)}</span>
               </a>
             {/each}
           </div>
@@ -107,13 +95,14 @@
     left: 0;
     right: 0;
     z-index: 10;
+    display: flex;
+    flex-direction: column-reverse;
     background: linear-gradient(to top, #000c 0%, transparent 100%);
     animation: slide-up 0.25s ease;
   }
 
   summary {
     user-select: none;
-    margin-bottom: 10px;
   }
   summary::-webkit-details-marker {
     display: none;
@@ -153,16 +142,16 @@
     transform: scale(1.04);
   }
   .serie.active {
-    border-color: #e50914;
+    border-color: var(--red);
   }
   .serie.active span {
-    color: #fff;
+    color: var(--tx-5);
   }
   .serie img {
     aspect-ratio: 16/9;
-    background: #222;
+    background: var(--bg-3);
   }
   .serie span {
-    background: #111;
+    background: var(--bg-2);
   }
 </style>

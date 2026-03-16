@@ -108,9 +108,9 @@
 
 <div style="min-height:100vh">
   <header class="f fw al-ct g10 p-stx">
-    <a href="/" class="back fs c-muted"> ← Home </a>
+    <a href="/" class="back fs tx-3"> ← Home </a>
     <h1 class="m0 fw6">Manage Library</h1>
-    <span class="fs c-dim">
+    <span class="fs tx-1">
       {rows.length} folders · {total} files
     </span>
 
@@ -120,14 +120,14 @@
           {@const pct = Math.round((1 - d.free / d.total) * 100)}
 
           <div class="f al-ct g5">
-            <span class="fs-xs c-dim up" style="white-space:nowrap">
+            <span class="fs-xs tx-1 up" style="white-space:nowrap">
               {d.root}
             </span>
             <div class="disk-bar rx2 flow-h">
               <div class="disk-fill h-100 rx2" style="width:{pct}%"></div>
             </div>
 
-            <span class="fs-xs c-dim" style="white-space:nowrap">
+            <span class="fs-xs tx-1" style="white-space:nowrap">
               {fmtBytes(d.free)} free
             </span>
           </div>
@@ -138,7 +138,7 @@
 
   <main>
     {#if loading}
-      <div class="c-dim p20">Loading…</div>
+      <div class="tx-1 p20">Loading…</div>
     {:else}
       {#each rows as [dir, files], idx}
         <details class="folder rx5 flow-h" style="--i:{idx}">
@@ -165,10 +165,10 @@
               <span class="fw5 fs-md">
                 {dir === "." ? "Root" : clean(dir) || dir}
               </span>
-              <span class="folder-raw fs-xs c-dim trunc">
+              <span class="folder-raw fs-xs tx-1 trunc">
                 {dir === "." ? "" : dir}
               </span>
-              <span class="fs-sm c-dim sh-0" style="margin-left:auto">
+              <span class="fs-sm tx-1 sh-0" style="margin-left:auto">
                 ({files.length} files)
               </span>
 
@@ -204,7 +204,7 @@
               {@const fpath = dir === "." ? f : `${dir}/${f}`}
               <li class="file f al-ct g10">
                 <span
-                  class="fs-xs c-dim sh-0 tc"
+                  class="fs-xs tx-1 sh-0 tc"
                   style="width:16px"
                   title={f.split(".").pop()?.toUpperCase()}
                 >
@@ -223,10 +223,10 @@
                   </form>
                 {:else}
                   <div class="file-names">
-                    <span class="d-b fs c-light trunc">
+                    <span class="d-b fs tx-4 trunc">
                       {clean(f)}
                     </span>
-                    <span class="d-b fs-xs trunc" style="color:#3a3a3a">
+                    <span class="d-b fs-xs trunc" style="color:var(--bg-5)">
                       {f}
                     </span>
                   </div>
@@ -259,8 +259,8 @@
 <style>
   header {
     padding: 20px 40px;
-    background: #0a0a0a;
-    border-bottom: 1px solid #222;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--bg-3);
     top: 0;
     z-index: 10;
   }
@@ -268,16 +268,16 @@
   .disk-bar {
     width: 80px;
     height: 3px;
-    background: #2a2a2a;
+    background: var(--bg-3);
   }
 
   .disk-fill {
-    background: #e50914;
+    background: var(--red);
     transition: width 0.3s;
   }
 
   .back:hover {
-    color: #fff;
+    color: var(--tx-5);
   }
 
   main {
@@ -287,7 +287,7 @@
   }
 
   .folder {
-    border: 1px solid #2a2a2a;
+    border: 1px solid var(--bg-3);
     margin-bottom: 8px;
     animation: slide-up 0.25s ease both;
     animation-delay: calc(var(--i) * 40ms);
@@ -295,13 +295,13 @@
 
   .folder-hd {
     padding: 10px 14px;
-    background: #1a1a1a;
+    background: var(--bg-3);
     user-select: none;
     transition: background 0.1s;
   }
 
   .folder-hd:hover {
-    background: #212121;
+    background: var(--bg-3);
   }
   .folder-hd:hover .btn-icon {
     opacity: 1;
@@ -318,21 +318,21 @@
   .rename-input {
     flex: 1;
     width: 100%;
-    background: #0d0d0d;
-    border: 1px solid #e50914;
-    color: #fff;
+    background: var(--bg-2);
+    border: 1px solid var(--red);
+    color: var(--tx-5);
     padding: 3px 10px;
     border-radius: 3px;
   }
 
   .file {
     padding: 7px 14px 7px 42px;
-    border-top: 1px solid #1e1e1e;
+    border-top: 1px solid var(--bg-3);
     transition: background 0.1s;
   }
 
   .file:hover {
-    background: #191919;
+    background: var(--bg-3);
   }
 
   .file:hover .file-actions,

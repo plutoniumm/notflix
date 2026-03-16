@@ -1,49 +1,170 @@
+:root {
+  --tx-1: #555;
+  --tx-2: #888;
+  --tx-3: #aaa;
+  --tx-4: #ccc;
+  --tx-5: #fff;
+
+  --bg-1: #000;
+  --bg-2: #111;
+  --bg-3: #222;
+  --bg-4: #333;
+  --bg-5: #444;
+
+  --red: #e11;
+  --grn: #4d8;
+}
+
+body {
+  background: var(--bg-2);
+  color: var(--tx-5);
+  min-height: 100vh;
+}
+
 video {
   border: 0 !important;
   outline: 0 !important;
   transition: all 0.1s ease-in-out;
 }
 
+/* ── font sizes ── */
 .fs-xs {
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .fs-sm {
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .fs {
-  font-size: 16px;
+  font-size: 13px;
 }
 
 .fs-md {
-  font-size: 18px;
+  font-size: 14px;
 }
 
 .fs-lg {
   font-size: 20px;
 }
 
+/* ── text color ── */
+.tx-1 {
+  color: var(--tx-1);
+}
+
+.tx-2 {
+  color: var(--tx-2);
+}
+
+.tx-3 {
+  color: var(--tx-3);
+}
+
+.tx-4 {
+  color: var(--tx-4);
+}
+
+.tx-5 {
+  color: var(--tx-5);
+}
+
+/* named aliases */
 .red {
-  color: #e11;
+  color: var(--red);
 }
 
-.c-dim {
-  color: #555;
+.dim {
+  color: var(--tx-1);
 }
 
-.c-sub {
-  color: #666;
+.mute {
+  color: var(--tx-3);
 }
 
-.c-muted {
-  color: #aaa;
+.light {
+  color: var(--tx-4);
 }
 
-.c-light {
-  color: #ddd;
+.white {
+  color: var(--tx-5);
 }
 
+/* ── background ── */
+.bg-1 {
+  background: var(--bg-1);
+}
+
+.bg-2 {
+  background: var(--bg-2);
+}
+
+.bg-3 {
+  background: var(--bg-3);
+}
+
+.bg-4 {
+  background: var(--bg-4);
+}
+
+.bg-5 {
+  background: var(--bg-5);
+}
+
+/* ── buttons ── */
+.btn-ghost {
+  background: #fff2;
+  border: 1px solid #fff5;
+  color: var(--tx-4);
+  padding: 6px 14px;
+  border-radius: 3px;
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-ghost:hover {
+  background: #fff3;
+  color: var(--tx-5);
+}
+
+.btn-outline {
+  background: none;
+  border: 1px solid var(--bg-5);
+  color: var(--tx-2);
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.btn-outline:hover {
+  color: var(--tx-5);
+  border-color: var(--tx-2);
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  color: var(--tx-1);
+  padding: 3px 7px;
+  border-radius: 3px;
+  font-size: 12px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.btn-icon:hover {
+  background: var(--bg-4);
+  color: var(--tx-4);
+}
+
+.btn-icon.danger:hover {
+  color: var(--red);
+  background: #e112;
+}
+
+/* ── misc ── */
 .trunc {
   white-space: nowrap;
   overflow: hidden;
@@ -58,58 +179,6 @@ video {
   text-transform: uppercase;
 }
 
-.btn-ghost {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: #ccc;
-  padding: 6px 14px;
-  border-radius: 3px;
-  font-size: 13px;
-  transition: background 0.15s, color 0.15s;
-}
-
-.btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
-}
-
-.btn-outline {
-  background: none;
-  border: 1px solid #444;
-  color: #999;
-  padding: 4px 10px;
-  border-radius: 3px;
-  font-size: 12px;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.btn-outline:hover {
-  color: #fff;
-  border-color: #888;
-}
-
-.btn-icon {
-  background: none;
-  border: none;
-  color: #555;
-  padding: 3px 7px;
-  border-radius: 3px;
-  font-size: 12px;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: color 0.15s, background 0.15s;
-}
-
-.btn-icon:hover {
-  background: #333;
-  color: #ccc;
-}
-
-.btn-icon.danger:hover {
-  color: #e50914;
-  background: rgba(229, 9, 20, 0.1);
-}
-
 .bright {
   filter: contrast(90%) brightness(110%);
 }
@@ -117,15 +186,16 @@ video {
 .tap-ripple {
   position: absolute;
   transform: translate(-50%, -50%);
-  color: #fff;
+  color: var(--tx-5);
   font-size: 1.1rem;
   font-weight: 700;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 2px 8px #000c;
   pointer-events: none;
   animation: tap-fade 0.7s ease-out forwards;
   z-index: 20;
 }
 
+/* ── animations ── */
 @keyframes tap-fade {
   from {
     opacity: 1;

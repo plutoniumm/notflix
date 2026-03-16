@@ -13,9 +13,7 @@
   <link rel="icon" href="/assets/icon.svg" />
   <link rel="apple-touch-icon" href="/assets/icon.svg" />
 
-  <link rel="stylesheet" href="/assets/global.css" />
   <link rel="stylesheet" href="/assets/notflix.css" />
-  <link rel="stylesheet" href="/assets/atomic.css">
 
   <style>
     * .vjs-control-bar,
@@ -23,6 +21,29 @@
       display: none !important;
       opacity: 0 !important;
       visibility: hidden !important;
+    }
+
+    .video-js {
+      width: 100% !important;
+      height: auto !important;
+      aspect-ratio: 16/9;
+    }
+
+    .video-wrap .video-js {
+      height: 100% !important;
+      aspect-ratio: unset !important;
+    }
+
+    .vjs-poster {
+      background-size: cover;
+    }
+
+    .video-js.hideSubs .vjs-text-track-display {
+      display: none !important;
+    }
+
+    video.bright {
+      filter: brightness(1.4);
     }
   </style>
 

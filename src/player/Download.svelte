@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { isSupported, Down } from "./lib/dl";
+  import { isSupported, Down } from "../lib/dl";
 
   let {
     videoParam,
@@ -96,22 +96,14 @@
 {#if show}
   <div class="dl-wrap f al-ct g5">
     {#if !bgfetch}
-      <a
-        class="icon-btn"
-        href="/video/{videoParam}"
-        download={title}
-        title="Download"
-      >
+      <!-- svelte-ignore a11y_consider_explicit_label -->
+      <a class="ibtn cc ptr rx5 p5" href="/video/{videoParam}" download={title}>
         <svg
           width="18"
           height="18"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
         >
           <path d="M12 3v13M5 12l7 7 7-7" /><line
             x1="4"
@@ -123,7 +115,7 @@
       </a>
     {:else if state === "idle" || state === "error"}
       <button
-        class="icon-btn"
+        class="ibtn cc ptr rx5 p5"
         onclick={download}
         title={state === "error"
           ? `Retry — ${storageHint}`
@@ -134,11 +126,7 @@
           height="18"
           viewBox="0 0 24 24"
           fill="none"
-          stroke={state === "error" ? "#f87171" : "currentColor"}
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
+          stroke={state === "error" ? "var(--red)" : "currentColor"}
         >
           <path d="M12 3v13M5 12l7 7 7-7" /><line
             x1="4"
@@ -150,11 +138,11 @@
       </button>
     {:else if state === "downloading"}
       <div class="f al-ct g5">
-        <div class="prog-bar rx2">
-          <div class="prog-fill" style="width:{progress}%"></div>
+        <div class="bar rx2">
+          <div class="fill" style="width:{progress}%"></div>
         </div>
 
-        <span class="prog-pct fs-xs">{progress}%</span>
+        <span class="pct fs-xs">{progress}%</span>
         <button
           class="btn-ghost fs-xs"
           onclick={remove}
@@ -162,7 +150,7 @@
         >
       </div>
     {:else if state === "done"}
-      <span class="offline-pill rx10 fs-xs">✓ Offline</span>
+      <span class="offline rx10 fs-xs">✓ Offline</span>
       <button
         class="btn-ghost fs-xs"
         onclick={remove}
@@ -174,49 +162,40 @@
 {/if}
 
 <style>
-  .icon-btn {
-    background: none;
-    border: none;
-    color: #ccc;
-    cursor: pointer;
-    padding: 5px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
+  .ibtn {
+    color: var(--tx-4);
     transition:
       color 0.15s,
       background 0.15s;
-    text-decoration: none;
   }
-  .icon-btn:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.12);
+  .ibtn:hover {
+    color: var(--tx-5);
+    background: #fff2;
   }
 
-  .prog-bar {
+  .bar {
     width: 80px;
     height: 4px;
-    background: #444;
+    background: var(--bg-5);
     overflow: hidden;
   }
 
-  .prog-fill {
+  .fill {
     height: 100%;
-    background: #e50914;
+    background: var(--red);
     transition: width 0.3s;
     min-width: 2px;
   }
 
-  .prog-pct {
-    color: #999;
+  .pct {
+    color: var(--tx-2);
     min-width: 28px;
   }
 
-  .offline-pill {
-    color: #4ade80;
+  .offline {
+    color: var(--grn);
     padding: 2px 8px;
-    border: 1px solid #4ade80;
+    border: 1px solid var(--grn);
     white-space: nowrap;
   }
 </style>

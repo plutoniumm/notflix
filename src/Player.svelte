@@ -4,7 +4,7 @@
   import "video.js/dist/video-js.css";
 
   import SubsPicker from "./Subs.svelte";
-  import TopBar from "./player/TopBar.svelte";
+  import Bar from "./player/bar.svelte";
   import Progress from "./player/progress.svelte";
   import Volume from "./player/volume.svelte";
   import Related from "./player/related.svelte";
@@ -176,14 +176,14 @@
   onmousemove={() => ps.showUI(ps.paused)}
   ontouchstart={() => ps.showUI(ps.paused)}
 >
-  <TopBar
+  <Bar
     {title}
     {embed}
-    hideUI={ps.hideUI}
+    hidden={ps.hideUI}
     videoKey={ps.videoKey}
     {videoParam}
-    onfetchSubs={fetchSubs}
-    onrunWhisper={runWhisper}
+    getSubs={fetchSubs}
+    {runWhisper}
   />
 
   <div class="video-wrap p-abs">
@@ -195,8 +195,8 @@
 
   <Whisper msg={ps.wMsg} />
 
-  <Progress pct={ps.pct} duration={ps.duration} hideUI={ps.hideUI} />
-  <Volume volLevel={ps.volLevel} volVisible={ps.volVisible} />
+  <Progress pct={ps.pct} duration={ps.duration} hidden={ps.hideUI} />
+  <Volume level={ps.volLevel} visible={ps.volVisible} />
   <Related rows={ps.rows} {dir} {name} {embed} paused={ps.paused} />
 </div>
 
