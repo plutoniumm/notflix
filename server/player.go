@@ -65,7 +65,7 @@ func VideoHead(c *gin.Context, videosDir string) {
 		return
 	}
 
-	c.Header("Content-Type", vidType(name))
+	c.Header("Content-Type", "video/mp4")
 	c.Header("Content-Length", strconv.FormatInt(info.Size(), 10))
 	c.Header("Accept-Ranges", "bytes")
 	c.Status(http.StatusOK)
@@ -82,7 +82,7 @@ func getfname(c *gin.Context) (string, error) {
 	}
 
 	ext := strings.ToLower(filepath.Ext(name))
-	if ext != ".mp4" && ext != ".webm" {
+	if ext != ".mp4" {
 		return "", fmt.Errorf("unsupported video format")
 	}
 
@@ -118,17 +118,10 @@ func openVid(path string) (*os.File, os.FileInfo, error) {
 	return file, info, nil
 }
 
-func vidType(name string) string {
-	if strings.ToLower(filepath.Ext(name)) == ".webm" {
-		return "video/webm"
-	}
-	return "video/mp4"
-}
-
 func serve(c *gin.Context, file *os.File, info os.FileInfo, name string) {
 	size := info.Size()
 	rng := c.GetHeader("Range")
-	ct := vidType(name)
+	ct := "video/mp4"
 
 	if rng == "" {
 		c.Header("Content-Type", ct)

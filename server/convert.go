@@ -81,10 +81,12 @@ func convertRoot(root string) {
 		}
 
 		ext := strings.ToLower(filepath.Ext(d.Name()))
-		if ext == ".mp4" || ext == ".webm" {
+		switch ext {
+		case ".mp4":
 			return nil
-		}
-		if ext != ".mkv" && ext != ".mov" {
+		case ".mkv", ".mov", ".webm", ".avi", ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp":
+
+		default:
 			return nil
 		}
 
@@ -172,7 +174,7 @@ func codecs(videoPath string) (videoCodec, audioCodec string) {
 	if err != nil {
 		return "", ""
 	}
-	
+
 	for _, s := range streams {
 		switch s.CodecType {
 		case "video":
