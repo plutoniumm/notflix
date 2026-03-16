@@ -1,41 +1,31 @@
-/* ── video.js overrides ── */
 video {
   border: 0 !important;
   outline: 0 !important;
   transition: all 0.1s ease-in-out;
 }
 
-.vjs-text-track-cue div {
-  background-color: #0006 !important;
-  border-radius: 5px;
-  padding: 5px;
-}
-
-.video-js.vjs-has-started.vjs-playing.vjs-user-inactive .vjs-control-bar {
-  visibility: hidden;
-  opacity: 0 !important;
-  transform: translateY(3em);
-  transition: opacity 0.5s ease, visibility 0.5s ease;
-}
-
 .fs-xs {
-  font-size: 11px;
-}
-
-.fs-sm {
   font-size: 12px;
 }
 
-.fs-base {
-  font-size: 13px;
-}
-
-.fs-md {
+.fs-sm {
   font-size: 14px;
 }
 
-.c-red {
-  color: #e50914;
+.fs {
+  font-size: 16px;
+}
+
+.fs-md {
+  font-size: 18px;
+}
+
+.fs-lg {
+  font-size: 20px;
+}
+
+.red {
+  color: #e11;
 }
 
 .c-dim {
@@ -137,26 +127,59 @@ video {
 }
 
 @keyframes tap-fade {
-  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  to   { opacity: 0; transform: translate(-50%, -70%) scale(1.4); }
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(-50%, -70%) scale(1.4);
+  }
 }
 
 @keyframes fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slide-up {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @keyframes slide-down {
-  from { opacity: 0; transform: translateY(-10px); }
-  to   { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @keyframes slide-in-r {
-  from { opacity: 0; transform: translateX(12px); }
-  to   { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
