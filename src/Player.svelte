@@ -33,7 +33,7 @@
   let hideUI = $state(false);
   let quality = $state(localStorage.getItem(Quality.key) ?? "auto");
   let maxHeight = $state<number | null>(null);
-  let autoQ = $state("original");
+  let autoQ = $state<string>("original");
   let speedMbps = $state<number | null>(null);
   let videoDuration = $state(0);
 
@@ -148,7 +148,7 @@
       playbackRates: [0.5, 1, 1.25, 1.5, 2],
     });
 
-    const initQ = quality === "auto" ? "480p" : quality;
+    const initQ = quality === "auto" ? "original" : quality;
     player.src({
       src: Quality.src(videoParam, initQ),
       type: Quality.type(initQ),
@@ -203,8 +203,19 @@
       if (switching || quality === "original") return;
 
       const t = player.currentTime() ?? 0;
+      const q = quality === "auto" ? autoQ : quality;
+
       if (t < streamStart - 1) {
-        const q = quality === "auto" ? autoQ : quality;
+        applyQualityAt(q, t);
+        return;
+      }
+
+      const buf = player.buffered();
+      let maxBuf = streamStart;
+      for (let i = 0; i < buf.length; i++) {
+        if (buf.start(i) <= t + 1) maxBuf = Math.max(maxBuf, buf.end(i));
+      }
+      if (t > maxBuf + 2) {
         applyQualityAt(q, t);
       }
     });
@@ -294,6 +305,18 @@
 
         nextURL = nextVid(data, dir, name, autoplay);
         videoKey = data[dir]?.find((f) => f.name === name)?.key ?? "";
+
+        if (nextURL) {
+          const nextParam = new URLSearchParams(
+            nextURL.slice(nextURL.indexOf("?")),
+          ).get("video");
+          if (nextParam) {
+            fetch(`/video/${encodeURIComponent(nextParam)}`, {
+              headers: { Range: "bytes=0-1048575" },
+              priority: "low" as any,
+            }).catch(() => {});
+          }
+        }
       })
       .catch(() => {});
 

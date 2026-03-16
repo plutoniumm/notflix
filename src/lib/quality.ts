@@ -11,7 +11,7 @@ const LEVELS = [
 export default {
   key: "notflix-quality",
   levels: LEVELS,
-  type: (q: string) => q === "original" ? "video/mp4" : "video/webm",
+  type: (_q: string) => "video/mp4",
   src: (videoParam: string, q: string, seek = 0) => {
     if (q === "original")
       return `/video/${videoParam}`;

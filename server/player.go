@@ -83,14 +83,15 @@ func serveTranscoded(c *gin.Context, path string, quality string) {
 		"-i", path,
 		"-map", "0:v:0",
 		"-map", "0:a:0",
-		"-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-b:v", p.vbr,
+		"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", p.vbr,
 		"-vf", "scale="+p.scale,
-		"-c:a", "libopus", "-b:a", p.ab, "-ac", "2",
+		"-c:a", "aac", "-b:a", p.ab, "-ac", "2",
+		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
 	)
 	if seek > 0 {
 		args = append(args, "-output_ts_offset", fmt.Sprintf("%.3f", seek))
 	}
-	args = append(args, "-f", "webm", "pipe:1")
+	args = append(args, "-f", "mp4", "pipe:1")
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	cmd.WaitDelay = 2 * time.Second
@@ -98,7 +99,7 @@ func serveTranscoded(c *gin.Context, path string, quality string) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	c.Header("Content-Type", "video/webm")
+	c.Header("Content-Type", "video/mp4")
 	c.Status(http.StatusOK)
 	cmd.Stdout = c.Writer
 	if err := cmd.Run(); err != nil && !clientGone(err) {
