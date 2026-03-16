@@ -45,14 +45,15 @@ var hlsProfiles = map[string]hlsProfile{
 var hlsQualityOrder = []string{"144p", "240p", "360p", "480p", "720p", "1080p", "2160p"}
 
 // bandwidth in bits/s for each quality (used in #EXT-X-STREAM-INF:BANDWIDTH)
+// biased 25% below actual encode rate so ABR favours the next tier up
 var hlsBandwidth = map[string]int{
-	"144p":  150_000,
-	"240p":  300_000,
-	"360p":  500_000,
-	"480p":  800_000,
-	"720p":  2_000_000,
-	"1080p": 4_000_000,
-	"2160p": 12_000_000,
+	"144p":  112_000,
+	"240p":  225_000,
+	"360p":  375_000,
+	"480p":  600_000,
+	"720p":  1_500_000,
+	"1080p": 3_000_000,
+	"2160p": 9_000_000,
 }
 
 func hlsFindFile(file string, roots []string) string {

@@ -19,6 +19,11 @@ body {
   initial-value: 0px;
 }
 
+ul {
+  list-style-type: none;
+  list-style: none;
+}
+
 table {
   border-collapse: collapse;
 }

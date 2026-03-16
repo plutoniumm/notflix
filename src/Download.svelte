@@ -154,20 +154,20 @@
           <div class="prog-fill" style="width:{progress}%"></div>
         </div>
 
-        <span class="prog-pct">{progress}%</span>
+        <span class="prog-pct fs-xs">{progress}%</span>
         <button
-          class="btn-ghost"
+          class="btn-ghost fs-xs"
           onclick={remove}
-          style="padding:2px 6px;font-size:12px">✕</button
+          style="padding:2px 6px;">✕</button
         >
       </div>
     {:else if state === "done"}
-      <span class="offline-pill">✓ Offline</span>
+      <span class="offline-pill rx10 fs-xs">✓ Offline</span>
       <button
-        class="btn-ghost"
+        class="btn-ghost fs-xs"
         onclick={remove}
         title="Remove offline copy"
-        style="padding:2px 8px;font-size:13px">🗑</button
+        style="padding:2px 8px;">🗑</button
       >
     {/if}
   </div>
@@ -209,17 +209,14 @@
   }
 
   .prog-pct {
-    font-size: 11px;
     color: #999;
     min-width: 28px;
   }
 
   .offline-pill {
-    font-size: 12px;
     color: #4ade80;
     padding: 2px 8px;
     border: 1px solid #4ade80;
-    border-radius: 12px;
     white-space: nowrap;
   }
 </style>

@@ -27,7 +27,7 @@
       {#each results as r (r.file_id)}
         <li>
           <button
-            class="sub-item f al-ct g10 w-100 fs-base ptr"
+            class="sub-item f al-ct g10 w-100 fs ptr"
             class:busy={busy === r.file_id}
             onclick={() => pick(r.file_id)}
           >
@@ -43,7 +43,7 @@
             </span>
 
             {#if busy === r.file_id}
-              <span class="spinner c-red">↻</span>
+              <span class="spinner red">↻</span>
             {/if}
           </button>
         </li>
@@ -75,9 +75,6 @@
   }
 
   .close {
-    background: none;
-    border: none;
-    font-size: 1rem;
     padding: 4px 8px;
   }
   .close:hover {
@@ -85,11 +82,7 @@
   }
 
   .list {
-    list-style: none;
     padding: 8px 0;
-  }
-  li {
-    list-style: none;
   }
 
   .sub-item {

@@ -108,9 +108,9 @@
 
 <div style="min-height:100vh">
   <header class="f fw al-ct g10 p-stx">
-    <a href="/" class="back fs-base c-muted"> ← Home </a>
+    <a href="/" class="back fs c-muted"> ← Home </a>
     <h1 class="m0 fw6">Manage Library</h1>
-    <span class="fs-base c-dim">
+    <span class="fs c-dim">
       {rows.length} folders · {total} files
     </span>
 
@@ -143,7 +143,7 @@
       {#each rows as [dir, files], idx}
         <details class="folder rx5 flow-h" style="--i:{idx}">
           <summary class="folder-hd f al-ct g10 ptr">
-            <span class="sh-0" style="font-size:0.95rem">📁</span>
+            <span>📁</span>
 
             {#if editing === dir}
               <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -154,7 +154,7 @@
                 onclick={(e) => e.stopPropagation()}
               >
                 <input
-                  class="rename-input"
+                  class="rename-input fs-sm"
                   bind:value={val}
                   onkeydown={(e) => e.key === "Escape" && cancelEdit()}
                   onblur={confirmEdit}
@@ -199,7 +199,7 @@
             {/if}
           </summary>
 
-          <ul class="m0 p0" style="list-style:none">
+          <ul class="m0 p0">
             {#each files as f (f)}
               {@const fpath = dir === "." ? f : `${dir}/${f}`}
               <li class="file f al-ct g10">
@@ -223,7 +223,7 @@
                   </form>
                 {:else}
                   <div class="file-names">
-                    <span class="d-b fs-base c-light trunc">
+                    <span class="d-b fs c-light trunc">
                       {clean(f)}
                     </span>
                     <span class="d-b fs-xs trunc" style="color:#3a3a3a">
@@ -323,7 +323,6 @@
     color: #fff;
     padding: 3px 10px;
     border-radius: 3px;
-    font-size: 13px;
   }
 
   .file {

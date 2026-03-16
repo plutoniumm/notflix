@@ -97,7 +97,7 @@
           Results for "<strong>{search}</strong>"
         </span>
 
-        <button class="clear rx2" onclick={() => (search = "")}>
+        <button class="clear fs-xs rx2" onclick={() => (search = "")}>
           ✕ Clear
         </button>
       </div>
@@ -124,7 +124,7 @@
                 {clean(item.name)}
               </span>
               {#if item.dir !== "."}
-                <span class="card-dir">
+                <span class="card-dir fs-xs d-b">
                   {item.dir}
                 </span>
               {/if}
@@ -146,7 +146,7 @@
 
             <div class="row-wrap f al-ct p-rel">
               <button
-                class="arrow left"
+                class="arrow cc o-0 h-100 p0 left"
                 onclick={(e) => {
                   const el: any = e.currentTarget.nextElementSibling;
                   scrollRow(el, -1);
@@ -154,11 +154,12 @@
               >
 
               <div class="cards f flow-x-s g5">
-                {#each files as f (f.key)}
+                {#each files as f, idx}
                   {@const vidParam = dir === "." ? f.name : `${dir}/${f.name}`}
                   <a
                     href={vidURL(dir, f.name)}
                     class="card ptr rx5 flow-h p-rel"
+                    style="--i: {idx}"
                   >
                     <div class="thumb p-rel flow-h">
                       <img
@@ -167,12 +168,9 @@
                         alt=""
                         loading="lazy"
                       />
-                      <div class="play-icon p-abs cc o-0">▶</div>
+                      <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
                       {#if downloadedSet.has(vidParam)}
-                        <div
-                          class="offline-dot p-abs"
-                          title="Available offline"
-                        ></div>
+                        <div class="dot p-abs"></div>
                       {/if}
                     </div>
 
@@ -184,7 +182,7 @@
               </div>
 
               <button
-                class="arrow right"
+                class="arrow cc o-0 h-100 p0 right"
                 onclick={(e) => {
                   const el: any = e.currentTarget.previousElementSibling;
                   scrollRow(el, 1);
@@ -201,12 +199,12 @@
     <div class="panel p-fix rx10 flow-h">
       <div class="header f al-ct j-bw">
         <span class="title fw6">Converting</span>
-        <span class="count fw7 cc rx20">{jobs.length}</span>
+        <span class="count fs-xs fw7 cc rx20">{jobs.length}</span>
       </div>
 
       {#each jobs as j (j.name)}
         <div class="item">
-          <div class="name">
+          <div class="name fs-xs flow-h">
             {j.name.replace(/\.(mkv|mov)$/i, "")}
           </div>
 
@@ -218,7 +216,7 @@
               ></div>
             </div>
 
-            <span class="pct tr">{Math.round(j.percent)}%</span>
+            <span class="pct fs-xs tr">{Math.round(j.percent)}%</span>
           </div>
         </div>
       {/each}
@@ -287,7 +285,6 @@
     border: 1px solid #444;
     color: #999;
     padding: 4px 10px;
-    font-size: 12px;
   }
   .clear:hover {
     color: #fff;
@@ -295,7 +292,6 @@
   }
 
   .grid {
-    gap: 12px;
     padding: 0 48px;
   }
   .grid .card {
@@ -312,26 +308,17 @@
   .row h2 {
     padding: 0 48px;
     margin: 0 0 12px;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #e5e5e5;
+    color: #eee;
   }
 
   .arrow {
     position: absolute;
     z-index: 10;
     background: rgba(0, 0, 0, 0.7);
-    border: none;
     color: #fff;
     font-size: 2rem;
     width: 44px;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
     transition: opacity 0.2s;
-    padding: 0;
   }
   .arrow.left {
     left: 0;
@@ -354,6 +341,7 @@
   .cards {
     padding: 8px 48px 16px;
     scrollbar-width: none;
+    animation-delay: calc(var(--i) * 50ms);
   }
 
   .card {
@@ -364,30 +352,6 @@
       box-shadow 0.2s;
     z-index: 1;
     animation: slide-up 0.3s ease both;
-  }
-  .cards .card:nth-child(1) {
-    animation-delay: 0ms;
-  }
-  .cards .card:nth-child(2) {
-    animation-delay: 30ms;
-  }
-  .cards .card:nth-child(3) {
-    animation-delay: 60ms;
-  }
-  .cards .card:nth-child(4) {
-    animation-delay: 90ms;
-  }
-  .cards .card:nth-child(5) {
-    animation-delay: 120ms;
-  }
-  .cards .card:nth-child(6) {
-    animation-delay: 150ms;
-  }
-  .cards .card:nth-child(7) {
-    animation-delay: 180ms;
-  }
-  .cards .card:nth-child(8) {
-    animation-delay: 210ms;
   }
   .card:hover {
     transform: scale(1.08);
@@ -402,7 +366,6 @@
 
   .play-icon {
     inset: 0;
-    font-size: 2rem;
     background: rgba(0, 0, 0, 0.4);
     transition: opacity 0.2s;
   }
@@ -410,7 +373,7 @@
     opacity: 1;
   }
 
-  .offline-dot {
+  .dot {
     bottom: 6px;
     right: 6px;
     width: 8px;
@@ -434,9 +397,7 @@
     padding: 0 4px 6px;
   }
   .card-dir {
-    font-size: 11px;
     color: #666;
-    display: block;
   }
 
   .panel {
@@ -465,8 +426,6 @@
   .count {
     background: #e50914;
     color: #fff;
-    font-size: 11px;
-    font-weight: 700;
     width: 20px;
     height: 20px;
   }
@@ -480,10 +439,8 @@
   }
 
   .name {
-    font-size: 12px;
     color: #ddd;
     white-space: nowrap;
-    overflow: hidden;
     text-overflow: ellipsis;
     margin-bottom: 6px;
   }
@@ -501,7 +458,6 @@
   }
 
   .pct {
-    font-size: 11px;
     color: #888;
     width: 30px;
     flex-shrink: 0;
