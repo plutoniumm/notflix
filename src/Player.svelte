@@ -39,6 +39,7 @@
 
   let player_ready = false;
   let switching = false;
+  let stalling = false;
   let streamStart = 0;
   let uiTimer: ReturnType<typeof setTimeout>;
   let waitingDebounce: ReturnType<typeof setTimeout>;
@@ -64,10 +65,16 @@
       type: Quality.type(q),
     });
 
-    player.ready(() => {
-      if (q === "original" && seek > 0) player.currentTime(seek);
+    const done = () => {
       switching = false;
+      if (player.isDisposed()) return;
+      if (q === "original" && seek > 0) player.currentTime(seek);
       if (!paused) player.play().catch(() => {});
+    };
+    const swTimeout = setTimeout(done, 8000);
+    player.one("loadedmetadata", () => {
+      clearTimeout(swTimeout);
+      done();
     });
   }
 
@@ -76,8 +83,11 @@
 
     const aq = Quality.auto(speedMbps, maxHeight);
     if (aq === autoQ) return;
-    autoQ = aq;
 
+    const wasOriginal = autoQ === "original";
+    if (wasOriginal && !stalling) return;
+
+    autoQ = aq;
     if (!paused) applyQualityAt(aq, player?.currentTime() ?? 0);
   }
 
@@ -200,13 +210,13 @@
     });
 
     player.on("seeking", () => {
-      if (switching || quality === "original") return;
+      const effectiveQ = quality === "auto" ? autoQ : quality;
+      if (switching || effectiveQ === "original") return;
 
       const t = player.currentTime() ?? 0;
-      const q = quality === "auto" ? autoQ : quality;
 
       if (t < streamStart - 1) {
-        applyQualityAt(q, t);
+        applyQualityAt(effectiveQ, t);
         return;
       }
 
@@ -216,11 +226,12 @@
         if (buf.start(i) <= t + 1) maxBuf = Math.max(maxBuf, buf.end(i));
       }
       if (t > maxBuf + 2) {
-        applyQualityAt(q, t);
+        applyQualityAt(effectiveQ, t);
       }
     });
 
     player.on("waiting", () => {
+      stalling = true;
       if (switching) return;
       clearTimeout(waitingDebounce);
       waitingDebounce = setTimeout(
@@ -229,7 +240,10 @@
       );
     });
 
-    player.on("playing", () => clearTimeout(waitingDebounce));
+    player.on("playing", () => {
+      stalling = false;
+      clearTimeout(waitingDebounce);
+    });
 
     player.ready(() => {
       player_ready = true;
