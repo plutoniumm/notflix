@@ -94,7 +94,7 @@ func convertRoot(root string) {
 		go func(p string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			toWebM(p)
+			toMP4(p)
 		}(path)
 
 		return nil
@@ -103,18 +103,18 @@ func convertRoot(root string) {
 	wg.Wait()
 }
 
-func toWebM(srcPath string) {
+func toMP4(srcPath string) {
 	dir := filepath.Dir(srcPath)
 	srcName := filepath.Base(srcPath)
 	cleanedBase := CleanName(srcName)
 
-	webmPath := filepath.Join(dir, cleanedBase+".webm")
+	mp4Path := filepath.Join(dir, cleanedBase+".mp4")
 	vttPath := filepath.Join(dir, cleanedBase+".vtt")
 	name := srcName
 
-	if _, err := os.Stat(webmPath); err == nil {
+	if _, err := os.Stat(mp4Path); err == nil {
 		log.Printf("Incomplete conversion detected, restarting: %s", name)
-		os.Remove(webmPath)
+		os.Remove(mp4Path)
 	}
 
 	setProgress(name, 0)
@@ -126,7 +126,7 @@ func toWebM(srcPath string) {
 
 	dur := duration(srcPath)
 
-	if err := remux(srcPath, webmPath, dur, name); err != nil {
+	if err := remux(srcPath, mp4Path, dur, name); err != nil {
 		log.Printf("Conversion failed %s: %v", name, err)
 		return
 	}
@@ -187,14 +187,16 @@ func codecs(videoPath string) (videoCodec, audioCodec string) {
 func remux(src, dst string, durationSec float64, name string) error {
 	tmp := dst + ".tmp"
 
+	vc, ac := codecs(src)
 	args := []string{
 		"-nostdin", "-v", "error", "-i", src,
 		"-map", "0:v:0", "-map", "0:a:0",
-		"-c:v", "libvpx-vp9", "-quality", "good", "-cpu-used", "4",
-		"-b:v", "0", "-crf", "28", "-row-mt", "1",
-		"-c:a", "libopus", "-b:a", "128k", "-ac", "2",
-		"-f", "webm", tmp,
 	}
+	args = append(args, codecArgs(vc, ac)...)
+	args = append(args,
+		"-movflags", "+faststart",
+		"-f", "mp4", tmp,
+	)
 
 	pw := &progressWriter{name: name, durationSec: durationSec}
 	cmd := exec.Command("ffmpeg", args...)
