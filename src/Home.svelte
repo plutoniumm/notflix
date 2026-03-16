@@ -238,31 +238,31 @@
   }
 
   .search-wrap input {
-    background: #111;
-    border: 1px solid #444;
-    color: #fff;
+    background: var(--bg-2);
+    border: 1px solid var(--bg-5);
+    color: var(--tx-5);
     padding: 8px 14px;
     transition: border-color 0.15s;
   }
   .search-wrap input:focus {
-    border-color: #fff;
+    border-color: var(--tx-5);
   }
   .search-wrap input::placeholder {
-    color: #666;
+    color: var(--tx-1);
   }
 
   .manage {
     margin-left: auto;
-    color: #ccc;
+    color: var(--tx-4);
     padding: 6px 12px;
-    border: 1px solid #444;
+    border: 1px solid var(--bg-5);
     transition:
       color 0.15s,
       border-color 0.15s;
   }
   .manage:hover {
-    color: #fff;
-    border-color: #888;
+    color: var(--tx-5);
+    border-color: var(--tx-2);
   }
 
   main {
@@ -270,25 +270,25 @@
   }
   .loading {
     padding: 80px;
-    color: #666;
+    color: var(--tx-1);
   }
 
   .search-header {
     padding: 24px 48px 16px;
-    color: #aaa;
+    color: var(--tx-3);
   }
   .search-header strong {
-    color: #fff;
+    color: var(--tx-5);
   }
   .clear {
     background: none;
-    border: 1px solid #444;
-    color: #999;
+    border: 1px solid var(--bg-5);
+    color: var(--tx-2);
     padding: 4px 10px;
   }
   .clear:hover {
-    color: #fff;
-    border-color: #888;
+    color: var(--tx-5);
+    border-color: var(--tx-2);
   }
 
   .grid {
@@ -298,7 +298,7 @@
     width: 180px;
   }
   .no-results {
-    color: #666;
+    color: var(--tx-1);
     padding: 40px 48px;
   }
 
@@ -308,14 +308,14 @@
   .row h2 {
     padding: 0 48px;
     margin: 0 0 12px;
-    color: #eee;
+    color: var(--tx-4);
   }
 
   .arrow {
     position: absolute;
     z-index: 10;
-    background: rgba(0, 0, 0, 0.7);
-    color: #fff;
+    background: #000b;
+    color: var(--tx-5);
     font-size: 2rem;
     width: 44px;
     transition: opacity 0.2s;
@@ -335,7 +335,7 @@
     }
   }
   .arrow:hover {
-    background: rgba(0, 0, 0, 0.9);
+    background: #000e;
   }
 
   .cards {
@@ -356,17 +356,17 @@
   .card:hover {
     transform: scale(1.08);
     z-index: 10;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.8);
+    box-shadow: 0 8px 24px #000c;
   }
 
   .thumb {
     aspect-ratio: 16/9 !important;
-    background: #222;
+    background: var(--bg-3);
   }
 
   .play-icon {
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: #0006;
     transition: opacity 0.2s;
   }
   .card:hover .play-icon {
@@ -379,67 +379,67 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #4ade80;
-    box-shadow: 0 0 4px rgba(74, 222, 128, 0.8);
+    background: var(--grn);
+    box-shadow: 0 0 4px #4d8a;
   }
 
   .card-name {
-    color: #ccc;
+    color: var(--tx-4);
     padding: 6px 4px 2px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    background: #1a1a1a;
+    background: var(--bg-3);
   }
 
   .card-info {
-    background: #1a1a1a;
+    background: var(--bg-3);
     padding: 0 4px 6px;
   }
   .card-dir {
-    color: #666;
+    color: var(--tx-1);
   }
 
   .panel {
     bottom: 24px;
     right: 24px;
     width: 320px;
-    background: #1a1a1a;
-    border: 1px solid #333;
+    background: var(--bg-3);
+    border: 1px solid var(--bg-4);
     z-index: 200;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 8px 32px #0009;
     animation: slide-in-r 0.3s ease;
   }
 
   .header {
     padding: 10px 14px;
-    background: #222;
-    border-bottom: 1px solid #333;
+    background: var(--bg-3);
+    border-bottom: 1px solid var(--bg-4);
   }
 
   .title {
-    color: #ccc;
+    color: var(--tx-4);
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
 
   .count {
-    background: #e50914;
-    color: #fff;
+    background: var(--red);
+    color: var(--tx-5);
     width: 20px;
     height: 20px;
   }
 
   .item {
     padding: 10px 14px;
-    border-bottom: 1px solid #252525;
+    border-bottom: 1px solid var(--bg-3);
   }
   .item:last-child {
     border-bottom: none;
   }
 
   .name {
-    color: #ddd;
+    color: var(--tx-4);
     white-space: nowrap;
     text-overflow: ellipsis;
     margin-bottom: 6px;
@@ -448,17 +448,17 @@
   .bar {
     flex: 1;
     height: 4px;
-    background: #333;
+    background: var(--bg-4);
   }
 
   .fill {
-    background: #e50914;
+    background: var(--red);
     transition: width 0.5s ease;
     min-width: 2px;
   }
 
   .pct {
-    color: #888;
+    color: var(--tx-2);
     width: 30px;
     flex-shrink: 0;
   }

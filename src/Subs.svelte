@@ -9,18 +9,15 @@
   }
 </script>
 
-<div class="backdrop p-fix cc" onclick={onClose} role="presentation">
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="backdrop p-fix cc" onclick={onClose}>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div
-    class="modal f f-col rx5"
-    role="dialog"
-    aria-modal="true"
-    tabindex="-1"
-    onclick={(e) => e.stopPropagation()}
-  >
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal f f-col rx5" onclick={(e) => e.stopPropagation()}>
     <div class="modal-hd f al-ct j-bw">
       <h3 class="m0 fw6">Select Subtitles</h3>
-      <button class="close c-muted" onclick={onClose}>✕</button>
+      <button class="close tx-3" onclick={onClose}>✕</button>
     </div>
 
     <ul class="list m0 p0 flow-y-s">
@@ -38,7 +35,7 @@
             <span class="release trunc">
               {r.release || "Unknown release"}
             </span>
-            <span class="fs-sm c-sub sh-0">
+            <span class="fs-sm tx-2 sh-0">
               {r.download_count?.toLocaleString() ?? 0} dl
             </span>
 
@@ -55,14 +52,14 @@
 <style>
   .backdrop {
     inset: 0;
-    background: rgba(0, 0, 0, 0.8);
+    background: #000c;
     z-index: 1000;
     animation: fade-in 0.2s ease;
   }
 
   .modal {
-    background: #1f1f1f;
-    border: 1px solid #333;
+    background: var(--bg-3);
+    border: 1px solid var(--bg-4);
     width: 560px;
     max-width: 90vw;
     max-height: 70vh;
@@ -71,14 +68,14 @@
 
   .modal-hd {
     padding: 16px 20px;
-    border-bottom: 1px solid #333;
+    border-bottom: 1px solid var(--bg-4);
   }
 
   .close {
     padding: 4px 8px;
   }
   .close:hover {
-    color: #fff;
+    color: var(--tx-5);
   }
 
   .list {
@@ -89,13 +86,13 @@
     padding: 10px 20px;
     background: none;
     border: none;
-    border-bottom: 1px solid #2a2a2a;
-    color: #fff;
+    border-bottom: 1px solid var(--bg-3);
+    color: var(--tx-5);
     text-align: left;
     transition: background 0.1s;
   }
   .sub-item:hover {
-    background: #2a2a2a;
+    background: var(--bg-3);
   }
   .sub-item.busy {
     opacity: 0.7;
@@ -103,13 +100,13 @@
   }
 
   .badge {
-    background: #1a5c1a;
-    color: #4caf50;
+    background: #152;
+    color: var(--grn);
     padding: 2px 6px;
   }
   .release {
     flex: 1;
-    color: #ddd;
+    color: var(--tx-4);
   }
 
   .spinner {

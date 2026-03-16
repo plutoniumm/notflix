@@ -1,5 +1,5 @@
 <script lang="ts">
-  let { msg }: { msg: string } = $props();
+  let { msg } = $props();
 </script>
 
 {#if msg}
@@ -11,6 +11,6 @@
     bottom: 80px;
     left: 32px;
     z-index: 10;
-    background: rgba(0, 0, 0, 0.6);
+    background: #0009;
   }
 </style>

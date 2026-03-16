@@ -1,19 +1,11 @@
 <script lang="ts">
   import { fmtTime } from "../lib/events.svelte";
 
-  let {
-    pct,
-    duration,
-    hideUI,
-  }: {
-    pct: number;
-    duration: number;
-    hideUI: boolean;
-  } = $props();
+  let { pct, duration, hidden } = $props();
 </script>
 
 {#if duration > 0}
-  <div class="pill p-fix rx20" class:hidden={hideUI} style="--pct:{pct}%">
+  <div class="pill p-fix rx20" class:hidden style="--pct:{pct}%">
     {pct}% · {fmtTime(duration)}
   </div>
 {/if}
@@ -24,7 +16,7 @@
     left: 50%;
     transform: translateX(-50%);
     z-index: 10;
-    background: linear-gradient(to right, #f004 var(--pct), #0008 var(--pct));
+    background: linear-gradient(to right, #fff6 var(--pct), #0008 var(--pct));
     backdrop-filter: blur(8px);
     color: #fffd;
     font-variant-numeric: tabular-nums;
