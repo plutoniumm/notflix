@@ -112,6 +112,7 @@ func main() {
 	}
 	server.EnsureDir(pubDir)
 	server.EnsureDir(assDir)
+	server.EnsureDir("./cache")
 
 	go server.ConvertAll(roots)
 
@@ -322,6 +323,10 @@ func main() {
 	})
 
 	router.GET("/subs/*filename", func(c *gin.Context) { server.SubsSend(c, roots) })
+
+	router.GET("/api/hls/master", func(c *gin.Context) { server.HLSMaster(c, roots) })
+	router.GET("/api/hls/playlist", func(c *gin.Context) { server.HLSPlaylist(c, roots) })
+	router.GET("/api/hls/segment", func(c *gin.Context) { server.HLSSegment(c, roots) })
 
 	router.GET("/api/video/info", func(c *gin.Context) { server.VideoInfo(c, roots) })
 	router.GET("/api/subs/info", func(c *gin.Context) { server.Subctx(c, roots) })

@@ -14,6 +14,5 @@ export const DEL = (url: string) => fetch(url, { method: 'DELETE' })
   .then(r => r.json())
   .catch(() => null);
 
-export { default as Quality } from "./quality";
 export { default as Subs } from "./subs";
 export { default as Tracker } from "./tracker";

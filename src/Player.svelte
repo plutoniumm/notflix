@@ -7,7 +7,7 @@
   import DownloadButton from "./Download.svelte";
 
   import { clean, parseRaw, vidURL, nextVid } from "./lib/video";
-  import { Quality, Subs, GET, POST, Tracker } from "./lib";
+  import { Subs, GET, POST, Tracker } from "./lib";
   import { Touch, Hotkeys } from "./lib/ux";
 
   let { videoParam }: any = $props();
@@ -15,6 +15,7 @@
   const { dir, name } = parseRaw(videoParam);
   const title = clean(name);
   const sub = videoParam.replace(/\.mp4$/i, ".vtt");
+  const masterSrc = `/api/hls/master?file=${encodeURIComponent(videoParam)}`;
 
   const autoplay =
     new URLSearchParams(window.location.search).get("autoplay") === "1";
@@ -31,76 +32,11 @@
   let videoKey = $state("");
   let paused = $state(true);
   let hideUI = $state(false);
-  let quality = $state(localStorage.getItem(Quality.key) ?? "auto");
-  let maxHeight = $state<number | null>(null);
-  let autoQ = $state<string>("original");
-  let speedMbps = $state<number | null>(null);
-  let videoDuration = $state(0);
 
-  let player_ready = false;
-  let switching = false;
-  let stalling = false;
-  let streamStart = 0;
   let uiTimer: ReturnType<typeof setTimeout>;
-  let waitingDebounce: ReturnType<typeof setTimeout>;
   let idleTimer: ReturnType<typeof setTimeout>;
-  let speedWorker: Worker | null = null;
   let streamKilled = false;
   let killedAt = 0;
-
-  let availableLevels = $derived(
-    Quality.levels.filter((l) => maxHeight === null || l.h <= maxHeight),
-  );
-  let autoLabel = $derived(
-    Quality.levels.find((l) => l.q === autoQ)?.label ?? "Original",
-  );
-
-  function applyQualityAt(q: string, seek = 0) {
-    if (!player || !player_ready) return;
-
-    switching = true;
-    streamStart = q === "original" ? 0 : seek;
-    player.src({
-      src: Quality.src(videoParam, q, seek),
-      type: Quality.type(q),
-    });
-
-    const done = () => {
-      switching = false;
-      if (player.isDisposed()) return;
-      if (q === "original" && seek > 0) player.currentTime(seek);
-      if (!paused) player.play().catch(() => {});
-    };
-    const swTimeout = setTimeout(done, 8000);
-    player.one("loadedmetadata", () => {
-      clearTimeout(swTimeout);
-      done();
-    });
-  }
-
-  function tryAutoSwitch() {
-    if (quality !== "auto" || speedMbps === null || maxHeight === null) return;
-
-    const aq = Quality.auto(speedMbps, maxHeight);
-    if (aq === autoQ) return;
-
-    const wasOriginal = autoQ === "original";
-    if (wasOriginal && !stalling) return;
-
-    autoQ = aq;
-    if (!paused) applyQualityAt(aq, player?.currentTime() ?? 0);
-  }
-
-  function setQuality(q: string) {
-    quality = q;
-    localStorage.setItem(Quality.key, q);
-    if (q === "auto") {
-      tryAutoSwitch();
-      return;
-    }
-
-    applyQualityAt(q, player?.currentTime() ?? 0);
-  }
 
   function showUI() {
     hideUI = false;
@@ -158,11 +94,7 @@
       playbackRates: [0.5, 1, 1.25, 1.5, 2],
     });
 
-    const initQ = quality === "auto" ? "original" : quality;
-    player.src({
-      src: Quality.src(videoParam, initQ),
-      type: Quality.type(initQ),
-    });
+    player.src({ src: masterSrc, type: "application/vnd.apple.mpegurl" });
 
     player.addRemoteTextTrack(
       {
@@ -180,8 +112,11 @@
       if (streamKilled) {
         streamKilled = false;
         paused = false;
-        const q = quality === "auto" ? autoQ : quality;
-        applyQualityAt(q, killedAt);
+        player.src({ src: masterSrc, type: "application/vnd.apple.mpegurl" });
+        player.one("loadedmetadata", () => {
+          player.currentTime(killedAt);
+          player.play().catch(() => {});
+        });
         return;
       }
 
@@ -204,50 +139,7 @@
       }, 60_000);
     });
 
-    player.on("loadedmetadata", () => {
-      if (videoDuration > 0 && player.duration() === Infinity)
-        player.duration(videoDuration);
-    });
-
-    player.on("seeking", () => {
-      const effectiveQ = quality === "auto" ? autoQ : quality;
-      if (switching || effectiveQ === "original") return;
-
-      const t = player.currentTime() ?? 0;
-
-      if (t < streamStart - 1) {
-        applyQualityAt(effectiveQ, t);
-        return;
-      }
-
-      const buf = player.buffered();
-      let maxBuf = streamStart;
-      for (let i = 0; i < buf.length; i++) {
-        if (buf.start(i) <= t + 1) maxBuf = Math.max(maxBuf, buf.end(i));
-      }
-      if (t > maxBuf + 2) {
-        applyQualityAt(effectiveQ, t);
-      }
-    });
-
-    player.on("waiting", () => {
-      stalling = true;
-      if (switching) return;
-      clearTimeout(waitingDebounce);
-      waitingDebounce = setTimeout(
-        () => speedWorker?.postMessage({ type: "measure" }),
-        3000,
-      );
-    });
-
-    player.on("playing", () => {
-      stalling = false;
-      clearTimeout(waitingDebounce);
-    });
-
     player.ready(() => {
-      player_ready = true;
-      tryAutoSwitch();
       if (autoplay) player.play();
       const saved = tracker.get(videoParam);
       if (saved > 0) player.currentTime(saved);
@@ -283,36 +175,6 @@
 
     Subs.start(player, videoParam, sub);
 
-    const heightFallback = setTimeout(() => {
-      if (maxHeight === null) {
-        maxHeight = 1080;
-        tryAutoSwitch();
-      }
-    }, 5000);
-
-    GET(`/api/video/info?file=${encodeURIComponent(videoParam)}`)
-      .then((info: { height: number; duration: number }) => {
-        clearTimeout(heightFallback);
-
-        maxHeight = info.height > 0 ? info.height : 1080;
-        if (info.duration > 0) videoDuration = info.duration;
-
-        tryAutoSwitch();
-      })
-      .catch(() => {
-        clearTimeout(heightFallback);
-        maxHeight = 1080;
-        tryAutoSwitch();
-      });
-
-    speedWorker = new Worker(new URL("./lib/speedWorker.ts", import.meta.url), {
-      type: "module",
-    });
-    speedWorker.onmessage = (e: MessageEvent<number>) => {
-      speedMbps = e.data;
-      tryAutoSwitch();
-    };
-
     GET("/list/video")
       .then((data) => {
         rows = Object.entries(data).filter(([, files]) => files?.length);
@@ -336,9 +198,7 @@
 
     return () => {
       clearTimeout(uiTimer);
-      clearTimeout(waitingDebounce);
       clearTimeout(idleTimer);
-      speedWorker?.terminate();
       player?.dispose();
     };
   });
@@ -361,44 +221,6 @@
       </h1>
 
       <div class="f g5 sh-0 al-ct">
-        <div
-          class="icon-btn gear-wrap"
-          title="Quality: {quality === 'auto'
-            ? `Auto (${autoLabel})`
-            : quality}"
-        >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            aria-hidden="true"
-          >
-            <path
-              d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.64l-1.92-3.32a.49.49 0 0 0-.6-.22l-2.39.96a7.02 7.02 0 0 0-1.62-.94l-.36-2.54A.484.484 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.6.22L2.62 8.72a.48.48 0 0 0 .12.64l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.64l1.92 3.32c.12.22.37.29.6.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.36-2.54a6.9 6.9 0 0 0 1.62-.94l2.39.96c.23.08.48 0 .6-.22l1.92-3.32a.49.49 0 0 0-.12-.64l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"
-            />
-          </svg>
-
-          <select
-            class="gear-select"
-            onchange={(e) => setQuality(e.currentTarget.value)}
-          >
-            <option value="auto" selected={quality === "auto"}>
-              Auto ({autoLabel})
-            </option>
-
-            <option value="original" selected={quality === "original"}>
-              Original
-            </option>
-
-            {#each availableLevels as lvl (lvl.q)}
-              <option value={lvl.q} selected={quality === lvl.q}>
-                {lvl.label}
-              </option>
-            {/each}
-          </select>
-        </div>
-
         <!-- Subtitles -->
         <button class="icon-btn" onclick={fetchSubs} title="Fetch subtitles">
           <svg
@@ -640,21 +462,5 @@
   .icon-btn:hover {
     color: #fff;
     background: rgba(255, 255, 255, 0.12);
-  }
-
-  .gear-wrap {
-    position: relative;
-  }
-  .gear-select {
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    cursor: pointer;
-    width: 100%;
-    height: 100%;
-  }
-  .gear-select option {
-    background: #141414;
-    color: #ddd;
   }
 </style>

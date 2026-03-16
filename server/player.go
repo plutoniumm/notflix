@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -9,11 +8,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,12 +28,6 @@ func VideoPlayer(c *gin.Context, videosDir string) {
 		return
 	}
 
-	q := c.Query("q")
-	if validQuality(q) {
-		serveTranscoded(c, path, q)
-		return
-	}
-
 	file, info, err := openVid(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -49,62 +40,6 @@ func VideoPlayer(c *gin.Context, videosDir string) {
 	defer file.Close()
 
 	serve(c, file, info, name)
-}
-
-func validQuality(q string) bool {
-	switch q {
-	case "144p", "240p", "360p", "480p", "720p", "1080p", "2160p":
-		return true
-	}
-	return false
-}
-
-func serveTranscoded(c *gin.Context, path string, quality string) {
-	type profile struct{ scale, vbr, ab string }
-	profiles := map[string]profile{
-		"144p":  {"-2:144", "150k", "64k"},
-		"240p":  {"-2:240", "300k", "80k"},
-		"360p":  {"-2:360", "500k", "96k"},
-		"480p":  {"-2:480", "800k", "112k"},
-		"720p":  {"-2:720", "2000k", "128k"},
-		"1080p": {"-2:1080", "4000k", "192k"},
-		"2160p": {"-2:2160", "12000k", "256k"},
-	}
-	p := profiles[quality]
-
-	seek, _ := strconv.ParseFloat(c.Query("seek"), 64)
-
-	ctx := c.Request.Context()
-	args := []string{"-v", "error"}
-	if seek > 0 {
-		args = append(args, "-ss", fmt.Sprintf("%.3f", seek))
-	}
-	args = append(args,
-		"-i", path,
-		"-map", "0:v:0",
-		"-map", "0:a:0",
-		"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", p.vbr,
-		"-vf", "scale="+p.scale,
-		"-c:a", "aac", "-b:a", p.ab, "-ac", "2",
-		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
-	)
-	if seek > 0 {
-		args = append(args, "-output_ts_offset", fmt.Sprintf("%.3f", seek))
-	}
-	args = append(args, "-f", "mp4", "pipe:1")
-
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	cmd.WaitDelay = 2 * time.Second
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	c.Header("Content-Type", "video/mp4")
-	c.Status(http.StatusOK)
-	cmd.Stdout = c.Writer
-	if err := cmd.Run(); err != nil && !clientGone(err) {
-		log.Printf("serveTranscoded %s %s: %v\nffmpeg: %s", quality, path, err, stderr.String())
-	}
 }
 
 func VideoHead(c *gin.Context, videosDir string) {
