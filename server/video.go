@@ -54,7 +54,7 @@ func GetVids(dir string) []string {
 		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		if strings.HasSuffix(e.Name(), ".mp4") || strings.HasSuffix(e.Name(), ".webm") {
+		if strings.HasSuffix(e.Name(), ".mp4") {
 			out = append(out, e.Name())
 		}
 	}
@@ -90,7 +90,7 @@ func GenerateThumbnails(dir string) {
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(d.Name()))
-		if ext == ".mp4" || ext == ".webm" {
+		if ext == ".mp4" {
 			name := Hash(d.Name()) + ".jpg"
 			dst := filepath.Join(tdir, name)
 			if _, err := os.Stat(dst); err != nil {

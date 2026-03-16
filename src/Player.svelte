@@ -8,6 +8,7 @@
 
   import { clean, parseRaw, vidURL, nextVid } from "./lib/video";
   import { Subs, GET, POST, Tracker } from "./lib";
+  import { Down, isSupported } from "./lib/dl";
   import { Touch, Hotkeys } from "./lib/ux";
 
   let { videoParam }: any = $props();
@@ -83,7 +84,7 @@
     );
   }
 
-  onMount(() => {
+  onMount(async () => {
     document.title = `${title} | Notflix`;
 
     player = videojs(videoEl!, {
@@ -94,7 +95,16 @@
       playbackRates: [0.5, 1, 1.25, 1.5, 2],
     });
 
-    player.src({ src: masterSrc, type: "application/vnd.apple.mpegurl" });
+    let initSrc = masterSrc;
+    let initType = "application/vnd.apple.mpegurl";
+    if (isSupported() && videoParam.endsWith(".mp4")) {
+      const record = await Down.get(videoParam);
+      if (record?.status === "done") {
+        initSrc = `/video/${videoParam}`;
+        initType = "video/mp4";
+      }
+    }
+    player.src({ src: initSrc, type: initType });
 
     player.addRemoteTextTrack(
       {
