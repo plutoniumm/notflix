@@ -7,11 +7,11 @@ CGO_LDFLAGS_WHISPER := -L$(BREW_LIB) -L$(WHISPER_PREFIX)/lib
 .PHONY: run whisper clean
 
 whisper: clean
-	CGO_ENABLED=1 \
+	xx port 4242 || CGO_ENABLED=1 \
 	CGO_CFLAGS="$(CGO_CFLAGS_WHISPER)" \
 	CGO_LDFLAGS="$(CGO_LDFLAGS_WHISPER)" \
-	go build -tags whisper -o notflix .
-	pnpm run build
+	go build -tags whisper -o notflix .;
+	pnpm run build;
 
 run: whisper
 	./notflix

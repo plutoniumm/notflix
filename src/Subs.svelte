@@ -17,14 +17,14 @@
   <div class="modal f f-col rx5" onclick={(e) => e.stopPropagation()}>
     <div class="modal-hd f al-ct j-bw">
       <h3 class="m0 fw6">Select Subtitles</h3>
-      <button class="close tx-3" onclick={onClose}>✕</button>
+      <button class="p5 tx-3" onclick={onClose}>✕</button>
     </div>
 
     <ul class="list m0 p0 flow-y-s">
       {#each results as r (r.file_id)}
         <li>
           <button
-            class="sub-item f al-ct g10 w-100 fs ptr"
+            class="item f al-ct g10 w-100 fs ptr tl"
             class:busy={busy === r.file_id}
             onclick={() => pick(r.file_id)}
           >
@@ -71,30 +71,20 @@
     border-bottom: 1px solid var(--bg-4);
   }
 
-  .close {
-    padding: 4px 8px;
-  }
-  .close:hover {
-    color: var(--tx-5);
-  }
-
   .list {
     padding: 8px 0;
   }
 
-  .sub-item {
+  .item {
     padding: 10px 20px;
-    background: none;
-    border: none;
     border-bottom: 1px solid var(--bg-3);
     color: var(--tx-5);
-    text-align: left;
     transition: background 0.1s;
   }
-  .sub-item:hover {
+  .item:hover {
     background: var(--bg-3);
   }
-  .sub-item.busy {
+  .item.busy {
     opacity: 0.7;
     pointer-events: none;
   }

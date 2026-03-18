@@ -114,7 +114,12 @@ func main() {
 	server.EnsureDir(assDir)
 	server.EnsureDir("./cache")
 
-	go server.ConvertAll(roots)
+	go func() {
+		server.ConvertAll(roots)
+		server.SubAll(roots)
+		server.CleanAll(roots)
+	}()
+	go server.Aria2Init()
 
 	gin.SetMode("release")
 	router := gin.New()
@@ -272,6 +277,7 @@ func main() {
 	router.GET("/api/manage/diskinfo", func(c *gin.Context) {
 		type DiskInfo struct {
 			Root  string `json:"root"`
+			Path  string `json:"path"`
 			Free  uint64 `json:"free"`
 			Total uint64 `json:"total"`
 		}
@@ -285,12 +291,20 @@ func main() {
 
 			out = append(out, DiskInfo{
 				Root:  filepath.Base(root),
+				Path:  root,
 				Free:  stat.Bavail * uint64(stat.Bsize),
 				Total: stat.Blocks * uint64(stat.Bsize),
 			})
 		}
 		c.JSON(http.StatusOK, out)
 	})
+
+	router.POST("/api/aria2/add", func(c *gin.Context) { server.Aria2Add(c, roots) })
+	router.GET("/api/aria2/list", server.Aria2List)
+	router.DELETE("/api/aria2/remove", server.Aria2Remove)
+
+	router.GET("/kv/get", server.KVGet)
+	router.POST("/kv/set", server.KVSet)
 
 	router.DELETE("/api/dir", func(c *gin.Context) {
 		path := c.Query("path")
@@ -335,6 +349,7 @@ func main() {
 	router.POST("/api/subs/extract", func(c *gin.Context) { server.SubsExtract(c, roots) })
 	router.POST("/api/subs/whisper", func(c *gin.Context) { server.SubsWhisper(c, roots) })
 	router.GET("/api/subs/whisper/status", server.SubsWhisperStatus)
+	router.GET("/api/subs/whisper/stream", func(c *gin.Context) { server.SubsWhisperStream(c, roots) })
 
 	log.Printf("Starting server on http://localhost:%s", port)
 
