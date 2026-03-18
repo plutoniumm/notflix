@@ -3,17 +3,28 @@ interface VideoEntry {
   key: string
 }
 
+type DiskInfo = {
+  root: string;
+  path: string;
+  free: number;
+  total: number
+};
+
+type Downjob = {
+  gid: string;
+  name: string;
+  status: string;
+  total: number;
+  done: number;
+  percent: number;
+  speed: number
+};
+
 type VideoData = Record<string, VideoEntry[]>
 
 interface Job {
   name: string
   percent: number
-}
-
-interface DiskInfo {
-  root: string
-  free: number
-  total: number
 }
 
 interface DownloadRecord {

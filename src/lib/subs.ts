@@ -55,21 +55,53 @@ export default {
     }
   },
 
-  async whisper (raw: string, onMsg: (s: string) => void, onDone: () => void) {
+  whisperStream (raw: string, player: any, onMsg: (s: string) => void, onDone: () => void) {
     onMsg('Generating subtitles with Whisper…');
-    await POST('/api/subs/whisper', { file: raw });
 
-    const timer = setInterval(async () => {
-      const s = await GET(`/api/subs/whisper/status?file=${E(raw)}`);
+    const tracks = player.textTracks();
+    for (let i = tracks.length - 1; i >= 0; i--) {
+      if (tracks[i].label === 'Whisper')
+        player.removeRemoteTextTrack(tracks[i]);
+    }
 
-      if (!s) return;
-      if (s.status === 'done') {
-        clearInterval(timer);
-        onDone();
-      } else if (s.status === 'error') {
-        clearInterval(timer);
-        onMsg('Whisper failed: ' + (s.error || 'unknown'));
+    player.addRemoteTextTrack({
+      kind: 'captions',
+      src: '',
+      srclang: 'en',
+      label: 'Whisper',
+      default: true
+    }, false);
+    let track: TextTrack | null = null;
+
+    setTimeout(() => {
+      const all = player.textTracks();
+      for (let i = 0; i < all.length; i++) {
+        if (all[i].label === 'Whisper') { track = all[i]; track!.mode = 'showing'; }
       }
-    }, 3000);
+    }, 100);
+
+    let count = 0;
+    const es = new EventSource(`/api/subs/whisper/stream?file=${E(raw)}`);
+    es.onmessage = (e) => {
+      const d = JSON.parse(e.data);
+      if (d.done) {
+        es.close();
+        onDone();
+        return;
+      }
+      if (d.error) {
+        es.close();
+        onMsg('Whisper error: ' + d.error);
+        return;
+      }
+      if (track)
+        track.addCue(new VTTCue(d.start, d.end, d.text));
+
+      onMsg(`Whisper: ${++count} segments…`);
+    };
+    es.onerror = () => {
+      es.close();
+      onMsg('Whisper stream error');
+    };
   },
 } as const;

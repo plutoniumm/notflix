@@ -47,24 +47,21 @@
       file_id: fid,
       file: videoParam,
     });
-    if (res?.ok) {
-      subs = null;
-      Subs.reload(player, `/subs/${sub}`, "English");
+    if (!res?.ok) {
+      alert("Subtitle download failed: " + (res?.error ?? "unknown error"));
+      return;
     }
+    subs = null;
+    Subs.reload(player, `/subs/${sub}`, "English");
   }
 
-  async function runWhisper() {
-    await Subs.whisper(
+  function runWhisper() {
+    Subs.whisperStream(
       videoParam,
+      player,
       (msg) => (ps.wMsg = msg),
       () => {
         ps.wMsg = "";
-        Subs.reload(
-          player,
-          `/subs/${sub.replace(/\.vtt$/, ".whisper.vtt")}`,
-          "Whisper",
-          true,
-        );
       },
     );
   }
@@ -103,6 +100,16 @@
 
     ps.bind(player);
 
+    player.requestFullscreen = () => {
+      pageEl!.requestFullscreen();
+      return player;
+    };
+    player.exitFullscreen = () => {
+      document.exitFullscreen();
+      return player;
+    };
+    player.isFullscreen = () => !!document.fullscreenElement;
+
     player.ready(() => {
       if (autoplay) player.play();
       const saved = tracker.get(videoParam);
@@ -111,6 +118,7 @@
       Touch(player, pageEl!);
       Hotkeys(
         player,
+        pageEl!,
         () => {
           if (ps.nextURL) window.location.href = ps.nextURL;
         },
@@ -170,7 +178,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   bind:this={pageEl}
-  class="player-page"
+  class="page p-fix flow-h"
   class:hide-ui={ps.hideUI}
   class:embed
   onmousemove={() => ps.showUI(ps.paused)}
@@ -209,13 +217,11 @@
 {/if}
 
 <style>
-  .player-page {
-    position: fixed;
+  .page {
     inset: 0;
     background: #000;
-    overflow: hidden;
   }
-  .player-page.hide-ui {
+  .page.hide-ui {
     cursor: none;
   }
 

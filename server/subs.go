@@ -385,6 +385,25 @@ func GetSubs(c *gin.Context, roots []string) {
 	}
 
 	data, _ := io.ReadAll(resp.Body)
+	fmt.Fprintf(os.Stderr, "[subs] OS download status=%d body=%s\n", resp.StatusCode, string(data))
+	if resp.StatusCode != http.StatusOK {
+		var osErr struct {
+			Message string   `json:"message"`
+			Errors  []string `json:"errors"`
+		}
+
+		msg := fmt.Sprintf("OpenSubtitles error (HTTP %d)", resp.StatusCode)
+		if json.Unmarshal(data, &osErr) == nil && osErr.Message != "" {
+			msg = osErr.Message
+			if len(osErr.Errors) > 0 {
+				msg += ": " + strings.Join(osErr.Errors, "; ")
+			}
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		return
+	}
+
 	if err := json.Unmarshal(data, &dl); err != nil || dl.Link == "" {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid download response"})
 		return

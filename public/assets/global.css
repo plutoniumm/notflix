@@ -27,28 +27,26 @@ video {
   transition: all 0.1s ease-in-out;
 }
 
-/* ── font sizes ── */
 .fs-xs {
-  font-size: 11px;
-}
-
-.fs-sm {
   font-size: 12px;
 }
 
+.fs-sm {
+  font-size: 14px;
+}
+
 .fs {
-  font-size: 13px;
+  font-size: 16px;
 }
 
 .fs-md {
-  font-size: 14px;
+  font-size: 18px;
 }
 
 .fs-lg {
   font-size: 20px;
 }
 
-/* ── text color ── */
 .tx-1 {
   color: var(--tx-1);
 }

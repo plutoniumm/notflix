@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { clean } from "./lib/video";
   import { POST, GET, DEL } from "./lib";
 
@@ -9,12 +9,25 @@
   let editing = $state<string | null>(null);
   let val = $state("");
 
+  let dlMagnet = $state("");
+  let dlDir = $state("");
+  let dlJobs: Downjob[] = $state([]);
+
+  let dlTimer: ReturnType<typeof setInterval>;
+
+  onDestroy(() => clearInterval(dlTimer));
+
   function focus(el: HTMLInputElement) {
     el.focus();
     el.select();
   }
 
-  onMount(load);
+  onMount(() => {
+    load();
+    dlTimer = setInterval(async () => {
+      dlJobs = (await GET("/api/aria2/list")) ?? [];
+    }, 2000);
+  });
 
   function fmtBytes(b: number): string {
     if (b >= 1e12) return (b / 1e12).toFixed(1) + " TB";
@@ -31,7 +44,20 @@
       GET("/api/manage/diskinfo"),
     ]);
 
+    if (disks?.length > 0 && !dlDir) dlDir = disks[0].path;
+
     loading = false;
+  }
+
+  async function addDownload() {
+    if (!dlMagnet.trim()) return;
+    await POST("/api/aria2/add", { magnet: dlMagnet.trim(), dir: dlDir });
+    dlMagnet = "";
+  }
+
+  async function removeDownload(gid: string) {
+    await DEL(`/api/aria2/remove?gid=${gid}`);
+    dlJobs = dlJobs.filter((j) => j.gid !== gid);
   }
 
   function startEdit(path: string, name: string) {
@@ -108,7 +134,7 @@
 
 <div style="min-height:100vh">
   <header class="f fw al-ct g10 p-stx">
-    <a href="/" class="back fs tx-3"> ← Home </a>
+    <a href="/" class="back fs tx-3"> ← </a>
     <h1 class="m0 fw6">Manage Library</h1>
     <span class="fs tx-1">
       {rows.length} folders · {total} files
@@ -136,7 +162,59 @@
     {/if}
   </header>
 
+  <div class="form-wrap f al-ct g10 p-stx">
+    <input
+      class="input bg-3 rx5 fs-sm tx-5"
+      placeholder="magnet:?xt=…"
+      bind:value={dlMagnet}
+      onkeydown={(e) => e.key === "Enter" && addDownload()}
+    />
+    <select class="bg-3 rx5 fs-sm tx-5" bind:value={dlDir}>
+      {#each disks as d}
+        <option value={d.path}>{d.root} ({fmtBytes(d.free)} free)</option>
+      {/each}
+    </select>
+
+    <button class="btn ptr rx5 fs-xs" onclick={addDownload}> Add </button>
+  </div>
+
   <main>
+    {#if dlJobs.length > 0}
+      <section class="rx5 flow-h">
+        <h3 class="m0 p10 fs-sm fw6 bg-3">Downloading ({dlJobs.length})</h3>
+        {#each dlJobs as j (j.gid)}
+          <div class="item f al-ct g10">
+            <div class="info">
+              <span class="name d-b fs-sm tx-4 flow-h">
+                {j.name || j.gid}
+              </span>
+
+              <div class="f al-ct g10">
+                <div class="bar rx2">
+                  <div
+                    class="fill h-100 rx2"
+                    style="width:{j.percent.toFixed(1)}%"
+                  ></div>
+                </div>
+
+                <span class="fs-xs tx-1">
+                  {Math.round(j.percent)}%
+                </span>
+                <span class="fs-xs tx-1">
+                  {fmtBytes(j.speed)}/s
+                </span>
+              </div>
+            </div>
+
+            <button
+              class="btn-icon danger sh-0"
+              onclick={() => removeDownload(j.gid)}>✕</button
+            >
+          </div>
+        {/each}
+      </section>
+    {/if}
+
     {#if loading}
       <div class="tx-1 p20">Loading…</div>
     {:else}
@@ -347,5 +425,67 @@
   .file-actions {
     opacity: 0;
     transition: opacity 0.15s;
+  }
+
+  .form-wrap {
+    padding: 10px 40px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--bg-3);
+  }
+
+  .input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--bg-4);
+    padding: 6px 12px;
+  }
+
+  select {
+    border: 1px solid var(--bg-4);
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+
+  .btn {
+    background: var(--red);
+    color: #fff;
+    padding: 6px 16px;
+    white-space: nowrap;
+  }
+
+  .btn:hover {
+    opacity: 0.85;
+  }
+
+  section {
+    margin-bottom: 20px;
+    border: 1px solid var(--bg-3);
+  }
+
+  .item {
+    padding: 10px 14px;
+    border-top: 1px solid var(--bg-3);
+  }
+
+  .info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .name {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+  }
+
+  .bar {
+    flex: 1;
+    height: 4px;
+    background: var(--bg-4);
+  }
+
+  .fill {
+    background: var(--red);
+    transition: width 0.5s;
   }
 </style>

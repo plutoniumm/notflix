@@ -41,6 +41,7 @@ function ripple (el: HTMLElement, x: number, y: number, label: string) {
 
 export function Hotkeys (
   player: any,
+  container: HTMLElement,
   onNext: () => void,
   onWhisper: () => void
 ) {
@@ -72,7 +73,7 @@ export function Hotkeys (
       e.preventDefault()
       player.paused() ? player.play() : player.pause()
     } else if (lkey === 'f') {
-      player.isFullscreen() ? player.exitFullscreen() : player.requestFullscreen()
+      document.fullscreenElement ? document.exitFullscreen() : container.requestFullscreen()
     } else if (lkey === 'm') {
       player.muted(!player.muted())
     } else if (lkey === 'd') {
