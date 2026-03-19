@@ -56,12 +56,18 @@ func a2call(method string, params ...any) (json.RawMessage, error) {
 	return out.Result, nil
 }
 
+const aria2Session = "./cache/aria2.session"
+
 func Aria2Init() {
 	cmd := exec.Command("aria2c",
 		"--enable-rpc", "--rpc-listen-all",
 		"--rpc-listen-port=6800",
 		"--seed-time=0",
 		"--quiet=true",
+		"--save-session="+aria2Session,
+		"--save-session-interval=60",
+		"--input-file="+aria2Session,
+		"--continue=true",
 	)
 
 	if err := cmd.Start(); err != nil {

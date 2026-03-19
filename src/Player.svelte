@@ -113,7 +113,16 @@
     player.ready(() => {
       if (autoplay) player.play();
       const saved = tracker.get(videoParam);
-      if (saved > 0) player.currentTime(saved);
+      if (saved > 0) {
+        player.currentTime(saved);
+      } else {
+        GET(`/kv/get?key=${encodeURIComponent("watched:" + videoParam)}`).then(
+          (res) => {
+            const t = res?.value?.t;
+            if (t > 60) player.currentTime(Math.max(0, t - 60));
+          },
+        );
+      }
 
       Touch(player, pageEl!);
       Hotkeys(
@@ -140,7 +149,15 @@
         const t = player.currentTime() ?? 0;
         const d = player.duration() ?? 0;
         tracker.set(videoParam, t);
-        if (d - t < 5 * 60) tracker.del(videoParam);
+        if (d > 0 && d - t < 5 * 60) {
+          tracker.del(videoParam);
+          POST("/kv/set", { key: `watched:${videoParam}`, value: null });
+        } else if (t > 60) {
+          POST("/kv/set", {
+            key: `watched:${videoParam}`,
+            value: { t, at: Date.now() },
+          });
+        }
       }, 2000);
     });
 

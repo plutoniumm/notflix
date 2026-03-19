@@ -7,38 +7,96 @@
   let data: VideoData = $state({});
   let search = $state("");
   let loading = $state(true);
-  let jobs: Job[] = $state([]);
   let downloadedSet = $state(new Set<string>());
+  let inProg: DownloadRecord[] = $state([]);
+  let continues: {
+    dir: string;
+    name: string;
+    key: string;
+    t: number;
+  }[] = $state([]);
 
-  async function pollJobs() {
-    jobs = (await GET("/api/conversions")) || [];
+  async function loadState(d: VideoData) {
+    const allParams: {
+      dir: string;
+      name: string;
+      key: string;
+      param: string;
+    }[] = [];
+
+    for (const [dir, files] of Object.entries(d)) {
+      for (const f of files ?? []) {
+        const param = dir === "." ? f.name : `${dir}/${f.name}`;
+        allParams.push({
+          dir,
+          name: f.name,
+          key: f.key,
+          param,
+        });
+      }
+    }
+    if (!allParams.length) return;
+
+    const qs = allParams
+      .map((v) => `key=${encodeURIComponent("watched:" + v.param)}`)
+      .join("&");
+    const kv: Record<string, { t: number; at: number } | null> =
+      (await GET(`/kv/get?${qs}`)) ?? {};
+
+    continues = allParams
+      .filter((v) => {
+        const val = kv[`watched:${v.param}`];
+        return val && val.t > 60;
+      })
+      .sort((a, b) => {
+        const at = kv[`watched:${a.param}`]?.at ?? 0;
+        const bt = kv[`watched:${b.param}`]?.at ?? 0;
+        return bt - at;
+      })
+      .slice(0, 20)
+      .map((v) => ({
+        dir: v.dir,
+        name: v.name,
+        key: v.key,
+        t: kv[`watched:${v.param}`]!.t,
+      }));
+  }
+
+  async function cancelDownload(videoParam: string) {
+    await Down.del(videoParam);
+
+    inProg = inProg.filter((r) => r.videoParam !== videoParam);
   }
 
   onMount(() => {
-    GET("/list/video").then((d) => (data = d));
+    GET("/list/video").then((d) => {
+      data = d;
+      loadState(d);
+    });
     loading = false;
-
-    pollJobs();
 
     Down.all().then((records) => {
       downloadedSet = new Set(
         records.filter((r) => r.status === "done").map((r) => r.videoParam),
       );
+      inProg = records.filter((r) => r.status === "downloading");
     });
 
     const unsubSW = Down.on((videoParam, record) => {
       const next = new Set(downloadedSet);
       if (record?.status === "done") {
         next.add(videoParam);
+        inProg = inProg.filter((r) => r.videoParam !== videoParam);
+      } else if (record?.status === "downloading") {
+        inProg = [...inProg.filter((r) => r.videoParam !== videoParam), record];
       } else {
         next.delete(videoParam);
+        inProg = inProg.filter((r) => r.videoParam !== videoParam);
       }
       downloadedSet = next;
     });
 
-    const timer = setInterval(pollJobs, 2000);
     return () => {
-      clearInterval(timer);
       unsubSW();
     };
   });
@@ -137,6 +195,60 @@
         {/if}
       </div>
     {:else}
+      {#if continues.length > 0}
+        <section class="row">
+          <h2>Continue Watching</h2>
+          <div class="row-wrap f al-ct p-rel">
+            <button
+              class="arrow cc o-0 h-100 p0 left"
+              onclick={(e) => {
+                const el: any = e.currentTarget.nextElementSibling;
+                scrollRow(el, -1);
+              }}>‹</button
+            >
+            <div class="cards f flow-x-s g5">
+              {#each continues as item, idx}
+                {@const vidParam =
+                  item.dir === "." ? item.name : `${item.dir}/${item.name}`}
+                <a
+                  href={vidURL(item.dir, item.name)}
+                  class="card ptr rx5 flow-h p-rel"
+                  style="--i: {idx}"
+                >
+                  <div class="thumb p-rel flow-h">
+                    <img
+                      class="h-100 w-100 d-b"
+                      src="/images/{item.key}.jpg"
+                      alt=""
+                      loading="lazy"
+                    />
+                    <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
+                    {#if downloadedSet.has(vidParam)}
+                      <div class="dot p-abs"></div>
+                    {/if}
+                    <div class="cw-bar p-abs"></div>
+                  </div>
+                  <div class="card-name">
+                    {clean(item.name)}
+                  </div>
+                  <div class="cw-time fs-xs">
+                    {Math.floor(item.t / 3600) > 0
+                      ? `${Math.floor(item.t / 3600)}h ${Math.floor((item.t % 3600) / 60)}m`
+                      : `${Math.floor(item.t / 60)}m`}
+                  </div>
+                </a>
+              {/each}
+            </div>
+            <button
+              class="arrow cc o-0 h-100 p0 right"
+              onclick={(e) => {
+                const el: any = e.currentTarget.previousElementSibling;
+                scrollRow(el, 1);
+              }}>›</button
+            >
+          </div>
+        </section>
+      {/if}
       {#each rows as [dir, files]}
         {#if files?.length}
           <section class="row">
@@ -195,29 +307,22 @@
     {/if}
   </main>
 
-  {#if jobs.length > 0}
+  {#if inProg.length > 0}
     <div class="panel p-fix rx10 flow-h">
       <div class="header f al-ct j-bw">
-        <span class="title fw6">Converting</span>
-        <span class="count fs-xs fw7 cc rx20">{jobs.length}</span>
+        <span class="title fw6">Downloading</span>
+        <span class="count fs-xs fw7 cc rx20">{inProg.length}</span>
       </div>
-
-      {#each jobs as j (j.name)}
-        <div class="item">
-          <div class="name fs-xs flow-h">
-            {j.name.replace(/\.(mkv|mov)$/i, "")}
+      {#each inProg as dl (dl.videoParam)}
+        <div class="item f al-ct g10">
+          <div class="name fs-xs flow-h" style="flex:1">
+            {clean(dl.title || dl.videoParam)}
           </div>
-
-          <div class="row f al-ct g10">
-            <div class="bar rx2 flow-h">
-              <div
-                class="fill h-100 rx2"
-                style="width: {j.percent.toFixed(1)}%"
-              ></div>
-            </div>
-
-            <span class="pct fs-xs tr">{Math.round(j.percent)}%</span>
-          </div>
+          <button
+            class="cancel-btn fs-xs cc ptr rx3"
+            onclick={() => cancelDownload(dl.videoParam)}
+            title="Cancel download">✕</button
+          >
         </div>
       {/each}
     </div>
@@ -383,6 +488,39 @@
     box-shadow: 0 0 4px #4d8a;
   }
 
+  .cw-bar {
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--red);
+    opacity: 0.8;
+  }
+
+  .cw-time {
+    color: var(--tx-2);
+    padding: 2px 4px 4px;
+    background: var(--bg-3);
+  }
+
+  .cancel-btn {
+    background: #fff1;
+    border: 1px solid #fff2;
+    color: var(--tx-3);
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    font-size: 11px;
+    transition:
+      background 0.15s,
+      color 0.15s;
+  }
+  .cancel-btn:hover {
+    background: var(--red);
+    color: #fff;
+    border-color: var(--red);
+  }
+
   .card-name {
     color: var(--tx-4);
     padding: 6px 4px 2px;
@@ -443,23 +581,5 @@
     white-space: nowrap;
     text-overflow: ellipsis;
     margin-bottom: 6px;
-  }
-
-  .bar {
-    flex: 1;
-    height: 4px;
-    background: var(--bg-4);
-  }
-
-  .fill {
-    background: var(--red);
-    transition: width 0.5s ease;
-    min-width: 2px;
-  }
-
-  .pct {
-    color: var(--tx-2);
-    width: 30px;
-    flex-shrink: 0;
   }
 </style>

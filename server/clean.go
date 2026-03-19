@@ -17,6 +17,10 @@ var subExts = map[string]bool{
 	".vtt": true, ".srt": true, ".ass": true, ".ssa": true,
 }
 
+var keepExts = map[string]bool{
+	".torrent": true, ".aria2": true,
+}
+
 func CleanAll(roots []string) {
 	for _, root := range roots {
 		if _, err := os.Stat(root); err != nil {
@@ -36,7 +40,7 @@ func cleanRoot(root string) {
 		}
 
 		ext := strings.ToLower(filepath.Ext(d.Name()))
-		if !videoExts[ext] && !subExts[ext] {
+		if !videoExts[ext] && !subExts[ext] && !keepExts[ext] {
 			log.Printf("[CleanAll] junk: %s", path)
 			os.Remove(path)
 		}
