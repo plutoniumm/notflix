@@ -4,7 +4,6 @@ go 1.24.0
 
 require (
 	github.com/asticode/go-astiffprobe v0.4.0
-	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20260305053642-30c5194c9691
 	github.com/gin-gonic/gin v1.10.0
 	github.com/joho/godotenv v1.5.1
 	github.com/martinlindhe/subtitles v0.0.0-20251112120457-6c58d9eae08c

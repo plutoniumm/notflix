@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -14,6 +15,30 @@ import (
 )
 
 var prober = astiffprobe.New(astiffprobe.Configuration{BinaryPath: "ffprobe"})
+
+// FindFile resolves a user-supplied relative path against the given roots.
+// It rejects path traversal and returns the absolute path of the first match.
+func FindFile(rel string, roots []string) string {
+	rel = strings.TrimPrefix(rel, "/")
+	if rel == "" || strings.Contains(rel, "..") {
+		return ""
+	}
+	for _, root := range roots {
+		absR, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		candidate := filepath.Join(root, rel)
+		abs, err := filepath.Abs(candidate)
+		if err != nil || !strings.HasPrefix(abs, absR) {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return abs
+		}
+	}
+	return ""
+}
 
 func Error(message string, c *gin.Context, statusCode int) {
 	fmt.Println("Error:", message)

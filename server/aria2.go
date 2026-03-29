@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync/atomic"
@@ -59,16 +60,19 @@ func a2call(method string, params ...any) (json.RawMessage, error) {
 const aria2Session = "./cache/aria2.session"
 
 func Aria2Init() {
-	cmd := exec.Command("aria2c",
+	args := []string{
 		"--enable-rpc", "--rpc-listen-all",
 		"--rpc-listen-port=6800",
 		"--seed-time=0",
 		"--quiet=true",
-		"--save-session="+aria2Session,
+		"--save-session=" + aria2Session,
 		"--save-session-interval=60",
-		"--input-file="+aria2Session,
 		"--continue=true",
-	)
+	}
+	if _, err := os.Stat(aria2Session); err == nil {
+		args = append(args, "--input-file="+aria2Session)
+	}
+	cmd := exec.Command("aria2c", args...)
 
 	if err := cmd.Start(); err != nil {
 		log.Printf("[aria2] failed to start aria2c: %v", err)
@@ -181,7 +185,7 @@ func Aria2Add(c *gin.Context, roots []string) {
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.Magnet == "" {
 		log.Printf("[aria2] add: bad body: %v", err)
-		c.JSON(400, gin.H{"error": "invalid body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
 
@@ -193,7 +197,7 @@ func Aria2Add(c *gin.Context, roots []string) {
 
 	absDir, err := filepath.Abs(body.Dir)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "invalid dir"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid dir"})
 		return
 	}
 	allowed := false
@@ -206,21 +210,23 @@ func Aria2Add(c *gin.Context, roots []string) {
 	}
 	if !allowed {
 		log.Printf("[aria2] add: dir %q not in roots", absDir)
-		c.JSON(400, gin.H{"error": "dir not allowed"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dir not allowed"})
 		return
 	}
 
 	raw, err := a2call("aria2.addUri", []string{body.Magnet}, map[string]string{"dir": absDir})
 	if err != nil {
 		log.Printf("[aria2] add: RPC error: %v", err)
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	var gid string
-	json.Unmarshal(raw, &gid)
+	if err := json.Unmarshal(raw, &gid); err != nil {
+		log.Printf("[aria2] add: unmarshal gid: %v", err)
+	}
 	log.Printf("[aria2] add: ok gid=%s", gid)
-	c.JSON(200, gin.H{"ok": true, "gid": gid})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "gid": gid})
 }
 
 func Aria2List(c *gin.Context) {
@@ -228,7 +234,7 @@ func Aria2List(c *gin.Context) {
 	waitRaw, err2 := a2call("aria2.tellWaiting", 0, 100)
 
 	if err1 != nil && err2 != nil {
-		c.JSON(200, []Downjob{})
+		c.JSON(http.StatusOK, []Downjob{})
 		return
 	}
 
@@ -245,13 +251,13 @@ func Aria2List(c *gin.Context) {
 		items = append(items, s.toItem())
 	}
 
-	c.JSON(200, items)
+	c.JSON(http.StatusOK, items)
 }
 
 func Aria2Remove(c *gin.Context) {
 	gid := c.Query("gid")
 	if gid == "" {
-		c.JSON(400, gin.H{"error": "missing gid"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing gid"})
 		return
 	}
 	log.Printf("[aria2] remove: gid=%s", gid)
@@ -260,5 +266,5 @@ func Aria2Remove(c *gin.Context) {
 	a2call("aria2.removeDownloadResult", gid) //nolint
 
 	log.Printf("[aria2] remove: done")
-	c.JSON(200, gin.H{"ok": true})
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

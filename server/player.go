@@ -156,25 +156,7 @@ func serve(c *gin.Context, file *os.File, info os.FileInfo, name string) {
 
 func VideoInfo(c *gin.Context, roots []string) {
 	file := c.Query("file")
-	if file == "" || strings.Contains(file, "..") {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid"})
-		return
-	}
-
-	var path string
-	for _, root := range roots {
-		absR, _ := filepath.Abs(root)
-		candidate := filepath.Join(root, file)
-		abs, err := filepath.Abs(candidate)
-		if err != nil || !strings.HasPrefix(abs, absR) {
-			continue
-		}
-		if _, err := os.Stat(candidate); err == nil {
-			path = candidate
-			break
-		}
-	}
-
+	path := FindFile(file, roots)
 	if path == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return

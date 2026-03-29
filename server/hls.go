@@ -56,22 +56,48 @@ var hlsBandwidth = map[string]int{
 	"2160p": 9_000_000,
 }
 
+// HLSAVOffset probes the source file and returns the A/V start-time offset in ms.
+// A positive value means audio starts before video (audio is ahead); the frontend
+// should delay audio by that amount to re-align.
+func HLSAVOffset(c *gin.Context, roots []string) {
+	file := c.Query("file")
+	path := hlsFindFile(file, roots)
+	if path == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+
+	streams, err := prober.Streams(context.Background(), path)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var vStart, aStart float64
+	var hasV, hasA bool
+	for _, s := range streams {
+		if s.CodecType == "video" && !hasV {
+			vStart = s.StartTime.Duration.Seconds()
+			hasV = true
+		} else if s.CodecType == "audio" && !hasA {
+			aStart = s.StartTime.Duration.Seconds()
+			hasA = true
+		}
+	}
+
+	if !hasV || !hasA {
+		c.JSON(http.StatusOK, gin.H{"offset_ms": 0})
+		return
+	}
+
+	// positive → audio ahead of video → delay audio by this amount
+	// negative → video ahead of audio → not correctable in frontend (backend aresample handles it)
+	offsetMs := int((vStart - aStart) * 1000)
+	c.JSON(http.StatusOK, gin.H{"offset_ms": offsetMs})
+}
+
 func hlsFindFile(file string, roots []string) string {
-	if file == "" || strings.Contains(file, "..") {
-		return ""
-	}
-	for _, root := range roots {
-		absR, _ := filepath.Abs(root)
-		candidate := filepath.Join(root, file)
-		abs, err := filepath.Abs(candidate)
-		if err != nil || !strings.HasPrefix(abs, absR) {
-			continue
-		}
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-	return ""
+	return FindFile(file, roots)
 }
 
 func HLSMaster(c *gin.Context, roots []string) {
@@ -93,6 +119,7 @@ func HLSMaster(c *gin.Context, roots []string) {
 		}
 	}
 
+	audio := c.DefaultQuery("audio", "0")
 	encFile := url.QueryEscape(file)
 	var sb strings.Builder
 	sb.WriteString("#EXTM3U\n")
@@ -104,7 +131,7 @@ func HLSMaster(c *gin.Context, roots []string) {
 			continue
 		}
 		sb.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d\n", hlsBandwidth[q]))
-		sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s\n", encFile, q))
+		sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s&audio=%s\n", encFile, q, audio))
 	}
 
 	c.Header("Cache-Control", "no-cache")
@@ -114,6 +141,7 @@ func HLSMaster(c *gin.Context, roots []string) {
 func HLSPlaylist(c *gin.Context, roots []string) {
 	file := c.Query("file")
 	q := c.Query("q")
+	audio := c.DefaultQuery("audio", "0")
 
 	if _, ok := hlsProfiles[q]; !ok {
 		c.String(http.StatusBadRequest, "invalid quality")
@@ -148,7 +176,7 @@ func HLSPlaylist(c *gin.Context, roots []string) {
 			segDur = remaining
 		}
 		sb.WriteString(fmt.Sprintf("#EXTINF:%.3f,\n", segDur))
-		sb.WriteString(fmt.Sprintf("/api/hls/segment?file=%s&q=%s&seg=%d\n", encFile, q, i))
+		sb.WriteString(fmt.Sprintf("/api/hls/segment?file=%s&q=%s&seg=%d&audio=%s\n", encFile, q, i, audio))
 	}
 
 	sb.WriteString("#EXT-X-ENDLIST\n")
@@ -162,6 +190,7 @@ func HLSSegment(c *gin.Context, roots []string) {
 	file := c.Query("file")
 	q := c.Query("q")
 	segStr := c.Query("seg")
+	audioStr := c.DefaultQuery("audio", "0")
 
 	p, ok := hlsProfiles[q]
 	if !ok {
@@ -175,6 +204,11 @@ func HLSSegment(c *gin.Context, roots []string) {
 		return
 	}
 
+	var audioIdx int
+	if n, err := fmt.Sscanf(audioStr, "%d", &audioIdx); n != 1 || err != nil || audioIdx < 0 {
+		audioIdx = 0
+	}
+
 	path := hlsFindFile(file, roots)
 	if path == "" {
 		c.String(http.StatusNotFound, "not found")
@@ -182,8 +216,8 @@ func HLSSegment(c *gin.Context, roots []string) {
 	}
 
 	hash := Hash(file)
-	cacheKey := fmt.Sprintf("%s/%s/%06d", hash, q, segNum)
-	segPath := filepath.Join(hlsCacheDir, hash, q, fmt.Sprintf("%06d.ts", segNum))
+	cacheKey := fmt.Sprintf("%s/%s/a%d/%06d", hash, q, audioIdx, segNum)
+	segPath := filepath.Join(hlsCacheDir, hash, q, fmt.Sprintf("a%d", audioIdx), fmt.Sprintf("%06d.ts", segNum))
 
 	if _, err := os.Stat(segPath); err == nil {
 		serveSegment(c, segPath)
@@ -193,8 +227,12 @@ func HLSSegment(c *gin.Context, roots []string) {
 	// In-flight dedup: if another goroutine is generating this segment, wait for it
 	ch := make(chan struct{})
 	if actual, loaded := hlsInFlight.LoadOrStore(cacheKey, ch); loaded {
-		<-actual.(chan struct{})
-		serveSegment(c, segPath)
+		select {
+		case <-actual.(chan struct{}):
+			serveSegment(c, segPath)
+		case <-time.After(90 * time.Second):
+			c.String(http.StatusGatewayTimeout, "segment generation timed out")
+		}
 		return
 	}
 
@@ -203,8 +241,8 @@ func HLSSegment(c *gin.Context, roots []string) {
 		close(ch)
 	}()
 
-	if err := generateSegment(path, segPath, segNum, p); err != nil {
-		log.Printf("HLS segment error [%s q=%s seg=%d]: %v", filepath.Base(path), q, segNum, err)
+	if err := generateSegment(path, segPath, segNum, p, audioIdx); err != nil {
+		log.Printf("HLS segment error [%s q=%s seg=%d audio=%d]: %v", filepath.Base(path), q, segNum, audioIdx, err)
 		c.String(http.StatusInternalServerError, fmt.Sprintf("transcode failed: %v", err))
 		return
 	}
@@ -212,7 +250,7 @@ func HLSSegment(c *gin.Context, roots []string) {
 	serveSegment(c, segPath)
 }
 
-func generateSegment(srcPath, segPath string, segNum int, p hlsProfile) error {
+func generateSegment(srcPath, segPath string, segNum int, p hlsProfile, audioIdx int) error {
 	if err := os.MkdirAll(filepath.Dir(segPath), 0755); err != nil {
 		return err
 	}
@@ -225,10 +263,11 @@ func generateSegment(srcPath, segPath string, segNum int, p hlsProfile) error {
 		"-ss", fmt.Sprintf("%.3f", start),
 		"-i", srcPath,
 		"-t", fmt.Sprintf("%.3f", hlsSegDur),
-		"-map", "0:v:0", "-map", "0:a:0?", // '?' makes audio optional
+		"-map", "0:v:0", "-map", fmt.Sprintf("0:a:%d?", audioIdx),
 		"-c:v", "libx264", "-preset", "ultrafast", "-b:v", p.vbr,
 		"-vf", p.scale,
 		"-c:a", "aac", "-b:a", p.ab, "-ac", "2",
+		"-af", "aresample=async=1", // compensate A/V drift from AAC encoder priming at segment boundaries
 		"-output_ts_offset", fmt.Sprintf("%.3f", start), // TS timestamps must be monotonic across segments
 		"-f", "mpegts", tmp,
 	}
