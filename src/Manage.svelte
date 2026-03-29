@@ -2,10 +2,10 @@
   import { onMount, onDestroy } from "svelte";
   import { POST, GET, DEL } from "./lib";
 
-  import Header from "./components/manage/Header.svelte";
-  import Magnet from "./components/manage/Magnet.svelte";
-  import Downloads from "./components/manage/Downloads.svelte";
-  import FolderRow from "./components/manage/FolderRow.svelte";
+  import Header from "./components/Header.svelte";
+  import Magnet from "./components/Magnet.svelte";
+  import Downloads from "./components/Downloads.svelte";
+  import FolderRow from "./components/FolderRow.svelte";
 
   let data: Record<string, string[]> = $state({});
   let disks: DiskInfo[] = $state([]);
@@ -68,10 +68,10 @@
     val = "";
     if (!path || !name) return;
     const res = await POST("/api/rename", { path, name });
-    if (res.ok) {
+    if (res?.ok) {
       await reloadData();
     } else {
-      alert("Rename failed: " + (res.error ?? "unknown"));
+      alert("Rename failed: " + (res?.error ?? "unknown"));
     }
   }
 
@@ -91,8 +91,8 @@
     )
       return;
     const res = await DEL(`/api/dir?path=${encodeURIComponent(dir)}`);
-    if (!res.ok) {
-      alert("Delete failed: " + (res.error ?? "unknown"));
+    if (!res?.ok) {
+      alert("Delete failed: " + (res?.error ?? "unknown"));
       return;
     }
     delete data[dir];

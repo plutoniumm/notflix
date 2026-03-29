@@ -1,20 +1,14 @@
-WHISPER_PREFIX  := /opt/homebrew/Cellar/whisper-cpp/1.8.3/libexec
-BREW_LIB        := /opt/homebrew/lib
+.PHONY: run build clean setup
 
-CGO_CFLAGS_WHISPER  := -I$(WHISPER_PREFIX)/include -I/opt/homebrew/include
-CGO_LDFLAGS_WHISPER := -L$(BREW_LIB) -L$(WHISPER_PREFIX)/lib
+build: clean
+	go build -o notflix .
+	pnpm run build
 
-.PHONY: run whisper clean
-
-whisper: clean
-	xx port 4242 || CGO_ENABLED=1 \
-	CGO_CFLAGS="$(CGO_CFLAGS_WHISPER)" \
-	CGO_LDFLAGS="$(CGO_LDFLAGS_WHISPER)" \
-	go build -tags whisper -o notflix .;
-	pnpm run build;
-
-run: whisper
+run: build
 	./notflix
+
+setup:
+	@echo "Install faster-whisper: pip install faster-whisper"
 
 clean:
 	rm -f notflix

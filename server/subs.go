@@ -40,29 +40,8 @@ type SubResult struct {
 }
 
 func findVid(file string, roots []string) (string, bool) {
-	rel := strings.TrimPrefix(file, "/")
-	for _, root := range roots {
-		absR, err := filepath.Abs(root)
-		if err != nil {
-			continue
-		}
-
-		candidate := filepath.Join(root, rel)
-		abs, err := filepath.Abs(candidate)
-		if err != nil {
-			continue
-		}
-
-		if !strings.HasPrefix(abs, absR) {
-			continue
-		}
-
-		if _, err := os.Stat(candidate); err == nil {
-			return abs, true
-		}
-	}
-
-	return "", false
+	path := FindFile(file, roots)
+	return path, path != ""
 }
 
 func vttOf(path string) string {
@@ -144,7 +123,12 @@ func Subctx(c *gin.Context, roots []string) {
 		embedded = []embedTrack{}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"vtt": hasVTT, "srt": hasSRT, "embedded": embedded})
+	hasWhisper := false
+	if _, err := os.Stat(base + ".whisper.vtt"); err == nil {
+		hasWhisper = true
+	}
+
+	c.JSON(http.StatusOK, gin.H{"vtt": hasVTT, "srt": hasSRT, "embedded": embedded, "whisper": hasWhisper})
 }
 
 func SubsExtract(c *gin.Context, roots []string) {

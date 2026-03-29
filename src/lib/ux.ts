@@ -1,7 +1,7 @@
-export function Touch (player: any, el: HTMLElement) {
+export function Touch (player: any, el: HTMLElement): () => void {
   let [last, prev] = [0, 0];
 
-  el.addEventListener('touchend', (e) => {
+  const handler = (e: TouchEvent) => {
     const now = Date.now();
     const touch = e.changedTouches[0];
     const x = touch.clientX;
@@ -26,7 +26,10 @@ export function Touch (player: any, el: HTMLElement) {
       last = now;
       prev = x;
     }
-  }, { passive: false });
+  };
+
+  el.addEventListener('touchend', handler, { passive: false });
+  return () => el.removeEventListener('touchend', handler);
 }
 
 function ripple (el: HTMLElement, x: number, y: number, label: string) {
@@ -43,9 +46,10 @@ export function Hotkeys (
   player: any,
   container: HTMLElement,
   onNext: () => void,
-  onWhisper: () => void
-) {
-  document.addEventListener('keydown', (e) => {
+  onWhisper: () => void,
+  onSync: (deltaMs: number) => void,
+): () => void {
+  const handler = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement).tagName === 'INPUT') return
 
     const key = e.key
@@ -104,8 +108,15 @@ export function Hotkeys (
       }
     } else if (key >= '0' && key <= '9') {
       player.currentTime(player.duration() * parseInt(key) * 0.1)
+    } else if (key === ']') {
+      onSync(50)
+    } else if (key === '[') {
+      onSync(-50)
     }
-  })
+  };
+
+  document.addEventListener('keydown', handler);
+  return () => document.removeEventListener('keydown', handler);
 }
 
 function seek (player: any, n: number) {

@@ -38,23 +38,16 @@ func pulse() {
 }
 
 func findRoot(name string, rts []string) (string, string, bool) {
+	abs := server.FindFile(name, rts)
+	if abs == "" {
+		return "", "", false
+	}
 	rel := strings.TrimPrefix(name, "/")
 	for _, r := range rts {
-		absR, _ := filepath.Abs(r)
-		candidate := filepath.Join(r, rel)
-		abs, err := filepath.Abs(candidate)
-
-		if err != nil {
-			continue
-		}
-		if !strings.HasPrefix(abs, absR) {
-			continue
-		}
-		if _, err := os.Stat(candidate); err == nil {
+		if strings.HasPrefix(abs, r) || strings.HasPrefix(abs, filepath.Join(r, rel)) {
 			return r, abs, true
 		}
 	}
-
 	return "", "", false
 }
 
@@ -116,7 +109,6 @@ func main() {
 
 	go func() {
 		server.ConvertAll(roots)
-		server.SubAll(roots)
 		server.CleanAll(roots)
 	}()
 	go server.Aria2Init()
@@ -192,27 +184,17 @@ func main() {
 			return
 		}
 
-		rel := strings.TrimPrefix(body.Path, "/")
-		for _, root := range roots {
-			absR, _ := filepath.Abs(root)
-			candidate := filepath.Join(root, rel)
-			abs, err := filepath.Abs(candidate)
-			if err != nil || !strings.HasPrefix(abs, absR) {
-				continue
-			}
-			if _, err := os.Stat(candidate); err != nil {
-				continue
-			}
-
-			dst := filepath.Join(filepath.Dir(candidate), body.NewName)
-			if err := os.Rename(candidate, dst); err != nil {
+		abs := server.FindFile(body.Path, roots)
+		if abs != "" {
+			dst := filepath.Join(filepath.Dir(abs), body.NewName)
+			if err := os.Rename(abs, dst); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 
-			ext := strings.ToLower(filepath.Ext(candidate))
+			ext := strings.ToLower(filepath.Ext(abs))
 			if ext == ".mp4" {
-				base := candidate[:len(candidate)-len(ext)]
+				base := abs[:len(abs)-len(ext)]
 				nbase := dst[:len(dst)-len(filepath.Ext(dst))]
 
 				for _, suf := range []string{".vtt", ".whisper.vtt", ".srt"} {
@@ -313,27 +295,21 @@ func main() {
 			return
 		}
 
-		for _, root := range roots {
-			absR, _ := filepath.Abs(root)
-			candidate := filepath.Join(root, path)
-			abs, err := filepath.Abs(candidate)
-			if err != nil || !strings.HasPrefix(abs, absR) {
-				continue
-			}
-
-			info, err := os.Stat(candidate)
-			if err != nil || !info.IsDir() {
-				continue
-			}
-			if err := os.RemoveAll(candidate); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-
-			c.JSON(http.StatusOK, gin.H{"ok": true})
+		abs := server.FindFile(path, roots)
+		if abs == "" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		info, err := os.Stat(abs)
+		if err != nil || !info.IsDir() {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		if err := os.RemoveAll(abs); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
 	router.GET("/subs/*filename", func(c *gin.Context) { server.SubsSend(c, roots) })
@@ -341,8 +317,10 @@ func main() {
 	router.GET("/api/hls/master", func(c *gin.Context) { server.HLSMaster(c, roots) })
 	router.GET("/api/hls/playlist", func(c *gin.Context) { server.HLSPlaylist(c, roots) })
 	router.GET("/api/hls/segment", func(c *gin.Context) { server.HLSSegment(c, roots) })
+	router.GET("/api/hls/avoffset", func(c *gin.Context) { server.HLSAVOffset(c, roots) })
 
 	router.GET("/api/video/info", func(c *gin.Context) { server.VideoInfo(c, roots) })
+	router.GET("/api/audio/info", func(c *gin.Context) { server.AudioInfo(c, roots) })
 	router.GET("/api/subs/info", func(c *gin.Context) { server.Subctx(c, roots) })
 	router.GET("/api/subs/search", func(c *gin.Context) { server.SubsSearch(c, roots) })
 	router.POST("/api/subs/download", func(c *gin.Context) { server.GetSubs(c, roots) })

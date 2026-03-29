@@ -3,10 +3,10 @@
   import videojs from "video.js";
   import "video.js/dist/video-js.css";
 
-  import SubsPicker from "./Subs.svelte";
   import Bar from "./player/bar.svelte";
   import Progress from "./player/progress.svelte";
   import Volume from "./player/volume.svelte";
+  import Sync from "./player/sync.svelte";
   import Related from "./player/related.svelte";
   import Whisper from "./player/whisper.svelte";
 
@@ -15,6 +15,9 @@
   import { Down, isSupported } from "./lib/dl";
   import { Touch, Hotkeys } from "./lib/ux";
   import { PlayerState } from "./lib/events.svelte";
+  import { AVSync } from "./lib/avsync";
+  import type { SubsInfo, WhisperCue } from "./lib/subs";
+  import type { AudioTrack } from "./AudioPicker.svelte";
 
   let { videoParam }: any = $props();
 
@@ -31,18 +34,42 @@
   let videoEl: HTMLVideoElement | undefined;
   let pageEl: HTMLElement | undefined;
   let player: any = null;
-  let subs = $state<any[] | null>(null);
+  let avSync: AVSync | null = null;
+  let cleanups: (() => void)[] = [];
 
-  async function fetchSubs() {
-    const results = await Subs.search(videoParam);
-    if (!results) {
-      alert("No subtitles found on OpenSubtitles.");
-      return;
-    }
-    subs = results;
+  // subtitle state
+  let subsInfo = $state<SubsInfo | null>(null);
+  let whisperCues = $state<WhisperCue[]>([]);
+  let subsOpen = $state(false);
+  let onlineResults = $state<any[] | null>(null);
+  let searchingSubs = $state(false);
+  let activeEmbeddedIdx = $state<number | null>(null);
+
+  // audio state
+  let audioTracks = $state<AudioTrack[]>([]);
+  let audioTrack = $state(0);
+  let audioOpen = $state(false);
+
+  async function searchSubs() {
+    searchingSubs = true;
+    onlineResults = await Subs.search(videoParam);
+    searchingSubs = false;
   }
 
-  async function selectSub(fid: number) {
+  function toggleSubs() {
+    subsOpen = !subsOpen;
+    if (subsOpen && onlineResults === null && !searchingSubs) {
+      searchSubs();
+    }
+  }
+
+  async function selectEmbedded(idx: number) {
+    await Subs.extractEmbedded(player, videoParam, sub, idx);
+    activeEmbeddedIdx = idx;
+    subsOpen = false;
+  }
+
+  async function selectOnline(fid: number) {
     const res = await POST("/api/subs/download", {
       file_id: fid,
       file: videoParam,
@@ -51,17 +78,41 @@
       alert("Subtitle download failed: " + (res?.error ?? "unknown error"));
       return;
     }
-    subs = null;
     Subs.reload(player, `/subs/${sub}`, "English");
+    activeEmbeddedIdx = null;
+    subsOpen = false;
+  }
+
+  function selectAudio(track: number) {
+    const pos = player.currentTime();
+    const wasPlaying = !player.paused();
+    audioTrack = track;
+    audioOpen = false;
+    const src = `/api/hls/master?file=${encodeURIComponent(videoParam)}&audio=${track}`;
+    player.src({ src, type: 'application/vnd.apple.mpegurl' });
+    player.ready(() => {
+      player.currentTime(pos);
+      if (wasPlaying) player.play();
+    });
   }
 
   function runWhisper() {
+    if (subsInfo?.whisper) {
+      const wsub = sub.replace('.vtt', '.whisper.vtt');
+      Subs.reload(player, `/subs/${wsub}`, 'Whisper', true);
+      return;
+    }
+    whisperCues = [];
     Subs.whisperStream(
       videoParam,
-      player,
+      sub,
       (msg) => (ps.wMsg = msg),
+      (cue) => { whisperCues = [...whisperCues, cue]; },
       () => {
-        ps.wMsg = "";
+        ps.wMsg = '';
+        const wsub = sub.replace('.vtt', '.whisper.vtt');
+        Subs.reload(player, `/subs/${wsub}`, 'Whisper');
+        whisperCues = [];
       },
     );
   }
@@ -124,8 +175,8 @@
         );
       }
 
-      Touch(player, pageEl!);
-      Hotkeys(
+      cleanups.push(Touch(player, pageEl!));
+      cleanups.push(Hotkeys(
         player,
         pageEl!,
         () => {
@@ -143,9 +194,13 @@
           }
           runWhisper();
         },
-      );
+        (deltaMs) => {
+          const ms = avSync?.adjust(deltaMs) ?? 0;
+          ps.showSync(ms);
+        },
+      ));
 
-      setInterval(() => {
+      const trackTimer = setInterval(() => {
         const t = player.currentTime() ?? 0;
         const d = player.duration() ?? 0;
         tracker.set(videoParam, t);
@@ -159,9 +214,22 @@
           });
         }
       }, 2000);
+      cleanups.push(() => clearInterval(trackTimer));
     });
 
-    Subs.start(player, videoParam, sub);
+    subsInfo = await Subs.start(player, videoParam, sub);
+
+    // Set up Web Audio sync and auto-apply the source file's native A/V offset
+    avSync = new AVSync().init(videoEl!);
+    GET(`/api/hls/avoffset?file=${encodeURIComponent(videoParam)}`).then((res) => {
+      if (res?.offset_ms > 0) {
+        ps.showSync(avSync!.set(res.offset_ms));
+      }
+    });
+
+    GET(`/api/audio/info?file=${encodeURIComponent(videoParam)}`).then((tracks) => {
+      if (Array.isArray(tracks) && tracks.length > 1) audioTracks = tracks;
+    });
 
     GET("/list/video")
       .then((data) => {
@@ -186,7 +254,9 @@
       .catch(() => {});
 
     return () => {
+      cleanups.forEach((fn) => fn());
       ps.destroy();
+      avSync?.destroy();
       player?.dispose();
     };
   });
@@ -207,8 +277,22 @@
     hidden={ps.hideUI}
     videoKey={ps.videoKey}
     {videoParam}
-    getSubs={fetchSubs}
     {runWhisper}
+    subsOpen={subsOpen}
+    subsInfo={subsInfo}
+    onlineResults={onlineResults}
+    searching={searchingSubs}
+    activeEmbeddedIdx={activeEmbeddedIdx}
+    onToggleSubs={toggleSubs}
+    onSelectEmbedded={selectEmbedded}
+    onSelectOnline={selectOnline}
+    onCloseSubs={() => (subsOpen = false)}
+    {audioTracks}
+    {audioTrack}
+    {audioOpen}
+    onToggleAudio={() => (audioOpen = !audioOpen)}
+    onSelectAudio={selectAudio}
+    onCloseAudio={() => (audioOpen = false)}
   />
 
   <div class="video-wrap p-abs">
@@ -218,20 +302,13 @@
     ></video>
   </div>
 
-  <Whisper msg={ps.wMsg} />
+  <Whisper msg={ps.wMsg} cues={whisperCues} currentTime={ps.currentTime} />
 
   <Progress pct={ps.pct} duration={ps.duration} hidden={ps.hideUI} />
   <Volume level={ps.volLevel} visible={ps.volVisible} />
+  <Sync ms={ps.syncMs} visible={ps.syncVisible} />
   <Related rows={ps.rows} {dir} {name} {embed} paused={ps.paused} />
 </div>
-
-{#if subs}
-  <SubsPicker
-    results={subs}
-    onSelect={selectSub}
-    onClose={() => (subs = null)}
-  />
-{/if}
 
 <style>
   .page {

@@ -1,111 +1,191 @@
 <script lang="ts">
-  let { results, onSelect, onClose }: any = $props();
+  import { onMount } from "svelte";
+  import { clickOutside } from "./lib/clickOutside";
+  import type { SubsInfo } from "./lib/subs";
+
+  let {
+    info,
+    onlineResults,
+    searching,
+    activeEmbeddedIdx,
+    onSelectEmbedded,
+    onSelectOnline,
+    onClose,
+  }: {
+    info: SubsInfo | null;
+    onlineResults: any[] | null;
+    searching: boolean;
+    activeEmbeddedIdx: number | null;
+    onSelectEmbedded: (idx: number) => Promise<void>;
+    onSelectOnline: (fid: number) => Promise<void>;
+    onClose: () => void;
+  } = $props();
+
   let busy = $state<number | null>(null);
 
-  async function pick(fid: number) {
-    busy = fid;
-    await onSelect(fid);
+  async function pickEmbedded(idx: number) {
+    busy = -idx - 1;
+    await onSelectEmbedded(idx);
     busy = null;
   }
+
+  async function pickOnline(fid: number) {
+    busy = fid;
+    await onSelectOnline(fid);
+    busy = null;
+  }
+
+  onMount(() => clickOutside(onClose));
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="backdrop p-fix cc" onclick={onClose}>
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal f f-col rx5" onclick={(e) => e.stopPropagation()}>
-    <div class="modal-hd f al-ct j-bw">
-      <h3 class="m0 fw6">Select Subtitles</h3>
-      <button class="p5 tx-3" onclick={onClose}>✕</button>
-    </div>
+<div class="dropdown" onclick={(e) => e.stopPropagation()}>
+  {#if info?.embedded?.length}
+    <div class="section-hd">Embedded</div>
+    {#each info.embedded as track}
+      <button
+        class="item"
+        class:active={activeEmbeddedIdx === track.index}
+        class:busy={busy === -track.index - 1}
+        onclick={() => pickEmbedded(track.index)}
+      >
+        <span class="bullet"
+          >{activeEmbeddedIdx === track.index ? "●" : "○"}</span
+        >
+        {track.language || "Unknown"} (track {track.index})
+      </button>
+    {/each}
+    <div class="divider"></div>
+  {/if}
 
-    <ul class="list m0 p0 flow-y-s">
-      {#each results as r (r.file_id)}
-        <li>
-          <button
-            class="item f al-ct g10 w-100 fs ptr tl"
-            class:busy={busy === r.file_id}
-            onclick={() => pick(r.file_id)}
-          >
-            {#if r.hash_match}
-              <span class="badge fs-xs rx2 sh-0"> ✓ match </span>
-            {/if}
-
-            <span class="release trunc">
-              {r.release || "Unknown release"}
-            </span>
-            <span class="fs-sm tx-2 sh-0">
-              {r.download_count?.toLocaleString() ?? 0} dl
-            </span>
-
-            {#if busy === r.file_id}
-              <span class="spinner red">↻</span>
-            {/if}
-          </button>
-        </li>
-      {/each}
-    </ul>
+  <div class="section-hd row">
+    Online
+    {#if searching}<span class="spin">↻</span>{/if}
   </div>
+
+  {#if !searching && !onlineResults}
+    <div class="empty">No results</div>
+  {:else if onlineResults?.length}
+    {#each onlineResults as r (r.file_id)}
+      <button
+        class="item"
+        class:busy={busy === r.file_id}
+        onclick={() => pickOnline(r.file_id)}
+      >
+        {#if r.hash_match}<span class="check">✓</span>{/if}
+        <span class="release trunc">{r.release || "Unknown"}</span>
+        <span class="dl-count">{r.download_count?.toLocaleString() ?? 0}</span>
+      </button>
+    {/each}
+  {/if}
 </div>
 
 <style>
-  .backdrop {
-    inset: 0;
-    background: #000c;
-    z-index: 1000;
-    animation: fade-in 0.2s ease;
+  .dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 300px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: #111c;
+    backdrop-filter: blur(8px);
+    border: 1px solid #fff2;
+    border-radius: 8px;
+    z-index: 100;
+    animation: fade-in 0.15s ease;
   }
 
-  .modal {
-    background: var(--bg-3);
-    border: 1px solid var(--bg-4);
-    width: 560px;
-    max-width: 90vw;
-    max-height: 70vh;
-    animation: slide-up 0.25s ease;
+  .section-hd {
+    padding: 8px 12px 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--tx-3);
   }
 
-  .modal-hd {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--bg-4);
+  .section-hd.row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
-  .list {
-    padding: 8px 0;
+  .divider {
+    height: 1px;
+    background: #fff1;
+    margin: 4px 0;
   }
 
   .item {
-    padding: 10px 20px;
-    border-bottom: 1px solid var(--bg-3);
-    color: var(--tx-5);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 12px;
+    text-align: left;
+    color: var(--tx-4);
+    font-size: 13px;
     transition: background 0.1s;
   }
   .item:hover {
-    background: var(--bg-3);
+    background: #fff1;
+    color: var(--tx-5);
+  }
+  .item.active {
+    color: var(--tx-5);
   }
   .item.busy {
-    opacity: 0.7;
+    opacity: 0.6;
     pointer-events: none;
   }
 
-  .badge {
-    background: #152;
-    color: var(--grn);
-    padding: 2px 6px;
-  }
-  .release {
-    flex: 1;
-    color: var(--tx-4);
+  .bullet {
+    width: 14px;
+    text-align: center;
+    flex-shrink: 0;
   }
 
-  .spinner {
-    animation: spin 0.8s linear infinite;
+  .check {
+    color: var(--grn, #4c4);
+    flex-shrink: 0;
+  }
+
+  .release {
+    flex: 1;
+  }
+
+  .dl-count {
+    font-size: 11px;
+    color: var(--tx-2);
+    flex-shrink: 0;
+  }
+
+  .empty {
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--tx-2);
+  }
+
+  .spin {
+    animation: spin 1s linear infinite;
     display: inline-block;
   }
+
   @keyframes spin {
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 </style>

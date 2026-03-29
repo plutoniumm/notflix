@@ -114,7 +114,7 @@
         .filter((f) => {
           const name = f.name.toLowerCase();
 
-          clean(name).includes(q) || name.includes(q);
+          return clean(name).includes(q) || name.includes(q);
         })
         .map((f) => ({ dir, ...f })),
     );

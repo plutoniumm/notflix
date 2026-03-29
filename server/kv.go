@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"sync"
 
@@ -44,20 +45,20 @@ func KVGet(c *gin.Context) {
 	store := kvRead()
 
 	if len(keys) == 1 {
-		c.JSON(200, gin.H{"key": keys[0], "value": store[keys[0]]})
+		c.JSON(http.StatusOK, gin.H{"key": keys[0], "value": store[keys[0]]})
 		return
 	}
 
 	out := make(map[string]any, len(keys))
 	if len(keys) == 0 {
 		// return everything
-		c.JSON(200, store)
+		c.JSON(http.StatusOK, store)
 		return
 	}
 	for _, k := range keys {
 		out[k] = store[k]
 	}
-	c.JSON(200, out)
+	c.JSON(http.StatusOK, out)
 }
 
 // POST /kv/set  body: {"key":"foo","value":"bar"}  or  {"key":"foo","value":{...}}
@@ -65,7 +66,7 @@ func KVGet(c *gin.Context) {
 func KVSet(c *gin.Context) {
 	raw, err := c.GetRawData()
 	if err != nil {
-		c.JSON(400, gin.H{"error": "cannot read body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read body"})
 		return
 	}
 
@@ -81,10 +82,10 @@ func KVSet(c *gin.Context) {
 			store[item.Key] = item.Value
 		}
 		if err := kvWrite(store); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(200, gin.H{"ok": true, "count": len(bulk)})
+		c.JSON(http.StatusOK, gin.H{"ok": true, "count": len(bulk)})
 		return
 	}
 
@@ -94,14 +95,14 @@ func KVSet(c *gin.Context) {
 		Value any    `json:"value"`
 	}
 	if err := json.Unmarshal(raw, &single); err != nil || single.Key == "" {
-		c.JSON(400, gin.H{"error": "expected {key, value} or [{key, value}]"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expected {key, value} or [{key, value}]"})
 		return
 	}
 
 	store[single.Key] = single.Value
 	if err := kvWrite(store); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"ok": true, "key": single.Key})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "key": single.Key})
 }

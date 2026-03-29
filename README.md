@@ -89,5 +89,6 @@ make run
 > Uses `-tags whisper` and CGO flags for whisper.cpp. Don't use `go build` directly.
 
 ## License
+This was once hand written. Its now mostly vibe written.
 
 MIT 2023 plutoniumm

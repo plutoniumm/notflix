@@ -169,21 +169,34 @@ func duration(path string) float64 {
 	return f.Duration.Duration.Seconds()
 }
 
-func codecs(videoPath string) (videoCodec, audioCodec string) {
+func codecs(videoPath string) (videoCodec string, audioCodecs []string) {
 	streams, err := prober.Streams(context.Background(), videoPath)
 	if err != nil {
-		return "", ""
+		return "", nil
 	}
 
 	for _, s := range streams {
 		switch s.CodecType {
 		case "video":
-			videoCodec = s.CodecName
+			if videoCodec == "" {
+				videoCodec = s.CodecName
+			}
 		case "audio":
-			audioCodec = s.CodecName
+			audioCodecs = append(audioCodecs, s.CodecName)
 		}
 	}
 	return
+}
+
+// mp4AudioOK returns true if all codecs are directly muxable into MP4 without re-encoding.
+func mp4AudioOK(codecs []string) bool {
+	ok := map[string]bool{"aac": true, "mp3": true, "ac3": true}
+	for _, c := range codecs {
+		if !ok[strings.ToLower(c)] {
+			return false
+		}
+	}
+	return len(codecs) > 0
 }
 
 func remux(src, dst string, durationSec float64, name string) error {
@@ -192,13 +205,26 @@ func remux(src, dst string, durationSec float64, name string) error {
 	vc, ac := codecs(src)
 	args := []string{
 		"-nostdin", "-v", "error", "-i", src,
-		"-map", "0:v:0", "-map", "0:a:0",
+		"-map", "0:v:0", "-map", "0:a", // all audio streams
 	}
-	args = append(args, codecArgs(vc, ac)...)
-	args = append(args,
-		"-movflags", "+faststart",
-		"-f", "mp4", tmp,
-	)
+
+	switch vc {
+	case "h264":
+		args = append(args, "-c:v", "copy")
+	case "hevc":
+		args = append(args, "-c:v", "copy", "-tag:v", "hvc1")
+	default:
+		args = append(args, "-c:v", "libx264", "-preset", "fast", "-crf", "23")
+	}
+
+	// Copy audio if all streams are MP4-compatible, otherwise re-encode all to AAC.
+	if mp4AudioOK(ac) {
+		args = append(args, "-c:a", "copy")
+	} else {
+		args = append(args, "-c:a", "aac", "-b:a", "192k")
+	}
+
+	args = append(args, "-movflags", "+faststart", "-f", "mp4", tmp)
 
 	pw := &progressWriter{name: name, durationSec: durationSec}
 	cmd := exec.Command("ffmpeg", args...)
@@ -217,28 +243,6 @@ func remux(src, dst string, durationSec float64, name string) error {
 	}
 
 	return os.Rename(tmp, dst)
-}
-
-func codecArgs(video, audio string) []string {
-	var args []string
-
-	switch video {
-	case "h264":
-		args = append(args, "-c:v", "copy")
-	case "hevc":
-		args = append(args, "-c:v", "copy", "-tag:v", "hvc1")
-	default:
-		args = append(args, "-c:v", "libx264", "-preset", "fast", "-crf", "23")
-	}
-
-	switch audio {
-	case "aac", "mp3":
-		args = append(args, "-c:a", "copy")
-	default:
-		args = append(args, "-c:a", "aac")
-	}
-
-	return args
 }
 
 func extractSubs(srcPath, vttPath string) {

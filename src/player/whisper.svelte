@@ -1,13 +1,36 @@
 <script lang="ts">
-  let { msg } = $props();
+  import type { WhisperCue } from '../lib/subs';
+
+  let { msg, cues, currentTime }: { msg: string; cues: WhisperCue[]; currentTime: number } = $props();
+
+  const activeCue = $derived(
+    cues?.findLast((c) => currentTime >= c.start && currentTime < c.end) ?? null
+  );
 </script>
 
+{#if activeCue}
+  <div class="p-fix sub-overlay">{activeCue.text}</div>
+{/if}
+
 {#if msg}
-  <div class="p-fix p10 fs red rx5">{msg}</div>
+  <div class="p-fix p10 fs red rx5 status-msg">{msg}</div>
 {/if}
 
 <style>
-  div {
+  .sub-overlay {
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    max-width: 80%;
+    text-align: center;
+    font-size: 1.4rem;
+    color: #fff;
+    text-shadow: 0 0 4px #000, 0 1px 3px #000, 1px 0 3px #000, -1px 0 3px #000;
+    pointer-events: none;
+  }
+
+  .status-msg {
     bottom: 80px;
     left: 32px;
     z-index: 10;

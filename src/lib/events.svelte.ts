@@ -20,6 +20,10 @@ export class PlayerState {
   // whisper message
   wMsg = $state("");
 
+  // A/V sync offset
+  syncMs      = $state(0);
+  syncVisible = $state(false);
+
   // video list / meta
   rows     = $state<[string, any[]][]>([]);
   nextURL  = $state<string | null>(null);
@@ -31,8 +35,16 @@ export class PlayerState {
       : 0;
   }
 
-  #uiTimer:  ReturnType<typeof setTimeout> | undefined;
-  #volTimer: ReturnType<typeof setTimeout> | undefined;
+  #uiTimer:   ReturnType<typeof setTimeout> | undefined;
+  #volTimer:  ReturnType<typeof setTimeout> | undefined;
+  #syncTimer: ReturnType<typeof setTimeout> | undefined;
+
+  showSync(ms: number) {
+    this.syncMs      = ms;
+    this.syncVisible = true;
+    clearTimeout(this.#syncTimer);
+    this.#syncTimer = setTimeout(() => { this.syncVisible = false; }, 1500);
+  }
 
   showUI(paused: boolean) {
     this.hideUI = false;
@@ -73,5 +85,6 @@ export class PlayerState {
   destroy() {
     clearTimeout(this.#uiTimer);
     clearTimeout(this.#volTimer);
+    clearTimeout(this.#syncTimer);
   }
 }
