@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { isSupported, Down } from "../lib/dl";
+  import { isSupported, Down } from "../library/dl";
 
   let {
     videoParam,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { WhisperCue } from '../lib/subs';
+  import type { WhisperCue } from './subs';
 
   let { msg, cues, currentTime }: { msg: string; cues: WhisperCue[]; currentTime: number } = $props();
 
