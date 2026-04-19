@@ -18,7 +18,8 @@
   import Whisper from "./whisper.svelte";
 
   import { clean, parseRaw, nextVid } from "../core/video";
-  import { GET, POST } from "../core/api";
+  import { api } from "../core/api";
+  import { kv } from "../core/kv";
   import Subs from "./subs";
   import Tracker from "./tracker";
   import { Down, isSupported } from "../library/dl";
@@ -106,7 +107,7 @@
     const file = await Subs.extractEmbedded(player, videoParam, idx, lang);
     if (file) {
       activeSub = file;
-      subsInfo = await GET(`/api/subs/info?file=${encodeURIComponent(videoParam)}`);
+      subsInfo = await api.subs.info(videoParam);
     }
     subsOpen = false;
   }
@@ -115,7 +116,7 @@
     const res = await Subs.downloadOnline(player, videoParam, fid);
     if ('file' in res) {
       activeSub = res.file;
-      subsInfo = await GET(`/api/subs/info?file=${encodeURIComponent(videoParam)}`);
+      subsInfo = await api.subs.info(videoParam);
     } else {
       alert(res.error);
     }
@@ -222,12 +223,10 @@
       if (saved > 0) {
         player.currentTime(saved);
       } else {
-        GET(`/kv/get?key=${encodeURIComponent("watched:" + videoParam)}`).then(
-          (res) => {
-            const t = res?.value?.t;
-            if (t > RESUME_THRESHOLD_S) player.currentTime(Math.max(0, t - RESUME_THRESHOLD_S));
-          },
-        );
+        kv.get("watched:" + videoParam).then((res: any) => {
+          const t = res?.value?.t;
+          if (t > RESUME_THRESHOLD_S) player.currentTime(Math.max(0, t - RESUME_THRESHOLD_S));
+        });
       }
 
       cleanups.push(Touch(player, pageEl!, toggleFullscreen));
@@ -257,14 +256,12 @@
         const t = player.currentTime() ?? 0;
         const d = player.duration() ?? 0;
         tracker.set(videoParam, t);
+
         if (d > 0 && d - t < END_CUTOFF_S) {
           tracker.del(videoParam);
-          POST("/kv/set", { key: `watched:${videoParam}`, value: null });
+          kv.set(`watched:${videoParam}`, null);
         } else if (t > RESUME_THRESHOLD_S) {
-          POST("/kv/set", {
-            key: `watched:${videoParam}`,
-            value: { t, at: Date.now() },
-          });
+          kv.set(`watched:${videoParam}`, { t, at: Date.now() });
         }
       };
       const trackTimer = setInterval(() => {
@@ -329,13 +326,13 @@
 
     avSync = new AVSync().init(videoEl!);
     if (!isOffline) {
-      GET(`/api/hls/avoffset?file=${encodeURIComponent(videoParam)}`).then((res) => {
+      api.hls.avoffset(videoParam).then((res: any) => {
         if (res?.offset_ms > 0) {
           ps.showSync(avSync!.set(res.offset_ms));
         }
       });
 
-      GET(`/api/audio/info?file=${encodeURIComponent(videoParam)}`).then((tracks) => {
+      api.audio.info(videoParam).then((tracks: any) => {
         if (Array.isArray(tracks) && tracks.length > 1) {
           audioTracks = tracks;
           const atl = player.audioTracks();
@@ -383,8 +380,8 @@
       });
     }
 
-    GET("/list/video")
-      .then((data) => {
+    api.videoList()
+      .then((data: any) => {
         if (!data) return;
         ps.rows = Object.entries(data).filter(([, files]) => files?.length) as [
           string,

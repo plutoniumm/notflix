@@ -1,4 +1,4 @@
-import { GET, POST } from '../core/api';
+import { api } from '../core/api';
 
 const E = encodeURIComponent;
 
@@ -62,7 +62,7 @@ function subDir(videoParam: string): string {
 
 export default {
   async start(player: any, raw: string, sub: string): Promise<SubsInfo | null> {
-    const info: SubsInfo | null = await GET(`/api/subs/info?file=${E(raw)}`);
+    const info: SubsInfo | null = await api.subs.info(raw);
     if (!info) return null;
 
     const dir = subDir(raw);
@@ -82,10 +82,10 @@ export default {
     } else if (info.embedded?.length) {
       const L = info.embedded;
       const eng = L.find((t) => ['en', 'eng'].includes(t.language)) ?? L[0];
-      const res = await POST('/api/subs/extract', { file: raw, track: eng.index, language: eng.language });
+      const res = await api.subs.extract(raw, eng.index, eng.language);
       if (res?.ok && res.file) {
         this.reload(player, `/subs/${dir}${res.file}`, langLabel(eng.language), true);
-        const updated = await GET(`/api/subs/info?file=${E(raw)}`);
+        const updated = await api.subs.info(raw);
         if (updated) Object.assign(info, updated);
       }
     } else if (info.whisper) {
@@ -97,24 +97,29 @@ export default {
   },
 
   async extractEmbedded(player: any, raw: string, index: number, language: string): Promise<string | null> {
-    const res = await POST('/api/subs/extract', { file: raw, track: index, language });
+    const res = await api.subs.extract(raw, index, language);
     if (!res?.ok || !res.file) return null;
+
     const dir = subDir(raw);
     const label = langLabel(language);
     this.reload(player, `/subs/${dir}${res.file}`, label, true);
+
     return res.file;
   },
 
   async search(raw: string): Promise<any[] | null> {
-    let res = await GET(`/api/subs/search?file=${E(raw)}`);
+    const res = await api.subs.search(raw);
+
     return res?.results?.length ? res.results : null;
   },
 
   async downloadOnline(player: any, raw: string, fileId: number): Promise<{ file: string } | { error: string }> {
-    const res = await POST('/api/subs/download', { file_id: fileId, file: raw });
+    const res = await api.subs.download(fileId, raw);
     if (!res?.ok || !res.file) return { error: res?.error ?? 'Download failed' };
+
     const dir = subDir(raw);
     this.reload(player, `/subs/${dir}${res.file}`, 'English', true);
+
     return { file: res.file };
   },
 
