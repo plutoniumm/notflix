@@ -1,6 +1,7 @@
 package media
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -59,7 +60,9 @@ func nextSubPath(base, lang string) string {
 }
 
 type SubResult struct {
-	FileID        int    `json:"file_id"`
+	Provider      string `json:"provider"`
+	FileID        int    `json:"file_id,omitempty"`
+	URL           string `json:"url,omitempty"`
 	Language      string `json:"language"`
 	Release       string `json:"release"`
 	DownloadCount int    `json:"download_count"`
@@ -246,21 +249,102 @@ func SubsSearch(c *gin.Context, lib *library.Library) {
 		results = osSearch(key, "moviehash="+hash+"&languages=en&order_by=download_count", true)
 	}
 
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	title := cleanTitle(base[:len(base)-len(ext)])
+
 	if len(results) == 0 {
-		base := filepath.Base(path)
-		ext := filepath.Ext(base)
-		q := url.QueryEscape(cleanTitle(base[:len(base)-len(ext)]))
+		q := url.QueryEscape(title)
 		results = osSearch(key, "query="+q+"&languages=en&order_by=download_count", false)
+	}
+
+	if len(results) == 0 {
+		results = subdlSearch(title)
 	}
 
 	if len(results) > 10 {
 		results = results[:10]
 	}
+
 	if results == nil {
 		results = []SubResult{}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"results": results})
+}
+
+func subdlSearch(title string) []SubResult {
+	key := os.Getenv("SUBDL_API_KEY")
+	if key == "" {
+		return nil
+	}
+
+	q := url.Values{}
+	q.Set("api_key", key)
+	q.Set("film_name", title)
+	q.Set("languages", "EN")
+	q.Set("subs_per_page", "30")
+
+	resp, err := http.Get("https://api.subdl.com/api/v1/subtitles?" + q.Encode())
+	if err != nil {
+		log.Printf("[subs] subdl request error: %v", err)
+
+		return nil
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[subs] subdl status=%d body=%s", resp.StatusCode, string(data))
+
+		return nil
+	}
+
+	var payload struct {
+		Status    bool `json:"status"`
+		Subtitles []struct {
+			Lang        string `json:"lang"`
+			Language    string `json:"language"`
+			URL         string `json:"url"`
+			ReleaseName string `json:"release_name"`
+		} `json:"subtitles"`
+	}
+
+	if err := json.Unmarshal(data, &payload); err != nil {
+		log.Printf("[subs] subdl parse error: %v body=%s", err, string(data))
+
+		return nil
+	}
+
+	var out []SubResult
+	for _, s := range payload.Subtitles {
+		u := s.URL
+		if u == "" {
+			continue
+		}
+
+		if !strings.HasPrefix(u, "http") {
+			u = "https://dl.subdl.com" + u
+		}
+
+		lang := s.Lang
+		if lang == "" {
+			lang = s.Language
+		}
+
+		out = append(out, SubResult{
+			Provider: "subdl",
+			URL:      u,
+			Language: strings.ToLower(lang),
+			Release:  s.ReleaseName,
+		})
+	}
+
+	return out
 }
 
 var tagRe = regexp.MustCompile(`(?i)\b(720p|1080p|2160p|4k|480p|bluray|blu-ray|webrip|web-dl|webdl|web|hdrip|hdtv|dvdrip|x264|x265|h264|h265|hevc|avc|aac|ac3|dd5|eac3|atmos|nflx|amzn|hdr|10bit|repack|proper|extended|theatrical|directors\.cut|unrated)\b`)
@@ -333,6 +417,7 @@ func osSearch(key, params string, byHash bool) []SubResult {
 		}
 
 		out = append(out, SubResult{
+			Provider:      "os",
 			FileID:        fid,
 			Language:      a.Language,
 			Release:       a.Release,
@@ -340,6 +425,7 @@ func osSearch(key, params string, byHash bool) []SubResult {
 			HashMatch:     byHash,
 		})
 	}
+
 	return out
 }
 
@@ -396,8 +482,10 @@ func fetchToken(key string) string {
 
 func GetSubs(c *gin.Context, lib *library.Library) {
 	var body struct {
-		FileID int    `json:"file_id"`
-		File   string `json:"file"`
+		Provider string `json:"provider"`
+		FileID   int    `json:"file_id"`
+		URL      string `json:"url"`
+		File     string `json:"file"`
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -408,6 +496,11 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 	path, ok := lib.FindVid(body.File)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		return
+	}
+
+	if body.Provider == "subdl" {
+		subdlFetch(c, path, body.URL)
 		return
 	}
 
@@ -534,6 +627,82 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 	dir := filepath.Dir(path)
 	rel := strings.TrimPrefix(outPath, dir+string(os.PathSeparator))
 	c.JSON(http.StatusOK, gin.H{"ok": true, "file": rel})
+}
+
+func subdlFetch(c *gin.Context, videoPath, src string) {
+	resp, err := http.Get(src)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "subdl download: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("subdl HTTP %d", resp.StatusCode)})
+		return
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "subdl read failed"})
+		return
+	}
+
+	srt, err := firstSRT(data, src)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	parsed, err := subtitles.NewFromSRT(string(srt))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "srt parse: " + err.Error()})
+		return
+	}
+
+	base := videoPath[:len(videoPath)-len(filepath.Ext(videoPath))]
+	outPath := nextSubPath(base, "eng")
+
+	if err := os.WriteFile(outPath, []byte(parsed.AsVTT()), 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save vtt"})
+		return
+	}
+
+	dir := filepath.Dir(videoPath)
+	rel := strings.TrimPrefix(outPath, dir+string(os.PathSeparator))
+	c.JSON(http.StatusOK, gin.H{"ok": true, "file": rel})
+}
+
+func firstSRT(data []byte, src string) ([]byte, error) {
+	lower := strings.ToLower(src)
+	if strings.HasSuffix(lower, ".srt") {
+		return data, nil
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("subdl: not a zip and not a .srt")
+	}
+
+	for _, f := range zr.File {
+		if !strings.HasSuffix(strings.ToLower(f.Name), ".srt") {
+			continue
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+
+		body, err := io.ReadAll(rc)
+		rc.Close()
+
+		if err == nil && len(body) > 0 {
+			return body, nil
+		}
+	}
+
+	return nil, fmt.Errorf("subdl: no .srt in archive")
 }
 
 func SubsSend(c *gin.Context, lib *library.Library) {
