@@ -4,7 +4,7 @@
 
 <div class="pill p-fix f-row al-ct g10 p10 rx20 o-0" class:visible>
   <span class="lbl">A/V</span>
-  <span class="val">{ms > 0 ? '+' : ''}{ms}ms</span>
+  <span class="val">{ms > 0 ? "+" : ""}{ms}ms</span>
 </div>
 
 <style>

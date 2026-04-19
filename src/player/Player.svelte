@@ -56,9 +56,13 @@
   function goNext() {
     if (!ps.nextURL) return;
     tracker.del(videoParam);
-    navigator.sendBeacon("/kv/set",
-      new Blob([JSON.stringify({ key: `watched:${videoParam}`, value: null })],
-      { type: "application/json" }));
+    navigator.sendBeacon(
+      "/kv/set",
+      new Blob(
+        [JSON.stringify({ key: `watched:${videoParam}`, value: null })],
+        { type: "application/json" },
+      ),
+    );
     window.location.href = ps.nextURL;
   }
 
@@ -68,7 +72,7 @@
       (screen.orientation as any)?.unlock?.();
     } else {
       pageEl?.requestFullscreen();
-      (screen.orientation as any)?.lock?.('landscape').catch(() => {});
+      (screen.orientation as any)?.lock?.("landscape").catch(() => {});
     }
   }
 
@@ -97,7 +101,10 @@
   }
 
   function selectLocal(file: string, label: string) {
-    const dir = videoParam.lastIndexOf('/') >= 0 ? videoParam.slice(0, videoParam.lastIndexOf('/') + 1) : '';
+    const dir =
+      videoParam.lastIndexOf("/") >= 0
+        ? videoParam.slice(0, videoParam.lastIndexOf("/") + 1)
+        : "";
     Subs.reload(player, `/subs/${dir}${file}`, label, true);
     activeSub = file;
     subsOpen = false;
@@ -114,7 +121,7 @@
 
   async function selectOnline(pick: any) {
     const res = await Subs.downloadOnline(player, videoParam, pick);
-    if ('file' in res) {
+    if ("file" in res) {
       activeSub = res.file;
       subsInfo = await api.subs.info(videoParam);
     } else {
@@ -126,7 +133,7 @@
   function subsOff() {
     const tracks = player.textTracks();
     for (let i = 0; i < tracks.length; i++) {
-      if (tracks[i].mode === 'showing') tracks[i].mode = 'hidden';
+      if (tracks[i].mode === "showing") tracks[i].mode = "hidden";
     }
     activeSub = null;
     subsOpen = false;
@@ -135,7 +142,7 @@
   function selectAudio(track: number) {
     const atl = player.audioTracks();
     for (let i = 0; i < atl.length; i++) {
-      atl[i].enabled = (i === track);
+      atl[i].enabled = i === track;
     }
     audioTrack = track;
     audioOpen = false;
@@ -143,8 +150,8 @@
 
   function runWhisper() {
     if (subsInfo?.whisper) {
-      const wsub = sub.replace('.vtt', '.whisper.vtt');
-      Subs.reload(player, `/subs/${wsub}`, 'Whisper', true);
+      const wsub = sub.replace(".vtt", ".whisper.vtt");
+      Subs.reload(player, `/subs/${wsub}`, "Whisper", true);
       return;
     }
     whisperCues = [];
@@ -152,11 +159,13 @@
       videoParam,
       sub,
       (msg) => (ps.wMsg = msg),
-      (cue) => { whisperCues = [...whisperCues, cue]; },
+      (cue) => {
+        whisperCues = [...whisperCues, cue];
+      },
       () => {
-        ps.wMsg = '';
-        const wsub = sub.replace('.vtt', '.whisper.vtt');
-        Subs.reload(player, `/subs/${wsub}`, 'Whisper');
+        ps.wMsg = "";
+        const wsub = sub.replace(".vtt", ".whisper.vtt");
+        Subs.reload(player, `/subs/${wsub}`, "Whisper");
         whisperCues = [];
       },
     );
@@ -225,32 +234,35 @@
       } else {
         kv.get("watched:" + videoParam).then((res: any) => {
           const t = res?.value?.t;
-          if (t > RESUME_THRESHOLD_S) player.currentTime(Math.max(0, t - RESUME_THRESHOLD_S));
+          if (t > RESUME_THRESHOLD_S)
+            player.currentTime(Math.max(0, t - RESUME_THRESHOLD_S));
         });
       }
 
       cleanups.push(Touch(player, pageEl!, toggleFullscreen));
-      cleanups.push(Hotkeys(
-        player,
-        pageEl!,
-        goNext,
-        () => {
-          const tracks = player.textTracks();
-          for (let i = 0; i < tracks.length; i++) {
-            const t = tracks[i];
-            if (
-              (t.kind === "captions" || t.kind === "subtitles") &&
-              t.mode === "showing"
-            )
-              t.mode = "hidden";
-          }
-          runWhisper();
-        },
-        (deltaMs) => {
-          const ms = avSync?.adjust(deltaMs) ?? 0;
-          ps.showSync(ms);
-        },
-      ));
+      cleanups.push(
+        Hotkeys(
+          player,
+          pageEl!,
+          goNext,
+          () => {
+            const tracks = player.textTracks();
+            for (let i = 0; i < tracks.length; i++) {
+              const t = tracks[i];
+              if (
+                (t.kind === "captions" || t.kind === "subtitles") &&
+                t.mode === "showing"
+              )
+                t.mode = "hidden";
+            }
+            runWhisper();
+          },
+          (deltaMs) => {
+            const ms = avSync?.adjust(deltaMs) ?? 0;
+            ps.showSync(ms);
+          },
+        ),
+      );
 
       const saveProgress = () => {
         const t = player.currentTime() ?? 0;
@@ -268,22 +280,35 @@
         if (document.hidden) return;
         saveProgress();
       }, SAVE_INTERVAL_MS);
-      player.on('pause', saveProgress);
-      player.on('seeked', saveProgress);
+      player.on("pause", saveProgress);
+      player.on("seeked", saveProgress);
 
       const saveOnLeave = () => {
         const t = player.currentTime() ?? 0;
         const d = player.duration() ?? 0;
         if (d > 0 && d - t < END_CUTOFF_S) {
           tracker.del(videoParam);
-          navigator.sendBeacon("/kv/set",
-            new Blob([JSON.stringify({ key: `watched:${videoParam}`, value: null })],
-            { type: "application/json" }));
+          navigator.sendBeacon(
+            "/kv/set",
+            new Blob(
+              [JSON.stringify({ key: `watched:${videoParam}`, value: null })],
+              { type: "application/json" },
+            ),
+          );
         } else if (t > RESUME_THRESHOLD_S) {
           tracker.set(videoParam, t);
-          navigator.sendBeacon("/kv/set",
-            new Blob([JSON.stringify({ key: `watched:${videoParam}`, value: { t, at: Date.now() } })],
-            { type: "application/json" }));
+          navigator.sendBeacon(
+            "/kv/set",
+            new Blob(
+              [
+                JSON.stringify({
+                  key: `watched:${videoParam}`,
+                  value: { t, at: Date.now() },
+                }),
+              ],
+              { type: "application/json" },
+            ),
+          );
         }
         tracker.flush();
       };
@@ -298,28 +323,31 @@
           document.exitPictureInPicture().catch(() => {});
         }
       };
-      document.addEventListener('visibilitychange', onVisChange);
+      document.addEventListener("visibilitychange", onVisChange);
 
       cleanups.push(() => {
         clearInterval(trackTimer);
         window.removeEventListener("beforeunload", saveOnLeave);
-        document.removeEventListener('visibilitychange', onVisChange);
+        document.removeEventListener("visibilitychange", onVisChange);
       });
     });
 
     if (isOffline) {
       try {
         const subUrl = `/subs/${sub}`;
-        const res = await fetch(subUrl, { method: 'HEAD' });
+        const res = await fetch(subUrl, { method: "HEAD" });
         if (res.ok) {
-          Subs.reload(player, subUrl, 'Subtitles', true);
+          Subs.reload(player, subUrl, "Subtitles", true);
         }
       } catch {}
     } else {
       subsInfo = await Subs.start(player, videoParam, sub);
       if (subsInfo?.local?.length) {
         const eng = subsInfo.local.findIndex((t) =>
-          ['eng', 'en', 'english', 'sdh'].includes(t.language.replace(/\d+$/, '')));
+          ["eng", "en", "english", "sdh"].includes(
+            t.language.replace(/\d+$/, ""),
+          ),
+        );
         activeSub = subsInfo.local[eng >= 0 ? eng : 0]?.file ?? null;
       }
     }
@@ -337,50 +365,65 @@
           audioTracks = tracks;
           const atl = player.audioTracks();
           for (let i = 0; i < atl.length; i++) {
-            if (atl[i].enabled) { audioTrack = i; break; }
+            if (atl[i].enabled) {
+              audioTrack = i;
+              break;
+            }
           }
         }
       });
     }
 
-    if ('mediaSession' in navigator) {
+    if ("mediaSession" in navigator) {
       const ms = navigator.mediaSession;
       ms.metadata = new MediaMetadata({
         title,
-        artist: dir === '.' ? 'Notflix' : dir,
-        artwork: [{ src: '/assets/icon.svg', type: 'image/svg+xml' }],
+        artist: dir === "." ? "Notflix" : dir,
+        artwork: [{ src: "/assets/icon.svg", type: "image/svg+xml" }],
       });
-      ms.setActionHandler('play', () => player.play());
-      ms.setActionHandler('pause', () => player.pause());
-      ms.setActionHandler('seekbackward', () => player.currentTime(Math.max(0, player.currentTime() - 10)));
-      ms.setActionHandler('seekforward', () => player.currentTime(Math.min(player.duration(), player.currentTime() + 10)));
-      ms.setActionHandler('seekto', (d) => { if (d.seekTime != null) player.currentTime(d.seekTime); });
-      ms.setActionHandler('nexttrack', ps.nextURL ? goNext : null);
-      ms.setActionHandler('previoustrack', null);
+      ms.setActionHandler("play", () => player.play());
+      ms.setActionHandler("pause", () => player.pause());
+      ms.setActionHandler("seekbackward", () =>
+        player.currentTime(Math.max(0, player.currentTime() - 10)),
+      );
+      ms.setActionHandler("seekforward", () =>
+        player.currentTime(
+          Math.min(player.duration(), player.currentTime() + 10),
+        ),
+      );
+      ms.setActionHandler("seekto", (d) => {
+        if (d.seekTime != null) player.currentTime(d.seekTime);
+      });
+      ms.setActionHandler("nexttrack", ps.nextURL ? goNext : null);
+      ms.setActionHandler("previoustrack", null);
 
       const updatePosition = () => {
         try {
           ms.setPositionState({
             duration: player.duration() || 0,
             playbackRate: player.playbackRate() || 1,
-            position: Math.min(player.currentTime() || 0, player.duration() || 0),
+            position: Math.min(
+              player.currentTime() || 0,
+              player.duration() || 0,
+            ),
           });
         } catch {}
       };
-      player.on('timeupdate', updatePosition);
-      player.on('ratechange', updatePosition);
+      player.on("timeupdate", updatePosition);
+      player.on("ratechange", updatePosition);
       cleanups.push(() => {
         ms.metadata = null;
-        ms.setActionHandler('play', null);
-        ms.setActionHandler('pause', null);
-        ms.setActionHandler('seekbackward', null);
-        ms.setActionHandler('seekforward', null);
-        ms.setActionHandler('seekto', null);
-        ms.setActionHandler('nexttrack', null);
+        ms.setActionHandler("play", null);
+        ms.setActionHandler("pause", null);
+        ms.setActionHandler("seekbackward", null);
+        ms.setActionHandler("seekforward", null);
+        ms.setActionHandler("seekto", null);
+        ms.setActionHandler("nexttrack", null);
       });
     }
 
-    api.videoList()
+    api
+      .videoList()
       .then((data: any) => {
         if (!data) return;
         ps.rows = Object.entries(data).filter(([, files]) => files?.length) as [
@@ -389,11 +432,13 @@
         ][];
         ps.nextURL = nextVid(data, dir, name, autoplay);
         ps.videoKey = data[dir]?.find((f: any) => f.name === name)?.key ?? "";
-        if (ps.videoKey && 'mediaSession' in navigator) {
+        if (ps.videoKey && "mediaSession" in navigator) {
           navigator.mediaSession.metadata = new MediaMetadata({
             title,
-            artist: dir === '.' ? 'Notflix' : dir,
-            artwork: [{ src: `/images/${ps.videoKey}.jpg`, type: 'image/jpeg' }],
+            artist: dir === "." ? "Notflix" : dir,
+            artwork: [
+              { src: `/images/${ps.videoKey}.jpg`, type: "image/jpeg" },
+            ],
           });
         }
 
@@ -435,9 +480,9 @@
     videoKey={ps.videoKey}
     {videoParam}
     {runWhisper}
-    subsOpen={subsOpen}
-    subsInfo={subsInfo}
-    onlineResults={onlineResults}
+    {subsOpen}
+    {subsInfo}
+    {onlineResults}
     searching={searchingSubs}
     {activeSub}
     onToggleSubs={toggleSubs}
@@ -467,7 +512,13 @@
     <div class="error-overlay p-abs cc f-col g10">
       <span class="err-icon">⚠</span>
       <span class="err-msg">{playerError}</span>
-      <button class="err-retry rx5 ptr" onclick={() => { playerError = ""; player?.load(); }}>Retry</button>
+      <button
+        class="err-retry rx5 ptr"
+        onclick={() => {
+          playerError = "";
+          player?.load();
+        }}>Retry</button
+      >
     </div>
   {/if}
 
@@ -480,9 +531,15 @@
     hidden={ps.hideUI}
     speed={ps.speed}
     paused={ps.paused}
-    onSpeedDown={() => player?.playbackRate(Math.max(0.25, Math.round((player.playbackRate() - 0.25) * 4) / 4))}
-    onSpeedUp={() => player?.playbackRate(Math.min(4, Math.round((player.playbackRate() + 0.25) * 4) / 4))}
-    onPlayPause={() => player?.paused() ? player.play() : player.pause()}
+    onSpeedDown={() =>
+      player?.playbackRate(
+        Math.max(0.25, Math.round((player.playbackRate() - 0.25) * 4) / 4),
+      )}
+    onSpeedUp={() =>
+      player?.playbackRate(
+        Math.min(4, Math.round((player.playbackRate() + 0.25) * 4) / 4),
+      )}
+    onPlayPause={() => (player?.paused() ? player.play() : player.pause())}
     onNext={ps.nextURL ? goNext : undefined}
   />
   <Volume level={ps.volLevel} visible={ps.volVisible} />
@@ -506,8 +563,13 @@
     color: var(--tx-4);
     text-align: center;
   }
-  .err-icon { font-size: 2rem; }
-  .err-msg { font-size: 14px; max-width: 320px; }
+  .err-icon {
+    font-size: 2rem;
+  }
+  .err-msg {
+    font-size: 14px;
+    max-width: 320px;
+  }
   .err-retry {
     background: var(--bg-5);
     color: var(--tx-5);

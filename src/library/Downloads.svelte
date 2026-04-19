@@ -39,15 +39,27 @@
           </div>
         </div>
         {#if j.status === "paused"}
-          <button class="btn-icon sh-0" title="Resume" onclick={() => onResume(j.gid)}>
+          <button
+            class="btn-icon sh-0"
+            title="Resume"
+            onclick={() => onResume(j.gid)}
+          >
             ▶
           </button>
         {:else}
-          <button class="btn-icon sh-0" title="Pause" onclick={() => onPause(j.gid)}>
+          <button
+            class="btn-icon sh-0"
+            title="Pause"
+            onclick={() => onPause(j.gid)}
+          >
             ⏸
           </button>
         {/if}
-        <button class="btn-icon danger sh-0" title="Remove" onclick={() => onRemove(j.gid)}>
+        <button
+          class="btn-icon danger sh-0"
+          title="Remove"
+          onclick={() => onRemove(j.gid)}
+        >
           ✕
         </button>
       </div>
@@ -85,22 +97,25 @@
     box-shadow: inset 0 1px 1px #0005;
   }
   @media (max-width: 640px) {
-    .item { padding: 10px 8px; }
-    .name { font-size: 12px; }
+    .item {
+      padding: 10px 8px;
+    }
+    .name {
+      font-size: 12px;
+    }
   }
   .fill {
     background: linear-gradient(90deg, #e11, #f63);
     transition: width 0.5s;
   }
   .fill.active {
-    background-image:
-      linear-gradient(
-        45deg,
-        #e11 0 25%,
-        #f63 25% 50%,
-        #e11 50% 75%,
-        #f63 75% 100%
-      );
+    background-image: linear-gradient(
+      45deg,
+      #e11 0 25%,
+      #f63 25% 50%,
+      #e11 50% 75%,
+      #f63 75% 100%
+    );
     background-size: 28px 28px;
     animation: stripe-shift 0.8s linear infinite;
   }

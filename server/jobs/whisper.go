@@ -23,8 +23,8 @@ import (
 const pythonPath = "/opt/homebrew/Caskroom/miniconda/base/envs/global/bin/python"
 
 var (
-	activeProcs  sync.Map
-	whisperJobs  sync.Map
+	activeProcs sync.Map
+	whisperJobs sync.Map
 )
 
 func whisperVTTOf(path string) string {

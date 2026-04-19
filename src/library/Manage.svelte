@@ -25,7 +25,14 @@
   let jobs: Job[] = $state([]);
   let dlJobs: Downjob[] = $state([]);
   let processingLib = $state(false);
-  let pwaDownloads = $state<{ videoParam: string; title: string; bgFetchId: string | null; progress: number }[]>([]);
+  let pwaDownloads = $state<
+    {
+      videoParam: string;
+      title: string;
+      bgFetchId: string | null;
+      progress: number;
+    }[]
+  >([]);
   let dirSizes = $state<Record<string, { bytes: number; root: string }>>({});
 
   let jobsTimer: ReturnType<typeof setInterval>;
@@ -57,7 +64,9 @@
   onMount(() => {
     loadAll();
 
-    api.build().then((r) => { if (r?.backend) backendBuild = r.backend; });
+    api.build().then((r) => {
+      if (r?.backend) backendBuild = r.backend;
+    });
     api.manage.dirSizes().then((sizes: any[]) => {
       if (!Array.isArray(sizes)) return;
       const map: Record<string, { bytes: number; root: string }> = {};
@@ -181,12 +190,16 @@
 
   async function pauseDownload(gid: string) {
     await api.aria2.pause(gid);
-    dlJobs = dlJobs.map((j) => (j.gid === gid ? { ...j, status: "paused", speed: 0 } : j));
+    dlJobs = dlJobs.map((j) =>
+      j.gid === gid ? { ...j, status: "paused", speed: 0 } : j,
+    );
   }
 
   async function resumeDownload(gid: string) {
     await api.aria2.resume(gid);
-    dlJobs = dlJobs.map((j) => (j.gid === gid ? { ...j, status: "active" } : j));
+    dlJobs = dlJobs.map((j) =>
+      j.gid === gid ? { ...j, status: "active" } : j,
+    );
   }
 
   async function processLibrary() {
@@ -209,8 +222,20 @@
 </script>
 
 <div style="min-height:100vh">
-  <Header {rows} {total} {disks} {fmtBytes} processing={processingLib} onProcess={processLibrary} />
-  <Magnet {disks} {fmtBytes} onAdd={addDownload} onAddTorrent={addTorrentFile} />
+  <Header
+    {rows}
+    {total}
+    {disks}
+    {fmtBytes}
+    processing={processingLib}
+    onProcess={processLibrary}
+  />
+  <Magnet
+    {disks}
+    {fmtBytes}
+    onAdd={addDownload}
+    onAddTorrent={addTorrentFile}
+  />
 
   <main>
     <Downloads
@@ -229,10 +254,15 @@
         {#each pwaDownloads as dl (dl.videoParam)}
           <div class="pwa-item f al-ct g10">
             <div class="pwa-info">
-              <span class="d-b fs-sm tx-4 trunc">{clean(dl.title || dl.videoParam)}</span>
+              <span class="d-b fs-sm tx-4 trunc"
+                >{clean(dl.title || dl.videoParam)}</span
+              >
               <div class="f al-ct g10">
                 <div class="pwa-bar rx2">
-                  <div class="pwa-fill h-100 rx2" style="width:{dl.progress}%"></div>
+                  <div
+                    class="pwa-fill h-100 rx2"
+                    style="width:{dl.progress}%"
+                  ></div>
                 </div>
                 <span class="fs-xs tx-1">{dl.progress}%</span>
               </div>
@@ -270,9 +300,15 @@
     {/if}
 
     <div class="build-info fs-xs tx-1">
-      frontend {frontendBuild.replace("T", " ").replace(/:\d\dZ?$/, "").replace("Z", "")} UTC
+      frontend {frontendBuild
+        .replace("T", " ")
+        .replace(/:\d\dZ?$/, "")
+        .replace("Z", "")} UTC
       {#if backendBuild}
-        &middot; backend {backendBuild.replace("T", " ").replace(/:\d\dZ?$/, "").replace("Z", "")} UTC
+        &middot; backend {backendBuild
+          .replace("T", " ")
+          .replace(/:\d\dZ?$/, "")
+          .replace("Z", "")} UTC
       {/if}
     </div>
   </main>

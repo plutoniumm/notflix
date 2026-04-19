@@ -1,4 +1,4 @@
-const CACHE = 'notflix-v2';
+const CACHE = 'notflix-v3';
 const OFFLINE_CACHE = 'notflix-offline-v1';
 const SHELL = [
   '/',
@@ -13,7 +13,7 @@ const SHELL = [
 
 class IDB {
   constructor ( name, version, upgrade ) {
-    this._dbPromise = new Promise( ( resolve, reject ) => {
+    this.dbPromise = new Promise( ( resolve, reject ) => {
       const req = indexedDB.open( name, version );
       req.onupgradeneeded = ( e ) => upgrade( req.result, e.oldVersion );
       req.onsuccess = () => resolve( req.result );
@@ -21,8 +21,8 @@ class IDB {
     } );
   }
 
-  async _tx ( store, mode, fn ) {
-    const db = await this._dbPromise;
+  async tx ( store, mode, fn ) {
+    const db = await this.dbPromise;
 
     return new Promise( ( resolve, reject ) => {
       const req = fn(
@@ -37,22 +37,22 @@ class IDB {
   }
 
   get ( store, key ) {
-    return this._tx(
+    return this.tx(
       store, 'readonly', ( s ) => s.get( key )
     );
   }
   put ( store, value ) {
-    return this._tx(
+    return this.tx(
       store, 'readwrite', ( s ) => s.put( value )
     );
   }
   del ( store, key ) {
-    return this._tx(
+    return this.tx(
       store, 'readwrite', ( s ) => s.delete( key )
     );
   }
   getAll ( store ) {
-    return this._tx(
+    return this.tx(
       store, 'readonly', ( s ) => s.getAll()
     );
   }
@@ -84,6 +84,10 @@ self.addEventListener( 'install', ( e ) => {
   self.skipWaiting();
 } );
 
+self.addEventListener( 'message', ( e ) => {
+  if ( e.data?.type === 'SKIP_WAITING' ) self.skipWaiting();
+} );
+
 self.addEventListener( 'activate', ( e ) => {
   e.waitUntil(
     caches.keys().then( ( keys ) =>
@@ -112,12 +116,38 @@ self.addEventListener( 'fetch', ( e ) => {
     return;
   }
 
-  if ( url.pathname.startsWith( '/api/' ) || url.pathname.startsWith( '/images/' ) ) return;
+  if ( url.pathname.startsWith( '/api/' ) ||
+       url.pathname.startsWith( '/list/' ) ||
+       url.pathname.startsWith( '/kv/' ) ||
+       url.pathname.startsWith( '/images/' ) ) return;
+
+  if ( e.request.mode === 'navigate' ) {
+    e.respondWith(
+      fetch( e.request )
+        .then( ( response ) => {
+          const clone = response.clone();
+          caches.open( CACHE ).then( ( c ) => c.put( '/', clone ) );
+          return response;
+        } )
+        .catch( () =>
+          caches.open( CACHE ).then( ( c ) => c.match( '/' ) )
+            .then( ( r ) => r || new Response( 'Offline', { status: 503 } ) )
+        )
+    );
+    return;
+  }
 
   e.respondWith(
-    caches
-      .match( e.request )
-      .then( ( r ) => r || fetch( e.request ) )
+    fetch( e.request )
+      .then( ( response ) => {
+        const clone = response.clone();
+        caches.open( CACHE ).then( ( c ) => c.put( e.request, clone ) );
+        return response;
+      } )
+      .catch( () =>
+        caches.open( CACHE ).then( ( c ) => c.match( e.request ) )
+          .then( ( r ) => r || new Response( 'Offline', { status: 503 } ) )
+      )
   );
 } );
 

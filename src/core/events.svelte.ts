@@ -18,23 +18,23 @@ export function fmtTime(s: number): string {
 }
 
 export class PlayerState {
-  paused    = $state(true);
-  hideUI    = $state(false);
+  paused = $state(true);
+  hideUI = $state(false);
   currentTime = $state(0);
-  duration    = $state(0);
-  volLevel   = $state(1);
+  duration = $state(0);
+  volLevel = $state(1);
   volVisible = $state(false);
 
-  speed   = $state(1);
+  speed = $state(1);
   hasSubs = $state(false);
 
   wMsg = $state("");
 
-  syncMs      = $state(0);
+  syncMs = $state(0);
   syncVisible = $state(false);
 
-  rows     = $state<[string, any[]][]>([]);
-  nextURL  = $state<string | null>(null);
+  rows = $state<[string, any[]][]>([]);
+  nextURL = $state<string | null>(null);
   videoKey = $state("");
 
   get pct() {
@@ -43,22 +43,26 @@ export class PlayerState {
       : 0;
   }
 
-  #uiTimer:   ReturnType<typeof setTimeout> | undefined;
-  #volTimer:  ReturnType<typeof setTimeout> | undefined;
+  #uiTimer: ReturnType<typeof setTimeout> | undefined;
+  #volTimer: ReturnType<typeof setTimeout> | undefined;
   #syncTimer: ReturnType<typeof setTimeout> | undefined;
 
   showSync(ms: number) {
-    this.syncMs      = ms;
+    this.syncMs = ms;
     this.syncVisible = true;
     clearTimeout(this.#syncTimer);
-    this.#syncTimer = setTimeout(() => { this.syncVisible = false; }, HINT_SHOW_MS);
+    this.#syncTimer = setTimeout(() => {
+      this.syncVisible = false;
+    }, HINT_SHOW_MS);
   }
 
   showUI(paused: boolean) {
     this.hideUI = false;
     clearTimeout(this.#uiTimer);
     if (!paused)
-      this.#uiTimer = setTimeout(() => { this.hideUI = true; }, UI_HIDE_MS);
+      this.#uiTimer = setTimeout(() => {
+        this.hideUI = true;
+      }, UI_HIDE_MS);
   }
 
   bind(player: any) {
@@ -74,10 +78,12 @@ export class PlayerState {
     });
 
     player.on("volumechange", () => {
-      this.volLevel   = player.muted() ? 0 : player.volume();
+      this.volLevel = player.muted() ? 0 : player.volume();
       this.volVisible = true;
       clearTimeout(this.#volTimer);
-      this.#volTimer  = setTimeout(() => { this.volVisible = false; }, HINT_SHOW_MS);
+      this.#volTimer = setTimeout(() => {
+        this.volVisible = false;
+      }, HINT_SHOW_MS);
     });
 
     player.on("timeupdate", () => {
@@ -97,7 +103,10 @@ export class PlayerState {
       const tracks = player.textTracks();
       let active = false;
       for (let i = 0; i < tracks.length; i++) {
-        if (tracks[i].mode === "showing") { active = true; break; }
+        if (tracks[i].mode === "showing") {
+          active = true;
+          break;
+        }
       }
       this.hasSubs = active;
     };

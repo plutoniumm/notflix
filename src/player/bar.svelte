@@ -124,7 +124,11 @@
       </div>
 
       <!-- svelte-ignore a11y_consider_explicit_label -->
-      <button class="ibtn cc rx5 ptr p5" class:pulse={whisperActive} onclick={runWhisper}>
+      <button
+        class="ibtn cc rx5 ptr p5"
+        class:pulse={whisperActive}
+        onclick={runWhisper}
+      >
         <svg
           width="18"
           height="18"
@@ -181,7 +185,10 @@
 
   .ibtn {
     color: var(--tx-4);
-    transition: color 0.15s, background 0.15s, transform 0.12s;
+    transition:
+      color 0.15s,
+      background 0.15s,
+      transform 0.12s;
     min-width: 36px;
     min-height: 36px;
   }
@@ -192,7 +199,10 @@
     }
   }
   @media (hover: none) {
-    .ibtn { min-width: 44px; min-height: 44px; }
+    .ibtn {
+      min-width: 44px;
+      min-height: 44px;
+    }
   }
   .ibtn:active {
     color: var(--tx-5);
@@ -209,7 +219,12 @@
   }
 
   @keyframes pulse {
-    0%, 100% { color: var(--tx-4); }
-    50% { color: var(--red); }
+    0%,
+    100% {
+      color: var(--tx-4);
+    }
+    50% {
+      color: var(--red);
+    }
   }
 </style>

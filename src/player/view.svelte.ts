@@ -1,6 +1,6 @@
-import { PlayerState } from '../core/events.svelte';
-import type { SubsInfo, LocalTrack } from './subs';
-import type { AudioTrack } from './AudioPicker.svelte';
+import { PlayerState } from "../core/events.svelte";
+import type { SubsInfo, LocalTrack } from "./subs";
+import type { AudioTrack } from "./AudioPicker.svelte";
 
 export class SubsManager {
   info = $state<SubsInfo | null>(null);
@@ -9,13 +9,25 @@ export class SubsManager {
   onlineResults = $state<any[] | null>(null);
   searching = $state(false);
 
-  toggle() { this.open = !this.open; }
-  close() { this.open = false; }
+  toggle() {
+    this.open = !this.open;
+  }
+  close() {
+    this.open = false;
+  }
 
-  setInfo(info: SubsInfo | null) { this.info = info; }
-  markActive(label: string | null) { this.activeSub = label; }
-  setResults(r: any[] | null) { this.onlineResults = r; }
-  setSearching(b: boolean) { this.searching = b; }
+  setInfo(info: SubsInfo | null) {
+    this.info = info;
+  }
+  markActive(label: string | null) {
+    this.activeSub = label;
+  }
+  setResults(r: any[] | null) {
+    this.onlineResults = r;
+  }
+  setSearching(b: boolean) {
+    this.searching = b;
+  }
 }
 
 export class AudioManager {
@@ -23,11 +35,19 @@ export class AudioManager {
   active = $state(0);
   open = $state(false);
 
-  toggle() { this.open = !this.open; }
-  close() { this.open = false; }
+  toggle() {
+    this.open = !this.open;
+  }
+  close() {
+    this.open = false;
+  }
 
-  setTracks(tracks: AudioTrack[]) { this.tracks = tracks; }
-  select(track: number) { this.active = track; }
+  setTracks(tracks: AudioTrack[]) {
+    this.tracks = tracks;
+  }
+  select(track: number) {
+    this.active = track;
+  }
 }
 
 export class PlayerView {
