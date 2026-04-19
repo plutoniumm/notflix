@@ -35,12 +35,14 @@
     top: calc(100% + 6px);
     right: 0;
     overflow-y: auto;
-    background: #111c;
-    backdrop-filter: blur(8px);
+    background: #0d0d0dd9;
+    backdrop-filter: blur(14px) saturate(130%);
     border: 1px solid #fff2;
-    border-radius: 8px;
+    border-radius: 10px;
     z-index: 100;
-    animation: fade-in 0.15s ease;
+    box-shadow: 0 12px 40px #0009, 0 0 0 1px #0006;
+    transform-origin: top right;
+    animation: dropdown-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
   }
 
   .dropdown :global(.item) {
@@ -91,14 +93,14 @@
     margin: 4px 0;
   }
 
-  @keyframes fade-in {
+  @keyframes dropdown-in {
     from {
       opacity: 0;
-      transform: translateY(-4px);
+      transform: translateY(-6px) scale(0.94);
     }
     to {
       opacity: 1;
-      transform: translateY(0);
+      transform: translateY(0) scale(1);
     }
   }
 </style>

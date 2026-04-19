@@ -15,10 +15,45 @@
   --grn: #4d8;
 }
 
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.22s;
+}
+
 body {
-  background: var(--bg-2);
+  background:
+    radial-gradient(ellipse 80% 60% at 0% 0%, #1a0c0c 0%, transparent 55%),
+    radial-gradient(ellipse 60% 50% at 100% 0%, #0c121a 0%, transparent 55%),
+    var(--bg-2);
   color: var(--tx-5);
   min-height: 100vh;
+}
+
+::selection {
+  background: var(--red);
+  color: var(--tx-5);
+}
+
+input:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@keyframes stripe-shift {
+  from { background-position: 0 0; }
+  to   { background-position: 28px 0; }
+}
+
+@keyframes shimmer {
+  from { background-position: -200px 0; }
+  to   { background-position: 200px 0; }
 }
 
 video {
