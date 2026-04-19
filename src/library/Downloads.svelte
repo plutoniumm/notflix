@@ -28,6 +28,7 @@
             <div class="bar rx2">
               <div
                 class="fill h-100 rx2"
+                class:active={j.status !== "paused"}
                 style="width:{j.percent.toFixed(1)}%"
               ></div>
             </div>
@@ -77,11 +78,26 @@
   }
   .bar {
     flex: 1;
-    height: 4px;
+    height: 5px;
     background: var(--bg-4);
+    overflow: hidden;
+    box-shadow: inset 0 1px 1px #0005;
   }
   .fill {
-    background: var(--red);
+    background: linear-gradient(90deg, #e11, #f63);
     transition: width 0.5s;
+    box-shadow: 0 0 8px -2px #e114;
+  }
+  .fill.active {
+    background-image:
+      linear-gradient(
+        45deg,
+        #e11 0 25%,
+        #f63 25% 50%,
+        #e11 50% 75%,
+        #f63 75% 100%
+      );
+    background-size: 28px 28px;
+    animation: stripe-shift 0.8s linear infinite;
   }
 </style>

@@ -205,7 +205,11 @@
 
   <main>
     {#if loading}
-      <div class="loading tc"><span class="spinner"></span></div>
+      <div class="skel-grid">
+        {#each Array(14) as _, i}
+          <div class="skel-card" style="--i:{i}"></div>
+        {/each}
+      </div>
     {:else if results !== null}
       <div class="search-header f al-ct g20">
         <span>
@@ -412,14 +416,18 @@
   }
 
   .search-wrap input {
-    background: var(--bg-2);
+    background: #0008;
     border: 1px solid var(--bg-5);
     color: var(--tx-5);
     padding: 8px 14px;
-    transition: border-color 0.15s;
+    backdrop-filter: blur(6px);
+    transition: border-color 0.15s, box-shadow 0.2s, background 0.2s;
   }
   .search-wrap input:focus {
-    border-color: var(--tx-5);
+    outline: none;
+    border-color: var(--red);
+    background: #000c;
+    box-shadow: 0 0 0 3px #e112, 0 0 24px -8px var(--red);
   }
   .search-wrap input::placeholder {
     color: var(--tx-1);
@@ -469,20 +477,29 @@
     background: var(--tx-2);
     flex-shrink: 0;
   }
-  .loading {
-    padding: 80px;
-    color: var(--tx-1);
+  .skel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    padding: 24px 48px;
   }
-  .spinner {
-    display: inline-block;
-    width: 28px;
-    height: 28px;
-    border: 3px solid var(--bg-5);
-    border-top-color: var(--tx-3);
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
+  .skel-card {
+    aspect-ratio: 16 / 9;
+    border-radius: 5px;
+    background:
+      linear-gradient(
+        90deg,
+        var(--bg-3) 0%,
+        var(--bg-4) 40%,
+        var(--bg-3) 80%
+      );
+    background-size: 400px 100%;
+    opacity: 0;
+    animation:
+      shimmer 1.6s linear infinite,
+      fade-in 0.3s ease forwards;
+    animation-delay: calc(var(--i) * 60ms), calc(var(--i) * 60ms);
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   .search-header {
     padding: 24px 48px 16px;
@@ -563,15 +580,22 @@
     flex-shrink: 0;
     width: 200px;
     transition:
-      transform 0.2s,
-      box-shadow 0.2s;
+      transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.1),
+      box-shadow 0.25s ease;
     z-index: 1;
     animation: slide-up 0.3s ease both;
   }
   .card:hover {
-    transform: scale(1.08);
+    transform: scale(1.08) translateY(-4px);
     z-index: 10;
-    box-shadow: 0 8px 24px #000c;
+    box-shadow:
+      0 18px 40px #000e,
+      0 0 0 1px #fff2,
+      0 0 48px -12px var(--red);
+  }
+  .card:active {
+    transform: scale(1.05) translateY(-2px);
+    transition-duration: 0.1s;
   }
 
   .thumb {
