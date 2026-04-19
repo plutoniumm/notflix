@@ -66,12 +66,6 @@ type SubResult struct {
 	HashMatch     bool   `json:"hash_match"`
 }
 
-func findVid(file string, roots []string) (string, bool) {
-	path := library.FindFile(file, roots)
-
-	return path, path != ""
-}
-
 func vttOf(path string) string {
 	ext := filepath.Ext(path)
 
@@ -84,14 +78,14 @@ func whisperVTTOf(path string) string {
 	return path[:len(path)-len(ext)] + ".whisper.vtt"
 }
 
-func Subctx(c *gin.Context, roots []string) {
+func Subctx(c *gin.Context, lib *library.Library) {
 	raw := c.Query("file")
 	if raw == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file param"})
 		return
 	}
 
-	path, ok := findVid(raw, roots)
+	path, ok := lib.FindVid(raw)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return
@@ -185,7 +179,7 @@ func Subctx(c *gin.Context, roots []string) {
 	c.JSON(http.StatusOK, gin.H{"vtt": hasVTT, "srt": hasSRT, "embedded": embedded, "whisper": hasWhisper, "local": local})
 }
 
-func SubsExtract(c *gin.Context, roots []string) {
+func SubsExtract(c *gin.Context, lib *library.Library) {
 	var body struct {
 		File     string `json:"file"`
 		Track    int    `json:"track"`
@@ -196,7 +190,7 @@ func SubsExtract(c *gin.Context, roots []string) {
 		return
 	}
 
-	path, ok := findVid(body.File, roots)
+	path, ok := lib.FindVid(body.File)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return
@@ -219,7 +213,7 @@ func SubsExtract(c *gin.Context, roots []string) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "file": rel})
 }
 
-func SubsSearch(c *gin.Context, roots []string) {
+func SubsSearch(c *gin.Context, lib *library.Library) {
 	raw := c.Query("file")
 	if raw == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file param"})
@@ -232,7 +226,7 @@ func SubsSearch(c *gin.Context, roots []string) {
 		return
 	}
 
-	path, ok := findVid(raw, roots)
+	path, ok := lib.FindVid(raw)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return
@@ -387,7 +381,7 @@ func fetchToken(key string) string {
 	return tok
 }
 
-func GetSubs(c *gin.Context, roots []string) {
+func GetSubs(c *gin.Context, lib *library.Library) {
 	var body struct {
 		FileID int    `json:"file_id"`
 		File   string `json:"file"`
@@ -398,7 +392,7 @@ func GetSubs(c *gin.Context, roots []string) {
 		return
 	}
 
-	path, ok := findVid(body.File, roots)
+	path, ok := lib.FindVid(body.File)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return
@@ -528,10 +522,10 @@ func GetSubs(c *gin.Context, roots []string) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "file": rel})
 }
 
-func SubsSend(c *gin.Context, roots []string) {
+func SubsSend(c *gin.Context, lib *library.Library) {
 	filename := strings.TrimPrefix(c.Param("filename"), "/")
 
-	path, ok := findVid(filename, roots)
+	path, ok := lib.FindVid(filename)
 	if ok && strings.ToLower(filepath.Ext(path)) == ".vtt" {
 		c.Header("Content-Type", "text/vtt")
 		c.File(path)
@@ -540,7 +534,7 @@ func SubsSend(c *gin.Context, roots []string) {
 
 	if strings.ToLower(filepath.Ext(filename)) == ".vtt" {
 		srtName := filename[:len(filename)-len(".vtt")] + ".srt"
-		srtP, ok := findVid(srtName, roots)
+		srtP, ok := lib.FindVid(srtName)
 		if ok {
 			data, err := os.ReadFile(srtP)
 

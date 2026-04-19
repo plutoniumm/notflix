@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 
 	"notflix/server/library"
@@ -15,49 +14,6 @@ const hlsCacheMaxAge = 7 * 24 * time.Hour
 
 var hashDirRe = regexp.MustCompile(`^\d{7}$`)
 
-func liveHashes(roots []string) map[string]bool {
-	live := make(map[string]bool)
-	add := func(rel string) {
-		live[library.Hash(rel)] = true
-	}
-
-	for _, root := range roots {
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), ".") {
-				continue
-			}
-			if !e.IsDir() {
-				if isVideoFile(e.Name()) {
-					add(e.Name())
-				}
-				continue
-			}
-			sub := filepath.Join(root, e.Name())
-			subEntries, err := os.ReadDir(sub)
-			if err != nil {
-				continue
-			}
-			for _, se := range subEntries {
-				if se.IsDir() || strings.HasPrefix(se.Name(), ".") {
-					continue
-				}
-				if isVideoFile(se.Name()) {
-					add(e.Name() + "/" + se.Name())
-				}
-			}
-		}
-	}
-	return live
-}
-
-func isVideoFile(name string) bool {
-	ext := strings.ToLower(filepath.Ext(name))
-	return ext == ".mp4" || ext == ".mkv" || ext == ".mov"
-}
 
 // dirLatestMTime returns the newest mtime of any file within dir. Falls back to
 // the dir's own mtime if the walk fails or yields nothing.
@@ -79,13 +35,13 @@ func dirLatestMTime(dir string) time.Time {
 	return latest
 }
 
-func CleanHLSCache(roots []string) {
+func CleanHLSCache(lib *library.Library) {
 	entries, err := os.ReadDir(hlsCacheDir)
 	if err != nil {
 		return
 	}
 
-	live := liveHashes(roots)
+	live := lib.LiveHashes()
 	now := time.Now()
 	orphans, aged := 0, 0
 
@@ -119,10 +75,10 @@ func CleanHLSCache(roots []string) {
 	}
 }
 
-func StartCacheCleanLoop(roots []string, interval time.Duration) {
+func StartCacheCleanLoop(lib *library.Library, interval time.Duration) {
 	go func() {
 		for {
-			CleanHLSCache(roots)
+			CleanHLSCache(lib)
 			time.Sleep(interval)
 		}
 	}()

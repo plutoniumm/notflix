@@ -156,9 +156,9 @@ func serve(c *gin.Context, file *os.File, info os.FileInfo, name string) {
 	}
 }
 
-func VideoInfo(c *gin.Context, roots []string) {
+func VideoInfo(c *gin.Context, lib *library.Library) {
 	file := c.Query("file")
-	path := library.FindFile(file, roots)
+	path := lib.FindFile(file)
 	if path == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return

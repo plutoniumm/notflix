@@ -6,6 +6,8 @@ import (
 	"os/exec"
 
 	"github.com/gin-gonic/gin"
+
+	"notflix/server/library"
 )
 
 type AudioTrack struct {
@@ -15,13 +17,14 @@ type AudioTrack struct {
 	Channels int    `json:"channels"`
 }
 
-func AudioInfo(c *gin.Context, roots []string) {
+func AudioInfo(c *gin.Context, lib *library.Library) {
 	raw := c.Query("file")
 	if raw == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file param"})
 		return
 	}
-	path, ok := findVid(raw, roots)
+
+	path, ok := lib.FindVid(raw)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return

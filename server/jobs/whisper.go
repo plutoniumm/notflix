@@ -104,7 +104,7 @@ func extractToWAV(src string) (string, error) {
 	return tmpPath, nil
 }
 
-func SubsWhisperStream(c *gin.Context, roots []string) {
+func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 	raw := c.Query("file")
 	if raw == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file param"})
@@ -112,7 +112,7 @@ func SubsWhisperStream(c *gin.Context, roots []string) {
 	}
 	log.Printf("[whisper] stream request: file=%q", raw)
 
-	path, ok := library.FindVid(raw, roots)
+	path, ok := lib.FindVid(raw)
 	if !ok {
 		log.Printf("[whisper] video not found: %q", raw)
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
@@ -264,7 +264,7 @@ func SubsWhisperStream(c *gin.Context, roots []string) {
 	log.Printf("[whisper] stream complete: %d segments", len(segs))
 }
 
-func SubsWhisper(c *gin.Context, roots []string) {
+func SubsWhisper(c *gin.Context, lib *library.Library) {
 	var body struct {
 		File string `json:"file"`
 	}
@@ -273,7 +273,7 @@ func SubsWhisper(c *gin.Context, roots []string) {
 		return
 	}
 
-	path, ok := library.FindVid(body.File, roots)
+	path, ok := lib.FindVid(body.File)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return
