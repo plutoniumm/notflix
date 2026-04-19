@@ -72,7 +72,6 @@
         </div>
       {/if}
 
-      <!-- subtitle button + dropdown -->
       <div class="btn-wrap p-rel">
         <!-- svelte-ignore a11y_consider_explicit_label -->
         <button
@@ -182,18 +181,23 @@
 
   .ibtn {
     color: var(--tx-4);
-    transition:
-      color 0.15s,
-      background 0.15s;
+    transition: color 0.15s, background 0.15s, transform 0.12s;
     min-width: 36px;
     min-height: 36px;
+  }
+  @media (hover: hover) {
+    .ibtn:hover {
+      color: var(--tx-5);
+      background: #fff2;
+    }
   }
   @media (hover: none) {
     .ibtn { min-width: 44px; min-height: 44px; }
   }
-  .ibtn:hover, .ibtn:active {
+  .ibtn:active {
     color: var(--tx-5);
-    background: #fff2;
+    background: #fff3;
+    transform: scale(0.88);
   }
   .ibtn.active {
     color: var(--tx-5);

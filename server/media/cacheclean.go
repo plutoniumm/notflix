@@ -15,8 +15,6 @@ const hlsCacheMaxAge = 7 * 24 * time.Hour
 var hashDirRe = regexp.MustCompile(`^\d{7}$`)
 
 
-// dirLatestMTime returns the newest mtime of any file within dir. Falls back to
-// the dir's own mtime if the walk fails or yields nothing.
 func dirLatestMTime(dir string) time.Time {
 	info, err := os.Stat(dir)
 	if err != nil {

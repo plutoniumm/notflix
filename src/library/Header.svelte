@@ -61,7 +61,6 @@
     height: 4px;
     background: var(--bg-3);
     overflow: hidden;
-    box-shadow: inset 0 1px 1px #0006;
   }
   .proc-btn {
     padding: 4px 12px;
@@ -82,6 +81,5 @@
   .disk-fill {
     background: linear-gradient(90deg, #e11, #f63, #fa0);
     transition: width 0.4s cubic-bezier(0.2, 0.9, 0.3, 1);
-    box-shadow: 0 0 8px -1px #e114;
   }
 </style>

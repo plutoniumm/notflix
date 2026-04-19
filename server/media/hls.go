@@ -390,7 +390,6 @@ func HLSPlaylist(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	// Decide copy mode: only at source resolution, only h264 source.
 	var segDurs []float64
 	var segBitrates []int
 	copyMode := false

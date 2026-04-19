@@ -99,14 +99,16 @@
 
       {#if onToggleHidden}
         <button
-          class="btn-icon"
+          class="btn-icon eye-btn"
           title={hidden ? "Unhide from Home" : "Hide from Home"}
           onclick={(e) => {
             e.stopPropagation();
             onToggleHidden?.();
           }}
         >
-          {hidden ? "🙈" : "👁"}
+          {#key hidden}
+            <span class="eye-icon d-b">{hidden ? "🙈" : "👁"}</span>
+          {/key}
         </button>
       {/if}
       {#if dir !== "."}
@@ -159,9 +161,20 @@
     margin-bottom: 8px;
     animation: slide-up 0.25s ease both;
     animation-delay: calc(var(--i) * 40ms);
+    transition: opacity 0.2s, border-color 0.2s;
+  }
+  .folder[open] > .folder-hd {
+    border-bottom: 1px solid var(--bg-4);
   }
   .folder.is-hidden {
     opacity: 0.55;
+  }
+  .folder.is-hidden:hover {
+    opacity: 0.85;
+  }
+  .eye-icon {
+    animation: pop-in 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.4);
+    display: inline-block;
   }
   .folder.is-hidden .folder-hd {
     background: repeating-linear-gradient(
@@ -177,10 +190,21 @@
     padding: 10px 14px;
     background: var(--bg-3);
     user-select: none;
-    transition: background 0.1s;
+    transition: background 0.15s;
   }
-  .folder-hd:hover .btn-icon {
-    opacity: 1;
+  .folder-hd:hover {
+    background: var(--bg-4);
+  }
+  .folder-hd:active {
+    background: var(--bg-5);
+  }
+  @media (hover: hover) {
+    .folder-hd:hover .btn-icon {
+      opacity: 1;
+    }
+  }
+  @media (max-width: 640px) {
+    .folder-hd { padding: 12px 10px; }
   }
 
   .folder-icon {
@@ -195,6 +219,7 @@
     border-radius: 50%;
     background: var(--red);
     box-shadow: 0 0 4px var(--red);
+    animation: breathe 1.4s ease-in-out infinite;
   }
 
   .disk-tag {

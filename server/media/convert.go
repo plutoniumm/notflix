@@ -98,7 +98,6 @@ func convertRoot(root string) {
 			return nil
 		}
 
-		// skip files still being downloaded
 		if downloading[path] {
 			log.Printf("[convert] skipping (aria2 active): %s", d.Name())
 			return nil
