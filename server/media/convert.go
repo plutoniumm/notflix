@@ -20,41 +20,10 @@ import (
 	"notflix/server/library"
 )
 
-type Progress struct {
-	Name    string  `json:"name"`
-	Percent float64 `json:"percent"`
-}
+var progress = jobs.NewTracker()
 
-var (
-	mut    sync.Mutex
-	active = map[string]float64{}
-)
-
-func GetProgress() []Progress {
-	mut.Lock()
-	defer mut.Unlock()
-	out := make([]Progress, 0, len(active))
-
-	for name, pct := range active {
-		out = append(out, Progress{
-			Name:    name,
-			Percent: pct,
-		})
-	}
-
-	return out
-}
-
-func setProgress(name string, pct float64) {
-	mut.Lock()
-	active[name] = pct
-	mut.Unlock()
-}
-
-func clearProgress(name string) {
-	mut.Lock()
-	delete(active, name)
-	mut.Unlock()
+func GetProgress() []jobs.Progress {
+	return progress.List()
 }
 
 var processing atomic.Bool
@@ -104,7 +73,7 @@ func freeBytes(dir string) int64 {
 }
 
 func convertRoot(root string) {
-	sem := make(chan struct{}, 3)
+	pool := jobs.NewPool(3)
 	var wg sync.WaitGroup
 	downloading := jobs.Aria2ActivePaths()
 	var diskFull atomic.Bool
@@ -151,12 +120,13 @@ func convertRoot(root string) {
 			}
 		}
 
-		sem <- struct{}{}
+		pool.Acquire()
 		wg.Add(1)
 
 		go func(p string) {
 			defer wg.Done()
-			defer func() { <-sem }()
+			defer pool.Release()
+
 			if err := toMP4(p); err == errNoSpace {
 				diskFull.Store(true)
 			}
@@ -183,8 +153,8 @@ func toMP4(srcPath string) error {
 		os.Remove(mp4Path)
 	}
 
-	setProgress(name, 0)
-	defer clearProgress(name)
+	progress.Update(name, 0)
+	defer progress.Finish(name)
 
 	dur := duration(srcPath)
 	if dur <= 0 {
@@ -222,7 +192,7 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 			cs, _ := strconv.Atoi(m[4])
 			t := float64(h*3600+min*60+sec) + float64(cs)/100
 			pct := math.Min(t/pw.durationSec*100, 99)
-			setProgress(pw.name, pct)
+			progress.Update(pw.name, pct)
 		}
 	}
 	return len(p), nil
