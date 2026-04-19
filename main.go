@@ -9,12 +9,17 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
-	server "notflix/server"
+	"notflix/server/jobs"
+	"notflix/server/library"
+	"notflix/server/media"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
+
+var buildTime = "dev"
 
 const (
 	imgDir = "./images"
@@ -32,22 +37,24 @@ var roots = []string{
 func pulse() {
 	if rand.Float64() < 0.01 {
 		for _, root := range roots {
-			go server.GenerateThumbnails(root)
+			go media.GenerateThumbnails(root)
 		}
 	}
 }
 
 func findRoot(name string, rts []string) (string, string, bool) {
-	abs := server.FindFile(name, rts)
+	abs := library.FindFile(name, rts)
 	if abs == "" {
 		return "", "", false
 	}
+
 	rel := strings.TrimPrefix(name, "/")
 	for _, r := range rts {
 		if strings.HasPrefix(abs, r) || strings.HasPrefix(abs, filepath.Join(r, rel)) {
 			return r, abs, true
 		}
 	}
+
 	return "", "", false
 }
 
@@ -60,10 +67,10 @@ func buildList(dir string) map[string][]map[string]string {
 	}
 
 	procDir := func(sub string) []map[string]string {
-		files := server.GetVids(sub)
+		files := library.GetVids(sub)
 		var out []map[string]string
 		for _, name := range files {
-			out = append(out, map[string]string{"name": name, "key": server.Hash(name)})
+			out = append(out, map[string]string{"name": name, "key": library.Hash(name)})
 		}
 
 		return out
@@ -80,16 +87,16 @@ func buildList(dir string) map[string][]map[string]string {
 	return res
 }
 
-func listMedia(c *gin.Context, dir string) {
-	pulse()
-	c.JSON(http.StatusOK, buildList(dir))
-}
-
 func listAll(c *gin.Context, dirs []string) {
 	pulse()
+	hidden := library.HiddenDirs()
 	out := make(map[string][]map[string]string)
+
 	for _, d := range dirs {
 		for k, v := range buildList(d) {
+			if hidden[k] {
+				continue
+			}
 			out[k] = append(out[k], v...)
 		}
 	}
@@ -101,17 +108,18 @@ func main() {
 	_ = godotenv.Load()
 
 	for _, root := range roots {
-		server.EnsureDir(root)
+		library.EnsureDir(root)
 	}
-	server.EnsureDir(pubDir)
-	server.EnsureDir(assDir)
-	server.EnsureDir("./cache")
 
-	go func() {
-		server.ConvertAll(roots)
-		server.CleanAll(roots)
-	}()
-	go server.Aria2Init()
+	library.EnsureDir(pubDir)
+	library.EnsureDir(assDir)
+	library.EnsureDir("./cache")
+
+	jobs.OnDownloads = media.ProcessAll
+
+	go media.ProcessAll(roots)
+	go jobs.Aria2Init(roots)
+	media.StartCacheCleanLoop(roots, time.Hour)
 
 	gin.SetMode("release")
 	router := gin.New()
@@ -138,7 +146,8 @@ func main() {
 			c.String(http.StatusNotFound, "Video not found")
 			return
 		}
-		server.VideoPlayer(c, root)
+
+		media.VideoPlayer(c, root)
 	})
 
 	router.HEAD("/video/*filename", func(c *gin.Context) {
@@ -148,24 +157,37 @@ func main() {
 			c.Status(http.StatusNotFound)
 			return
 		}
-		server.VideoHead(c, root)
+
+		media.VideoHead(c, root)
 	})
 
 	router.GET("/images/:filename", func(c *gin.Context) {
-		pulse()
-		c.File(filepath.Join(imgDir, c.Param("filename")))
+		path := filepath.Join(imgDir, c.Param("filename"))
+		if _, err := os.Stat(path); err != nil {
+			go media.RegenerateThumbnails(roots, 60*time.Second)
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		c.File(path)
 	})
 
 	router.DELETE("/video/*filename", func(c *gin.Context) {
 		fname := c.Param("filename")
 		rel := strings.TrimPrefix(fname, "/")
 		base := strings.TrimSuffix(rel, filepath.Ext(rel))
+
 		for _, root := range roots {
-			server.DelFile(filepath.Join(root, rel))
-			for _, suf := range []string{".srt", ".vtt", ".whisper.vtt"} {
-				server.DelFile(filepath.Join(root, base+suf))
+			library.DelFile(filepath.Join(root, rel))
+			for _, suf := range []string{".vtt", ".srt"} {
+				library.DelFile(filepath.Join(root, base+suf))
+			}
+			matches, _ := filepath.Glob(filepath.Join(root, base+".*.vtt"))
+			for _, m := range matches {
+				library.DelFile(m)
 			}
 		}
+
 		c.String(http.StatusOK, "true")
 	})
 
@@ -179,12 +201,13 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
+
 		if body.NewName == "" || strings.ContainsAny(body.NewName, "/\\") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name"})
 			return
 		}
 
-		abs := server.FindFile(body.Path, roots)
+		abs := library.FindFile(body.Path, roots)
 		if abs != "" {
 			dst := filepath.Join(filepath.Dir(abs), body.NewName)
 			if err := os.Rename(abs, dst); err != nil {
@@ -197,11 +220,17 @@ func main() {
 				base := abs[:len(abs)-len(ext)]
 				nbase := dst[:len(dst)-len(filepath.Ext(dst))]
 
-				for _, suf := range []string{".vtt", ".whisper.vtt", ".srt"} {
+				for _, suf := range []string{".vtt", ".srt"} {
 					old := base + suf
 					if _, err := os.Stat(old); err == nil {
 						os.Rename(old, nbase+suf)
 					}
+				}
+
+				matches, _ := filepath.Glob(base + ".*.vtt")
+				for _, old := range matches {
+					suffix := strings.TrimPrefix(old, base)
+					os.Rename(old, nbase+suffix)
 				}
 			}
 
@@ -213,13 +242,28 @@ func main() {
 	})
 
 	router.GET("/api/conversions", func(c *gin.Context) {
-		c.JSON(http.StatusOK, server.GetProgress())
+		c.JSON(http.StatusOK, media.GetProgress())
+	})
+
+	router.POST("/api/process", func(c *gin.Context) {
+		if media.IsProcessing() {
+			c.JSON(http.StatusOK, gin.H{"ok": true, "status": "already running"})
+			return
+		}
+
+		go media.ProcessAll(roots)
+		c.JSON(http.StatusOK, gin.H{"ok": true, "status": "started"})
 	})
 
 	router.GET("/api/manage/list", func(c *gin.Context) {
-		out := make(map[string][]string)
-		listVids := func(dir string) []string {
-			var files []string
+		type FileEntry struct {
+			Name string `json:"name"`
+			Root string `json:"root"`
+		}
+		out := make(map[string][]FileEntry)
+
+		listVids := func(dir, root string) []FileEntry {
+			var files []FileEntry
 			entries, _ := os.ReadDir(dir)
 
 			for _, f := range entries {
@@ -229,9 +273,10 @@ func main() {
 
 				ext := strings.ToLower(filepath.Ext(f.Name()))
 				if ext == ".mp4" || ext == ".mkv" || ext == ".mov" {
-					files = append(files, f.Name())
+					files = append(files, FileEntry{Name: f.Name(), Root: root})
 				}
 			}
+
 			return files
 		}
 
@@ -241,19 +286,26 @@ func main() {
 				continue
 			}
 
-			if files := listVids(d); len(files) > 0 {
+			rootBase := filepath.Base(d)
+
+			if files := listVids(d, rootBase); len(files) > 0 {
 				out["."] = append(out["."], files...)
 			}
 
 			for _, e := range entries {
 				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-					if files := listVids(filepath.Join(d, e.Name())); len(files) > 0 {
+					if files := listVids(filepath.Join(d, e.Name()), rootBase); len(files) > 0 {
 						out[e.Name()] = append(out[e.Name()], files...)
 					}
 				}
 			}
 		}
+
 		c.JSON(http.StatusOK, out)
+	})
+
+	router.GET("/api/build", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"backend": buildTime})
 	})
 
 	router.GET("/api/manage/diskinfo", func(c *gin.Context) {
@@ -278,15 +330,60 @@ func main() {
 				Total: stat.Blocks * uint64(stat.Bsize),
 			})
 		}
+
 		c.JSON(http.StatusOK, out)
 	})
 
-	router.POST("/api/aria2/add", func(c *gin.Context) { server.Aria2Add(c, roots) })
-	router.GET("/api/aria2/list", server.Aria2List)
-	router.DELETE("/api/aria2/remove", server.Aria2Remove)
+	router.GET("/api/manage/dirsizes", func(c *gin.Context) {
+		type DirSize struct {
+			Dir   string `json:"dir"`
+			Bytes int64  `json:"bytes"`
+			Root  string `json:"root"`
+		}
+		var out []DirSize
 
-	router.GET("/kv/get", server.KVGet)
-	router.POST("/kv/set", server.KVSet)
+		for _, root := range roots {
+			entries, err := os.ReadDir(root)
+			if err != nil {
+				continue
+			}
+
+			rootBase := filepath.Base(root)
+			for _, e := range entries {
+				if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+					continue
+				}
+
+				var total int64
+				filepath.WalkDir(filepath.Join(root, e.Name()), func(_ string, d os.DirEntry, err error) error {
+					if err != nil || d.IsDir() {
+						return nil
+					}
+					if info, err := d.Info(); err == nil {
+						total += info.Size()
+					}
+					return nil
+				})
+
+				if total > 0 {
+					out = append(out, DirSize{Dir: e.Name(), Bytes: total, Root: rootBase})
+				}
+			}
+		}
+
+		c.JSON(http.StatusOK, out)
+	})
+
+	router.POST("/api/aria2/add", func(c *gin.Context) { jobs.Aria2Add(c, roots) })
+	router.POST("/api/aria2/add-torrent", func(c *gin.Context) { jobs.Aria2AddTorrent(c, roots) })
+	router.GET("/api/aria2/list", jobs.Aria2List)
+	router.POST("/api/aria2/pause", jobs.Aria2Pause)
+	router.POST("/api/aria2/resume", jobs.Aria2Resume)
+	router.DELETE("/api/aria2/remove", jobs.Aria2Remove)
+
+	router.GET("/kv/get", library.KVGet)
+	router.POST("/kv/set", library.KVSet)
+	router.GET("/api/manage/hidden", library.HiddenList)
 
 	router.DELETE("/api/dir", func(c *gin.Context) {
 		path := c.Query("path")
@@ -295,39 +392,42 @@ func main() {
 			return
 		}
 
-		abs := server.FindFile(path, roots)
+		abs := library.FindFile(path, roots)
 		if abs == "" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
+
 		info, err := os.Stat(abs)
 		if err != nil || !info.IsDir() {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
+
 		if err := os.RemoveAll(abs); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	router.GET("/subs/*filename", func(c *gin.Context) { server.SubsSend(c, roots) })
+	router.GET("/subs/*filename", func(c *gin.Context) { media.SubsSend(c, roots) })
 
-	router.GET("/api/hls/master", func(c *gin.Context) { server.HLSMaster(c, roots) })
-	router.GET("/api/hls/playlist", func(c *gin.Context) { server.HLSPlaylist(c, roots) })
-	router.GET("/api/hls/segment", func(c *gin.Context) { server.HLSSegment(c, roots) })
-	router.GET("/api/hls/avoffset", func(c *gin.Context) { server.HLSAVOffset(c, roots) })
+	router.GET("/api/hls/master", func(c *gin.Context) { media.HLSMaster(c, roots) })
+	router.GET("/api/hls/playlist", func(c *gin.Context) { media.HLSPlaylist(c, roots) })
+	router.GET("/api/hls/segment", func(c *gin.Context) { media.HLSSegment(c, roots) })
+	router.GET("/api/hls/avoffset", func(c *gin.Context) { media.HLSAVOffset(c, roots) })
 
-	router.GET("/api/video/info", func(c *gin.Context) { server.VideoInfo(c, roots) })
-	router.GET("/api/audio/info", func(c *gin.Context) { server.AudioInfo(c, roots) })
-	router.GET("/api/subs/info", func(c *gin.Context) { server.Subctx(c, roots) })
-	router.GET("/api/subs/search", func(c *gin.Context) { server.SubsSearch(c, roots) })
-	router.POST("/api/subs/download", func(c *gin.Context) { server.GetSubs(c, roots) })
-	router.POST("/api/subs/extract", func(c *gin.Context) { server.SubsExtract(c, roots) })
-	router.POST("/api/subs/whisper", func(c *gin.Context) { server.SubsWhisper(c, roots) })
-	router.GET("/api/subs/whisper/status", server.SubsWhisperStatus)
-	router.GET("/api/subs/whisper/stream", func(c *gin.Context) { server.SubsWhisperStream(c, roots) })
+	router.GET("/api/video/info", func(c *gin.Context) { media.VideoInfo(c, roots) })
+	router.GET("/api/audio/info", func(c *gin.Context) { media.AudioInfo(c, roots) })
+	router.GET("/api/subs/info", func(c *gin.Context) { media.Subctx(c, roots) })
+	router.GET("/api/subs/search", func(c *gin.Context) { media.SubsSearch(c, roots) })
+	router.POST("/api/subs/download", func(c *gin.Context) { media.GetSubs(c, roots) })
+	router.POST("/api/subs/extract", func(c *gin.Context) { media.SubsExtract(c, roots) })
+	router.POST("/api/subs/whisper", func(c *gin.Context) { jobs.SubsWhisper(c, roots) })
+	router.GET("/api/subs/whisper/status", jobs.SubsWhisperStatus)
+	router.GET("/api/subs/whisper/stream", func(c *gin.Context) { jobs.SubsWhisperStream(c, roots) })
 
 	log.Printf("Starting server on http://localhost:%s", port)
 

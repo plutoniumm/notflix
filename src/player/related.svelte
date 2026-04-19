@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { clean, vidURL } from "../lib/video";
+  import { clean, vidURL } from "../core/video";
 
   let { rows, dir, name, paused, embed }: any = $props();
 

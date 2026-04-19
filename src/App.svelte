@@ -1,7 +1,7 @@
 <script lang="ts">
-  import Home from "./Home.svelte";
-  import Player from "./Player.svelte";
-  import Manage from "./Manage.svelte";
+  import Home from "./library/Home.svelte";
+  import Player from "./player/Player.svelte";
+  import Manage from "./library/Manage.svelte";
 
   const loc = window.location;
 

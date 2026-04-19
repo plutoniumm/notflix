@@ -1,7 +1,7 @@
 <script lang="ts">
   import Down from "./Download.svelte";
-  import SubsDropdown from "../Subs.svelte";
-  import AudioPicker from "../AudioPicker.svelte";
+  import SubsDropdown from "./Subs.svelte";
+  import AudioPicker from "./AudioPicker.svelte";
 
   let {
     title,
@@ -14,10 +14,12 @@
     subsInfo,
     onlineResults,
     searching,
-    activeEmbeddedIdx,
+    activeSub,
     onToggleSubs,
+    onSelectLocal,
     onSelectEmbedded,
     onSelectOnline,
+    onSubsOff,
     onCloseSubs,
     audioTracks,
     audioTrack,
@@ -25,6 +27,8 @@
     onToggleAudio,
     onSelectAudio,
     onCloseAudio,
+    hasSubs,
+    whisperActive,
   }: any = $props();
 </script>
 
@@ -34,7 +38,6 @@
     <div class="title fw5 trunc">{title}</div>
 
     <div class="f g5 sh-0 al-ct">
-      <!-- audio button + dropdown (only when >1 track) -->
       {#if audioTracks?.length > 1}
         <div class="btn-wrap p-rel">
           <!-- svelte-ignore a11y_consider_explicit_label -->
@@ -74,7 +77,7 @@
         <!-- svelte-ignore a11y_consider_explicit_label -->
         <button
           class="ibtn cc rx5 ptr p5"
-          class:active={subsOpen}
+          class:active={subsOpen || hasSubs}
           onclick={onToggleSubs}
         >
           <svg width="20" height="15" viewBox="0 0 20 15" fill="none">
@@ -111,16 +114,18 @@
             info={subsInfo}
             {onlineResults}
             {searching}
-            {activeEmbeddedIdx}
+            {activeSub}
+            {onSelectLocal}
             {onSelectEmbedded}
             {onSelectOnline}
+            {onSubsOff}
             onClose={onCloseSubs}
           />
         {/if}
       </div>
 
       <!-- svelte-ignore a11y_consider_explicit_label -->
-      <button class="ibtn cc rx5 ptr p5" onclick={runWhisper}>
+      <button class="ibtn cc rx5 ptr p5" class:pulse={whisperActive} onclick={runWhisper}>
         <svg
           width="18"
           height="18"
@@ -180,13 +185,27 @@
     transition:
       color 0.15s,
       background 0.15s;
+    min-width: 36px;
+    min-height: 36px;
   }
-  .ibtn:hover {
+  @media (hover: none) {
+    .ibtn { min-width: 44px; min-height: 44px; }
+  }
+  .ibtn:hover, .ibtn:active {
     color: var(--tx-5);
     background: #fff2;
   }
   .ibtn.active {
     color: var(--tx-5);
     background: #fff2;
+  }
+
+  .ibtn.pulse {
+    animation: pulse 1.5s ease infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { color: var(--tx-4); }
+    50% { color: var(--red); }
   }
 </style>
