@@ -81,12 +81,16 @@
     height: 5px;
     background: var(--bg-4);
     overflow: hidden;
+    border-radius: 3px;
     box-shadow: inset 0 1px 1px #0005;
+  }
+  @media (max-width: 640px) {
+    .item { padding: 10px 8px; }
+    .name { font-size: 12px; }
   }
   .fill {
     background: linear-gradient(90deg, #e11, #f63);
     transition: width 0.5s;
-    box-shadow: 0 0 8px -2px #e114;
   }
   .fill.active {
     background-image:

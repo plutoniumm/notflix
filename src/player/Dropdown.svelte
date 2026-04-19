@@ -35,12 +35,12 @@
     top: calc(100% + 6px);
     right: 0;
     overflow-y: auto;
-    background: #0d0d0dd9;
+    background: #0d0d0de6;
     backdrop-filter: blur(14px) saturate(130%);
     border: 1px solid #fff2;
     border-radius: 10px;
     z-index: 100;
-    box-shadow: 0 12px 40px #0009, 0 0 0 1px #0006;
+    box-shadow: 0 6px 14px #0008;
     transform-origin: top right;
     animation: dropdown-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
   }

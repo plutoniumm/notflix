@@ -56,6 +56,40 @@ a:focus-visible {
   to   { background-position: 200px 0; }
 }
 
+@keyframes breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.8) rotate(-20deg); }
+  to   { opacity: 1; transform: scale(1)   rotate(0); }
+}
+
+@keyframes flip-in {
+  from { opacity: 0; transform: rotateX(90deg); }
+  to   { opacity: 1; transform: rotateX(0);     }
+}
+
+@keyframes nudge-x {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(3px); }
+}
+
+.press {
+  transition: transform 0.1s ease;
+}
+.press:active {
+  transform: scale(0.94);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 video {
   border: 0 !important;
   outline: 0 !important;
@@ -144,7 +178,6 @@ video {
   background: var(--bg-5);
 }
 
-/* ── buttons ── */
 .btn-ghost {
   background: #fff2;
   border: 1px solid #fff5;
@@ -152,12 +185,19 @@ video {
   padding: 6px 14px;
   border-radius: 3px;
   font-size: 13px;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, transform 0.12s;
 }
 
-.btn-ghost:hover {
+@media (hover: hover) {
+  .btn-ghost:hover {
+    background: #fff3;
+    color: var(--tx-5);
+  }
+}
+
+.btn-ghost:active {
+  transform: scale(0.96);
   background: #fff3;
-  color: var(--tx-5);
 }
 
 .btn-outline {
@@ -167,12 +207,19 @@ video {
   padding: 4px 10px;
   border-radius: 3px;
   font-size: 12px;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.15s, border-color 0.15s, transform 0.12s;
 }
 
-.btn-outline:hover {
-  color: var(--tx-5);
-  border-color: var(--tx-2);
+@media (hover: hover) {
+  .btn-outline:hover {
+    color: var(--tx-5);
+    border-color: var(--tx-2);
+  }
+}
+
+.btn-outline:active {
+  transform: scale(0.96);
+  border-color: var(--tx-3);
 }
 
 .btn-icon {
@@ -184,17 +231,37 @@ video {
   font-size: 12px;
   flex-shrink: 0;
   opacity: 0;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s, transform 0.1s;
 }
 
-.btn-icon:hover {
+@media (hover: hover) {
+  .btn-icon:hover {
+    background: var(--bg-4);
+    color: var(--tx-4);
+  }
+  .btn-icon.danger:hover {
+    color: var(--red);
+    background: #e112;
+  }
+}
+
+.btn-icon:active {
+  transform: scale(0.85);
   background: var(--bg-4);
   color: var(--tx-4);
 }
 
-.btn-icon.danger:hover {
+.btn-icon.danger:active {
   color: var(--red);
-  background: #e112;
+  background: #e113;
+}
+
+@media (hover: none) {
+  .btn-icon {
+    opacity: 1;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
 }
 
 /* ── misc ── */

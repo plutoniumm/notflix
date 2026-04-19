@@ -409,6 +409,19 @@
     background: linear-gradient(to bottom, #000 80%, transparent);
     padding: 18px 48px;
   }
+  @media (max-width: 640px) {
+    header { padding: 12px 16px; gap: 10px; }
+    header img { height: 36px; }
+    .grid { padding: 0 16px; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+    .row h2 { padding: 0 16px; font-size: 15px; }
+    .cards { padding: 6px 16px 12px; }
+    .card { width: 140px; }
+    .card:hover { transform: none; box-shadow: 0 6px 14px #000b; }
+    .search-header { padding: 16px 16px 12px; }
+    main { padding: 0 0 40px; }
+    .manage { padding: 4px 10px; font-size: 12px; }
+    .update-btn { font-size: 11px; padding: 4px 8px; }
+  }
 
   .search-wrap {
     flex: 1;
@@ -427,7 +440,7 @@
     outline: none;
     border-color: var(--red);
     background: #000c;
-    box-shadow: 0 0 0 3px #e112, 0 0 24px -8px var(--red);
+    box-shadow: 0 0 0 2px #e112;
   }
   .search-wrap input::placeholder {
     color: var(--tx-1);
@@ -474,8 +487,9 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--tx-2);
+    background: var(--red);
     flex-shrink: 0;
+    animation: breathe 2s ease-in-out infinite;
   }
   .skel-grid {
     display: grid;
@@ -550,24 +564,22 @@
     color: var(--tx-5);
     font-size: 2rem;
     width: 44px;
-    transition: opacity 0.2s;
+    transition: opacity 0.2s, background 0.2s, transform 0.2s;
   }
-  .arrow.left {
-    left: 0;
+  .arrow.left { left: 0; }
+  .arrow.right { right: 0; }
+  .arrow:active {
+    transform: scale(0.9);
+    background: #000e;
   }
-  .arrow.right {
-    right: 0;
-  }
-  .row-wrap:hover .arrow {
-    opacity: 1;
+  @media (hover: hover) {
+    .row-wrap:hover .arrow { opacity: 1; }
+    .arrow:hover { background: #000e; }
+    .arrow.left:hover { transform: translateX(-2px); }
+    .arrow.right:hover { transform: translateX(2px); }
   }
   @media (hover: none) {
-    .arrow {
-      opacity: 0.5;
-    }
-  }
-  .arrow:hover {
-    background: #000e;
+    .arrow { opacity: 0.5; font-size: 1.5rem; width: 36px; }
   }
 
   .cards {
@@ -586,15 +598,14 @@
     animation: slide-up 0.3s ease both;
   }
   .card:hover {
-    transform: scale(1.08) translateY(-4px);
+    transform: scale(1.06) translateY(-2px);
     z-index: 10;
     box-shadow:
-      0 18px 40px #000e,
-      0 0 0 1px #fff2,
-      0 0 48px -12px var(--red);
+      0 10px 22px #000c,
+      0 0 0 1px #fff2;
   }
   .card:active {
-    transform: scale(1.05) translateY(-2px);
+    transform: scale(1.03) translateY(-1px);
     transition-duration: 0.1s;
   }
 
