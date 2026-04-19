@@ -31,6 +31,22 @@ func (l *Library) FindVid(file string) (string, bool) {
 	return FindVid(file, l.Roots)
 }
 
+func (l *Library) FindRoot(name string) (root, abs string, ok bool) {
+	abs = FindFile(name, l.Roots)
+	if abs == "" {
+		return "", "", false
+	}
+
+	rel := strings.TrimPrefix(name, "/")
+	for _, r := range l.Roots {
+		if strings.HasPrefix(abs, r) || strings.HasPrefix(abs, filepath.Join(r, rel)) {
+			return r, abs, true
+		}
+	}
+
+	return "", "", false
+}
+
 func (l *Library) HiddenDirs() map[string]bool {
 	return HiddenDirs()
 }

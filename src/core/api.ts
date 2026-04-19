@@ -53,6 +53,7 @@ export const api = {
   build: () => GET('/api/build'),
   rename: (path: string, name: string) => POST('/api/rename', { path, name }),
   deleteDir: (path: string) => DEL(`/api/dir?path=${E(path)}`),
+  deleteVideo: (rel: string) => DEL(`/video/${rel}`),
 
   aria2: {
     list: () => GET('/api/aria2/list'),

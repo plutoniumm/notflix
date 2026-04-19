@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"notflix/server/library"
 )
 
 const aria2RPC = "http://localhost:6800/jsonrpc"
@@ -63,7 +65,7 @@ const aria2Session = "./cache/aria2.session"
 
 var (
 	aria2Ready  = make(chan struct{})
-	OnDownloads func([]string)
+	OnDownloads func(*library.Library)
 )
 
 func WaitAria2() {
@@ -74,7 +76,7 @@ func WaitAria2() {
 	}
 }
 
-func Aria2Init(roots []string) {
+func Aria2Init(lib *library.Library) {
 	args := []string{
 		"--enable-rpc", "--rpc-listen-all",
 		"--rpc-listen-port=6800",
@@ -159,7 +161,7 @@ func Aria2Init(roots []string) {
 				}
 			}
 			if realComplete && OnDownloads != nil {
-				go OnDownloads(roots)
+				go OnDownloads(lib)
 			}
 		}
 	}()
@@ -226,7 +228,7 @@ func scanInt(s string) int64 {
 	return n
 }
 
-func Aria2Add(c *gin.Context, roots []string) {
+func Aria2Add(c *gin.Context, lib *library.Library) {
 	var body struct {
 		Magnet string `json:"magnet"`
 		Dir    string `json:"dir"`
@@ -249,7 +251,7 @@ func Aria2Add(c *gin.Context, roots []string) {
 		return
 	}
 	allowed := false
-	for _, r := range roots {
+	for _, r := range lib.Roots {
 		absR, _ := filepath.Abs(r)
 		if absDir == absR {
 			allowed = true
@@ -277,7 +279,7 @@ func Aria2Add(c *gin.Context, roots []string) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "gid": gid})
 }
 
-func Aria2AddTorrent(c *gin.Context, roots []string) {
+func Aria2AddTorrent(c *gin.Context, lib *library.Library) {
 	file, err := c.FormFile("torrent")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing torrent file"})
@@ -295,7 +297,7 @@ func Aria2AddTorrent(c *gin.Context, roots []string) {
 		return
 	}
 	allowed := false
-	for _, r := range roots {
+	for _, r := range lib.Roots {
 		absR, _ := filepath.Abs(r)
 		if absDir == absR {
 			allowed = true

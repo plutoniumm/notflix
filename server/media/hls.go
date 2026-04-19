@@ -227,9 +227,9 @@ var hlsBandwidth = map[string]int{
 	"2160p": 15_000_000,
 }
 
-func HLSAVOffset(c *gin.Context, roots []string) {
+func HLSAVOffset(c *gin.Context, lib *library.Library) {
 	file := c.Query("file")
-	path := hlsFindFile(file, roots)
+	path := lib.FindFile(file)
 	if path == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
@@ -263,13 +263,9 @@ func HLSAVOffset(c *gin.Context, roots []string) {
 	c.JSON(http.StatusOK, gin.H{"offset_ms": offsetMs})
 }
 
-func hlsFindFile(file string, roots []string) string {
-	return library.FindFile(file, roots)
-}
-
-func HLSMaster(c *gin.Context, roots []string) {
+func HLSMaster(c *gin.Context, lib *library.Library) {
 	file := c.Query("file")
-	path := hlsFindFile(file, roots)
+	path := lib.FindFile(file)
 	if path == "" {
 		c.String(http.StatusNotFound, "not found")
 		return
@@ -366,7 +362,7 @@ func HLSMaster(c *gin.Context, roots []string) {
 	c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(sb.String()))
 }
 
-func HLSPlaylist(c *gin.Context, roots []string) {
+func HLSPlaylist(c *gin.Context, lib *library.Library) {
 	file := c.Query("file")
 	q := c.Query("q")
 	audioStr, hasAudio := c.GetQuery("audio")
@@ -382,7 +378,7 @@ func HLSPlaylist(c *gin.Context, roots []string) {
 		}
 	}
 
-	path := hlsFindFile(file, roots)
+	path := lib.FindFile(file)
 	if path == "" {
 		c.String(http.StatusNotFound, "not found")
 		return
@@ -465,7 +461,7 @@ const (
 	segAudioOnly = 2
 )
 
-func HLSSegment(c *gin.Context, roots []string) {
+func HLSSegment(c *gin.Context, lib *library.Library) {
 	file := c.Query("file")
 	q := c.Query("q")
 	segStr := c.Query("seg")
@@ -487,7 +483,7 @@ func HLSSegment(c *gin.Context, roots []string) {
 		}
 	}
 
-	path := hlsFindFile(file, roots)
+	path := lib.FindFile(file)
 	if path == "" {
 		c.String(http.StatusNotFound, "not found")
 		return

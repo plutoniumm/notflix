@@ -59,7 +59,7 @@ func clearProgress(name string) {
 
 var processing atomic.Bool
 
-func ProcessAll(roots []string) {
+func ProcessAll(lib *library.Library) {
 	if !processing.CompareAndSwap(false, true) {
 		log.Println("[ProcessAll] already running, skipping")
 		return
@@ -67,9 +67,9 @@ func ProcessAll(roots []string) {
 	defer processing.Store(false)
 
 	jobs.WaitAria2()
-	ConvertAll(roots)
-	library.CleanAll(roots)
-	RegenerateThumbnails(roots, 0)
+	ConvertAll(lib)
+	library.CleanAll(lib.Roots)
+	RegenerateThumbnails(lib, 0)
 	log.Println("[ProcessAll] done")
 }
 
@@ -77,9 +77,9 @@ func IsProcessing() bool {
 	return processing.Load()
 }
 
-func ConvertAll(roots []string) {
+func ConvertAll(lib *library.Library) {
 	var wg sync.WaitGroup
-	for _, root := range roots {
+	for _, root := range lib.Roots {
 		if _, err := os.Stat(root); err != nil {
 			continue
 		}
@@ -89,7 +89,6 @@ func ConvertAll(roots []string) {
 			defer wg.Done()
 			convertRoot(root)
 		}(root)
-
 	}
 
 	wg.Wait()

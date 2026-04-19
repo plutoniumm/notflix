@@ -75,7 +75,7 @@ var (
 	thumbLastRun atomic.Int64
 )
 
-func RegenerateThumbnails(roots []string, minInterval time.Duration) {
+func RegenerateThumbnails(lib *library.Library, minInterval time.Duration) {
 	if minInterval > 0 {
 		last := time.Unix(thumbLastRun.Load(), 0)
 		if time.Since(last) < minInterval {
@@ -98,7 +98,7 @@ func RegenerateThumbnails(roots []string, minInterval time.Duration) {
 
 	active := jobs.Aria2ActivePaths()
 
-	for _, root := range roots {
+	for _, root := range lib.Roots {
 		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") {
 				return nil

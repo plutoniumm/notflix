@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { POST, GET, DEL } from "../core/api";
+  import { api } from "../core/api";
+  import { kv } from "../core/kv";
   import { JOBS_POLL_MS, DL_POLL_MS, PWA_POLL_MS } from "../core/events.svelte";
   import { Down, isSupported } from "./dl";
   import { clean } from "../core/video";
@@ -55,21 +56,24 @@
 
   onMount(() => {
     loadAll();
-    GET("/api/build").then((r) => { if (r?.backend) backendBuild = r.backend; });
-    GET("/api/manage/dirsizes").then((sizes: any[]) => {
+
+    api.build().then((r) => { if (r?.backend) backendBuild = r.backend; });
+    api.manage.dirSizes().then((sizes: any[]) => {
       if (!Array.isArray(sizes)) return;
       const map: Record<string, { bytes: number; root: string }> = {};
       for (const s of sizes) map[s.dir] = { bytes: s.bytes, root: s.root };
       dirSizes = map;
     });
+
     jobsTimer = setInterval(async () => {
       if (document.hidden) return;
-      jobs = (await GET("/api/conversions")) ?? [];
+      jobs = (await api.conversions()) ?? [];
       if (processingLib && jobs.length === 0) processingLib = false;
     }, JOBS_POLL_MS);
+
     dlTimer = setInterval(async () => {
       if (document.hidden) return;
-      dlJobs = (await GET("/api/aria2/list")) ?? [];
+      dlJobs = (await api.aria2.list()) ?? [];
     }, DL_POLL_MS);
 
     if (isSupported()) {
@@ -85,9 +89,9 @@
   async function loadAll() {
     loading = true;
     const [d, disk, hidden] = await Promise.all([
-      GET("/api/manage/list"),
-      GET("/api/manage/diskinfo"),
-      GET("/api/manage/hidden"),
+      api.manage.list(),
+      api.manage.diskInfo(),
+      api.manage.hidden(),
     ]);
     data = d;
     disks = disk;
@@ -97,7 +101,8 @@
 
   async function toggleHidden(dir: string) {
     const isHidden = hiddenSet.has(dir);
-    await POST("/kv/set", { key: `hidden:${dir}`, value: isHidden ? null : true });
+    await kv.set(`hidden:${dir}`, isHidden ? null : true);
+
     const next = new Set(hiddenSet);
     if (isHidden) next.delete(dir);
     else next.add(dir);
@@ -105,7 +110,7 @@
   }
 
   async function reloadData() {
-    data = await GET("/api/manage/list");
+    data = await api.manage.list();
   }
 
   function fmtBytes(b: number): string {
@@ -124,12 +129,15 @@
   }
   async function confirmEdit(e?: Event) {
     e?.preventDefault();
+
     const path = editing;
     const name = val.trim();
     editing = null;
     val = "";
+
     if (!path || !name) return;
-    const res = await POST("/api/rename", { path, name });
+
+    const res = await api.rename(path, name);
     if (res?.ok) {
       await reloadData();
     } else {
@@ -139,46 +147,51 @@
 
   async function delFile(dir: string, f: string) {
     const rel = dir === "." ? f : `${dir}/${f}`;
-    await DEL(`/video/${rel}`);
+    await api.deleteVideo(rel);
+
     data[dir] = data[dir].filter((x) => x.name !== f);
     if (!data[dir]?.length) delete data[dir];
   }
 
   async function delDir(dir: string) {
-    const res = await DEL(`/api/dir?path=${encodeURIComponent(dir)}`);
+    const res = await api.deleteDir(dir);
     if (!res?.ok) {
       alert("Delete failed: " + (res?.error ?? "unknown"));
       return;
     }
+
     delete data[dir];
   }
 
   async function addDownload(magnet: string, dir: string) {
-    await POST("/api/aria2/add", { magnet, dir });
+    await api.aria2.add(magnet, dir);
   }
+
   async function addTorrentFile(file: File, dir: string) {
     const form = new FormData();
     form.append("torrent", file);
     form.append("dir", dir);
     await fetch("/api/aria2/add-torrent", { method: "POST", body: form });
   }
+
   async function removeDownload(gid: string) {
-    await DEL(`/api/aria2/remove?gid=${gid}`);
+    await api.aria2.remove(gid);
     dlJobs = dlJobs.filter((j) => j.gid !== gid);
   }
+
   async function pauseDownload(gid: string) {
-    await POST(`/api/aria2/pause?gid=${gid}`, {});
+    await api.aria2.pause(gid);
     dlJobs = dlJobs.map((j) => (j.gid === gid ? { ...j, status: "paused", speed: 0 } : j));
   }
+
   async function resumeDownload(gid: string) {
-    await POST(`/api/aria2/resume?gid=${gid}`, {});
+    await api.aria2.resume(gid);
     dlJobs = dlJobs.map((j) => (j.gid === gid ? { ...j, status: "active" } : j));
   }
 
   async function processLibrary() {
     processingLib = true;
-    await POST("/api/process", {});
-    // stays "processing" while conversions are active
+    await api.process();
   }
 
   let rows = $derived(

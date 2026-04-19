@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { clean, vidURL } from "../core/video";
-  import { GET, POST } from "../core/api";
+  import { api } from "../core/api";
+  import { kv } from "../core/kv";
   import { Down } from "./dl";
 
   let data: VideoData = $state({});
@@ -39,20 +40,18 @@
     }
     if (!allParams.length) return;
 
-    const qs = allParams
-      .map((v) => `key=${encodeURIComponent("watched:" + v.param)}`)
-      .join("&");
-    const kv: Record<string, { t: number; at: number } | null> =
-      (await GET(`/kv/get?${qs}`)) ?? {};
+    const keys = allParams.map((v) => "watched:" + v.param);
+    const store: Record<string, { t: number; at: number } | null> =
+      (await kv.get(keys)) ?? {};
 
     continues = allParams
       .filter((v) => {
-        const val = kv[`watched:${v.param}`];
+        const val = store[`watched:${v.param}`];
         return val && val.t > 60;
       })
       .sort((a, b) => {
-        const at = kv[`watched:${a.param}`]?.at ?? 0;
-        const bt = kv[`watched:${b.param}`]?.at ?? 0;
+        const at = store[`watched:${a.param}`]?.at ?? 0;
+        const bt = store[`watched:${b.param}`]?.at ?? 0;
         return bt - at;
       })
       .slice(0, 20)
@@ -60,18 +59,18 @@
         dir: v.dir,
         name: v.name,
         key: v.key,
-        t: kv[`watched:${v.param}`]!.t,
+        t: store[`watched:${v.param}`]!.t,
       }));
   }
 
   function removeContinue(e: Event, dir: string, name: string) {
     e.preventDefault();
     e.stopPropagation();
+
     const param = dir === "." ? name : `${dir}/${name}`;
-    POST("/kv/set", { key: `watched:${param}`, value: null });
-    continues = continues.filter(
-      (c) => !(c.dir === dir && c.name === name),
-    );
+    kv.set(`watched:${param}`, null);
+
+    continues = continues.filter((c) => !(c.dir === dir && c.name === name));
   }
 
   async function cancelDownload(videoParam: string) {
@@ -97,7 +96,7 @@
     const recordsP = Down.all();
 
     (async () => {
-      const d = await GET("/list/video");
+      const d = await api.videoList();
       if (d && Object.keys(d).length) {
         data = d;
         loadState(d);
