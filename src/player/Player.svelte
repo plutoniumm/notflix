@@ -112,8 +112,8 @@
     subsOpen = false;
   }
 
-  async function selectOnline(fid: number) {
-    const res = await Subs.downloadOnline(player, videoParam, fid);
+  async function selectOnline(pick: any) {
+    const res = await Subs.downloadOnline(player, videoParam, pick);
     if ('file' in res) {
       activeSub = res.file;
       subsInfo = await api.subs.info(videoParam);

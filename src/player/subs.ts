@@ -113,8 +113,8 @@ export default {
     return res?.results?.length ? res.results : null;
   },
 
-  async downloadOnline(player: any, raw: string, fileId: number): Promise<{ file: string } | { error: string }> {
-    const res = await api.subs.download(fileId, raw);
+  async downloadOnline(player: any, raw: string, pick: { provider?: string; file_id?: number; url?: string }): Promise<{ file: string } | { error: string }> {
+    const res = await api.subs.download(pick, raw);
     if (!res?.ok || !res.file) return { error: res?.error ?? 'Download failed' };
 
     const dir = subDir(raw);

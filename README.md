@@ -25,7 +25,8 @@ Self-hosted Netflix-like video streaming. Go backend, Svelte 5 frontend.
 2. Local `.srt` file (auto-converted)
 3. Embedded subtitle track (extracted via ffmpeg)
 4. OpenSubtitles API (hash match, then title search)
-5. Whisper.cpp AI transcription (async, streams cues live via SSE)
+5. Subdl API fallback (title search) if OpenSubtitles returns nothing
+6. Whisper AI transcription (async, streams cues live via SSE). If the detected language isn't English, segments are translated via a local Ollama instance before the VTT is written.
 
 **Offline Downloads**
 - BackgroundFetch API — resumable downloads that survive closing the app
@@ -68,16 +69,20 @@ Self-hosted Netflix-like video streaming. Go backend, Svelte 5 frontend.
 
 ## Requirements
 
-- **ffmpeg** and **ffprobe** — transcoding and thumbnails
-- **aria2c** (optional) — torrent/magnet downloads
-- **whisper.cpp** (optional) — AI subtitle generation; set `WHISPER_MODEL` env var
+- **ffmpeg** and **ffprobe** — transcoding, thumbnails, subtitle extraction
+- **aria2c** (optional) — torrent/magnet downloads via JSON-RPC
+- **faster-whisper** (optional) — AI subtitle generation; Python in conda env `global`
+- **ollama** (optional) — local LLM for non-English Whisper translation
 
-**Environment variables**
+**Environment variables** (`.env`)
 ```
 WHISPER_MODEL=/path/to/model.bin
 OPENSUBTITLES_API_KEY=...
 OPENSUBTITLES_USER=...
 OPENSUBTITLES_PASS=...
+SUBDL_API_KEY=...          # optional fallback provider
+OLLAMA_HOST=http://...     # defaults to the author's tailnet box
+OLLAMA_MODEL=qwen2.5:7b    # model used for translation
 ```
 
 ## Build & Run
@@ -86,7 +91,23 @@ OPENSUBTITLES_PASS=...
 make run
 ```
 
-> Uses `-tags whisper` and CGO flags for whisper.cpp. Don't use `go build` directly.
+> `make` handles CGO flags and build tags. Don't invoke `go build` directly.
+
+## Architecture
+
+Backend is in three sub-packages, each owning a domain:
+
+- `server/library/` — roots, discovery, hashing, hidden dirs, KV store, junk cleanup. Houses the `Library{Roots}` type (receiver for everything that needs root access).
+- `server/media/` — HLS, MP4 range, audio probe, conversion, subtitles, thumbnails, HLS cache eviction.
+- `server/jobs/` — aria2, whisper, ollama, shared `Pool` + `Tracker` primitives.
+
+`main.go` is a thin router (~130 lines) that creates one `Library` and hands it to every handler.
+
+Frontend mirrors the split under `src/`:
+
+- `src/core/` — API client, KV helpers, shared state (`events.svelte.ts`), IDB, utilities.
+- `src/library/` — Home + Manage screens and their components.
+- `src/player/` — Video.js player, subs/audio managers, player subcomponents.
 
 ## License
 This was once hand written. Its now mostly vibe written.

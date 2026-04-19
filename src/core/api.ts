@@ -34,7 +34,8 @@ export const api = {
   subs: {
     info: (file: string) => GET(`/api/subs/info?file=${E(file)}`),
     search: (file: string) => GET(`/api/subs/search?file=${E(file)}`),
-    download: (fileId: number, file: string) => POST('/api/subs/download', { file_id: fileId, file }),
+    download: (pick: { provider?: string; file_id?: number; url?: string }, file: string) =>
+      POST('/api/subs/download', { ...pick, file }),
     extract: (file: string, track: number, language: string) =>
       POST('/api/subs/extract', { file, track, language }),
     whisper: (file: string) => POST('/api/subs/whisper', { file }),

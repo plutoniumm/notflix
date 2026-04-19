@@ -44,7 +44,7 @@ Routing is hash-based in `App.svelte` (Home / Player / Manage).
 
 **Background conversion** (`server/media/convert.go`): non-MP4 formats auto-convert on startup. Max 3 concurrent ffmpeg processes. Progress parsed from ffmpeg stderr via regex.
 
-**Subtitle waterfall** (`server/media/subs.go` + `src/player/subs.ts`): tries local VTT → SRT → embedded extraction → OpenSubtitles API (hash, then title) → Whisper transcription. Each step is attempted only if prior steps fail.
+**Subtitle waterfall** (`server/media/subs.go` + `src/player/subs.ts`): tries local VTT → SRT → embedded extraction → OpenSubtitles (hash, then title) → Subdl (title) → Whisper transcription. Each step is attempted only if prior steps fail. `SubResult.Provider` distinguishes "os" from "subdl"; `GetSubs` branches on it — OS uses the /download endpoint with a `file_id`, Subdl fetches a `.zip` (or `.srt`) directly from the URL and converts the first `.srt` to `.vtt`.
 
 **Whisper** (`server/jobs/whisper.go` + `tools/stream_whisper.py`): async transcription via faster-whisper Python subprocess. SSE streams cues to the frontend in real-time. Python runs in conda env `global`.
 
@@ -60,3 +60,5 @@ Routing is hash-based in `App.svelte` (Home / Player / Manage).
 
 - `WHISPER_MODEL` — path to whisper model file
 - `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USER`, `OPENSUBTITLES_PASS` — OpenSubtitles API credentials
+- `SUBDL_API_KEY` — optional Subdl fallback. If unset, the Subdl step in the waterfall is skipped silently.
+- `OLLAMA_HOST`, `OLLAMA_MODEL` — for Whisper post-translation of non-English audio. Defaults: `http://100.117.92.56:11434`, `qwen2.5:7b`.

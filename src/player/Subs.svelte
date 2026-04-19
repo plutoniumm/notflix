@@ -20,12 +20,16 @@
     activeSub: string | null;
     onSelectLocal: (file: string, label: string) => void;
     onSelectEmbedded: (idx: number, lang: string) => Promise<void>;
-    onSelectOnline: (fid: number) => Promise<void>;
+    onSelectOnline: (pick: any) => Promise<void>;
     onSubsOff: () => void;
     onClose: () => void;
   } = $props();
 
-  let busy = $state<number | string | null>(null);
+  let busy = $state<string | null>(null);
+
+  function pickKey(r: any): string {
+    return r.provider === "subdl" ? "u:" + r.url : "o:" + r.file_id;
+  }
 
   async function pickEmbedded(idx: number, lang: string) {
     busy = `e${idx}`;
@@ -33,9 +37,9 @@
     busy = null;
   }
 
-  async function pickOnline(fid: number) {
-    busy = fid;
-    await onSelectOnline(fid);
+  async function pickOnline(r: any) {
+    busy = pickKey(r);
+    await onSelectOnline(r);
     busy = null;
   }
 </script>
@@ -88,15 +92,19 @@
   {:else if onlineResults !== null && onlineResults.length === 0}
     <div class="empty">No results</div>
   {:else if onlineResults?.length}
-    {#each onlineResults as r (r.file_id)}
+    {#each onlineResults as r (pickKey(r))}
       <button
         class="item"
-        class:busy={busy === r.file_id}
-        onclick={() => pickOnline(r.file_id)}
+        class:busy={busy === pickKey(r)}
+        onclick={() => pickOnline(r)}
       >
         {#if r.hash_match}<span class="check">✓</span>{/if}
         <span class="release trunc">{r.release || "Unknown"}</span>
-        <span class="dl-count">{r.download_count?.toLocaleString() ?? 0}</span>
+        {#if r.provider === "subdl"}
+          <span class="badge">subdl</span>
+        {:else if r.download_count}
+          <span class="dl-count">{r.download_count.toLocaleString()}</span>
+        {/if}
       </button>
     {/each}
   {/if}
@@ -116,6 +124,16 @@
     font-size: 11px;
     color: var(--tx-2);
     flex-shrink: 0;
+  }
+
+  .badge {
+    font-size: 10px;
+    color: var(--tx-2);
+    background: var(--bg-4);
+    padding: 1px 5px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    letter-spacing: 0.04em;
   }
 
   .empty {
