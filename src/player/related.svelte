@@ -58,10 +58,7 @@
   {#each rows as [rowDir, files]}
     {#if rowDir === dir && files.length > 1}
       <details class="p-fix" open={isOpen || closing}>
-        <summary
-          class="fs-sm tx-3 m0 fw4 f al-ct g5 ptr p20"
-          onclick={toggle}
-        >
+        <summary class="fs-sm tx-3 m0 fw4 f al-ct g5 ptr p20" onclick={toggle}>
           <span class="chevron d-ib" class:open={isOpen && !closing}></span>
         </summary>
 

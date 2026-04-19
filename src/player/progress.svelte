@@ -28,12 +28,18 @@
   let flip = $state(0);
   let touchY = 0;
 
-  function speedUp() { onSpeedUp?.(); animate(1); }
-  function speedDown() { onSpeedDown?.(); animate(-1); }
+  function speedUp() {
+    onSpeedUp?.();
+    animate(1);
+  }
+  function speedDown() {
+    onSpeedDown?.();
+    animate(-1);
+  }
 
   function animate(dir: number) {
     flip = dir;
-    setTimeout(() => flip = 0, 250);
+    setTimeout(() => (flip = 0), 250);
   }
 
   function onWheel(e: WheelEvent) {
@@ -114,16 +120,40 @@
   }
 
   @keyframes roll-up {
-    0%   { transform: rotateX(0); opacity: 1; }
-    40%  { transform: rotateX(-90deg); opacity: 0; }
-    60%  { transform: rotateX(90deg); opacity: 0; }
-    100% { transform: rotateX(0); opacity: 1; }
+    0% {
+      transform: rotateX(0);
+      opacity: 1;
+    }
+    40% {
+      transform: rotateX(-90deg);
+      opacity: 0;
+    }
+    60% {
+      transform: rotateX(90deg);
+      opacity: 0;
+    }
+    100% {
+      transform: rotateX(0);
+      opacity: 1;
+    }
   }
   @keyframes roll-down {
-    0%   { transform: rotateX(0); opacity: 1; }
-    40%  { transform: rotateX(90deg); opacity: 0; }
-    60%  { transform: rotateX(-90deg); opacity: 0; }
-    100% { transform: rotateX(0); opacity: 1; }
+    0% {
+      transform: rotateX(0);
+      opacity: 1;
+    }
+    40% {
+      transform: rotateX(90deg);
+      opacity: 0;
+    }
+    60% {
+      transform: rotateX(-90deg);
+      opacity: 0;
+    }
+    100% {
+      transform: rotateX(0);
+      opacity: 1;
+    }
   }
 
   .ctrl {

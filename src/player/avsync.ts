@@ -11,9 +11,9 @@ export class AVSync {
       this.delay.delayTime.value = 0;
       src.connect(this.delay);
       this.delay.connect(this.ctx.destination);
-      videoEl.addEventListener('play', () => this.ctx?.resume()); // AudioContext requires user gesture to resume
+      videoEl.addEventListener("play", () => this.ctx?.resume()); // AudioContext requires user gesture to resume
     } catch (e) {
-      console.warn('[avsync] init failed:', e);
+      console.warn("[avsync] init failed:", e);
     }
     return this;
   }

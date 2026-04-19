@@ -40,7 +40,7 @@
     fmtBytes?: (b: number) => string;
   } = $props();
 
-  const pct = $derived(diskTotal > 0 ? (sizeBytes / diskTotal * 100) : 0);
+  const pct = $derived(diskTotal > 0 ? (sizeBytes / diskTotal) * 100 : 0);
 
   const converting = $derived(
     jobs.some((j) => files.some((f) => f.name === j.name)),
@@ -88,7 +88,8 @@
         {dir === "." ? "Root" : clean(dir) || dir}
       </span>
       {#if uniformRoot}
-        <span class="disk-tag fs-xs" data-root={uniformRoot}>{uniformRoot}</span>
+        <span class="disk-tag fs-xs" data-root={uniformRoot}>{uniformRoot}</span
+        >
       {/if}
       <span class="fs-sm tx-1 sh-0" style="margin-left:auto">
         {#if sizeBytes > 0 && fmtBytes}
@@ -161,7 +162,9 @@
     margin-bottom: 8px;
     animation: slide-up 0.25s ease both;
     animation-delay: calc(var(--i) * 40ms);
-    transition: opacity 0.2s, border-color 0.2s;
+    transition:
+      opacity 0.2s,
+      border-color 0.2s;
   }
   .folder[open] > .folder-hd {
     border-bottom: 1px solid var(--bg-4);
@@ -204,7 +207,9 @@
     }
   }
   @media (max-width: 640px) {
-    .folder-hd { padding: 12px 10px; }
+    .folder-hd {
+      padding: 12px 10px;
+    }
   }
 
   .folder-icon {
@@ -230,9 +235,18 @@
     letter-spacing: 0.02em;
     flex-shrink: 0;
   }
-  .disk-tag[data-root="Ravan"] { background: #3a2a2a; color: #f2a3a3; }
-  .disk-tag[data-root="Oni"] { background: #2a323a; color: #a3c8f2; }
-  .disk-tag[data-root="Kumbhakarn"] { background: #2a3a2d; color: #a3f2b8; }
+  .disk-tag[data-root="Ravan"] {
+    background: #3a2a2a;
+    color: #f2a3a3;
+  }
+  .disk-tag[data-root="Oni"] {
+    background: #2a323a;
+    color: #a3c8f2;
+  }
+  .disk-tag[data-root="Kumbhakarn"] {
+    background: #2a3a2d;
+    color: #a3f2b8;
+  }
 
   .rename-form {
     flex: 1;

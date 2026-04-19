@@ -1,13 +1,13 @@
 interface VideoEntry {
-  name: string
-  key: string
+  name: string;
+  key: string;
 }
 
 type DiskInfo = {
   root: string;
   path: string;
   free: number;
-  total: number
+  total: number;
 };
 
 type Downjob = {
@@ -17,22 +17,22 @@ type Downjob = {
   total: number;
   done: number;
   percent: number;
-  speed: number
+  speed: number;
 };
 
-type VideoData = Record<string, VideoEntry[]>
+type VideoData = Record<string, VideoEntry[]>;
 
 interface Job {
-  name: string
-  percent: number
+  name: string;
+  percent: number;
 }
 
 interface DownloadRecord {
-  videoParam: string
-  title: string
-  key: string
-  size: number
-  status: 'downloading' | 'done' | 'error'
-  downloadedAt: number | null
-  bgFetchId: string | null
+  videoParam: string;
+  title: string;
+  key: string;
+  size: number;
+  status: "downloading" | "done" | "error";
+  downloadedAt: number | null;
+  bgFetchId: string | null;
 }

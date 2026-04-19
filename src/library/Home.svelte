@@ -150,7 +150,9 @@
   $effect(() => {
     const q = search;
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => { debouncedSearch = q; }, 150);
+    debounceTimer = setTimeout(() => {
+      debouncedSearch = q;
+    }, 150);
   });
 
   let results = $derived.by(() => {
@@ -223,15 +225,24 @@
 
       <div class="grid">
         {#each results as item, idx (item.dir + "/" + item.name)}
-          {@const vidParam = item.dir === "." ? item.name : `${item.dir}/${item.name}`}
-          <a href={vidURL(item.dir, item.name)} class="card ptr rx5 flow-h p-rel" style="--i: {idx}">
+          {@const vidParam =
+            item.dir === "." ? item.name : `${item.dir}/${item.name}`}
+          <a
+            href={vidURL(item.dir, item.name)}
+            class="card ptr rx5 flow-h p-rel"
+            style="--i: {idx}"
+          >
             <div class="thumb p-rel flow-h">
               <img
                 class="h-100 w-100 d-b"
                 src="/images/{item.key}.jpg"
                 alt=""
                 loading="lazy"
-                onerror={(e) => { const i = e.currentTarget as HTMLImageElement; i.src = "/assets/tight.svg"; i.onerror = null; }}
+                onerror={(e) => {
+                  const i = e.currentTarget as HTMLImageElement;
+                  i.src = "/assets/tight.svg";
+                  i.onerror = null;
+                }}
               />
               <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
               {#if downloadedSet.has(vidParam)}
@@ -287,7 +298,11 @@
                       src="/images/{item.key}.jpg"
                       alt=""
                       loading="lazy"
-                      onerror={(e) => { const i = e.currentTarget as HTMLImageElement; i.src = "/assets/tight.svg"; i.onerror = null; }}
+                      onerror={(e) => {
+                        const i = e.currentTarget as HTMLImageElement;
+                        i.src = "/assets/tight.svg";
+                        i.onerror = null;
+                      }}
                     />
                     <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
                     {#if downloadedSet.has(vidParam)}
@@ -297,7 +312,8 @@
                     <button
                       class="cw-remove p-abs cc o-0 ptr"
                       onclick={(e) => removeContinue(e, item.dir, item.name)}
-                    >✕</button>
+                      >✕</button
+                    >
                     <div class="cw-bar p-abs"></div>
                   </div>
                   <div class="card-name">
@@ -351,7 +367,11 @@
                         src="/images/{f.key}.jpg"
                         alt=""
                         loading="lazy"
-                        onerror={(e) => { const i = e.currentTarget as HTMLImageElement; i.src = "/assets/tight.svg"; i.onerror = null; }}
+                        onerror={(e) => {
+                          const i = e.currentTarget as HTMLImageElement;
+                          i.src = "/assets/tight.svg";
+                          i.onerror = null;
+                        }}
                       />
                       <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
                       {#if downloadedSet.has(vidParam)}
@@ -410,17 +430,46 @@
     padding: 18px 48px;
   }
   @media (max-width: 640px) {
-    header { padding: 12px 16px; gap: 10px; }
-    header img { height: 36px; }
-    .grid { padding: 0 16px; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
-    .row h2 { padding: 0 16px; font-size: 15px; }
-    .cards { padding: 6px 16px 12px; }
-    .card { width: 140px; }
-    .card:hover { transform: none; box-shadow: 0 6px 14px #000b; }
-    .search-header { padding: 16px 16px 12px; }
-    main { padding: 0 0 40px; }
-    .manage { padding: 4px 10px; font-size: 12px; }
-    .update-btn { font-size: 11px; padding: 4px 8px; }
+    header {
+      padding: 12px 16px;
+      gap: 10px;
+    }
+    header img {
+      height: 36px;
+    }
+    .grid {
+      padding: 0 16px;
+      gap: 6px;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    }
+    .row h2 {
+      padding: 0 16px;
+      font-size: 15px;
+    }
+    .cards {
+      padding: 6px 16px 12px;
+    }
+    .card {
+      width: 140px;
+    }
+    .card:hover {
+      transform: none;
+      box-shadow: 0 6px 14px #000b;
+    }
+    .search-header {
+      padding: 16px 16px 12px;
+    }
+    main {
+      padding: 0 0 40px;
+    }
+    .manage {
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+    .update-btn {
+      font-size: 11px;
+      padding: 4px 8px;
+    }
   }
 
   .search-wrap {
@@ -434,7 +483,10 @@
     color: var(--tx-5);
     padding: 8px 14px;
     backdrop-filter: blur(6px);
-    transition: border-color 0.15s, box-shadow 0.2s, background 0.2s;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.2s,
+      background 0.2s;
   }
   .search-wrap input:focus {
     outline: none;
@@ -456,8 +508,13 @@
   }
 
   @keyframes pulse-bg {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
   }
 
   .manage {
@@ -500,13 +557,12 @@
   .skel-card {
     aspect-ratio: 16 / 9;
     border-radius: 5px;
-    background:
-      linear-gradient(
-        90deg,
-        var(--bg-3) 0%,
-        var(--bg-4) 40%,
-        var(--bg-3) 80%
-      );
+    background: linear-gradient(
+      90deg,
+      var(--bg-3) 0%,
+      var(--bg-4) 40%,
+      var(--bg-3) 80%
+    );
     background-size: 400px 100%;
     opacity: 0;
     animation:
@@ -564,22 +620,41 @@
     color: var(--tx-5);
     font-size: 2rem;
     width: 44px;
-    transition: opacity 0.2s, background 0.2s, transform 0.2s;
+    transition:
+      opacity 0.2s,
+      background 0.2s,
+      transform 0.2s;
   }
-  .arrow.left { left: 0; }
-  .arrow.right { right: 0; }
+  .arrow.left {
+    left: 0;
+  }
+  .arrow.right {
+    right: 0;
+  }
   .arrow:active {
     transform: scale(0.9);
     background: #000e;
   }
   @media (hover: hover) {
-    .row-wrap:hover .arrow { opacity: 1; }
-    .arrow:hover { background: #000e; }
-    .arrow.left:hover { transform: translateX(-2px); }
-    .arrow.right:hover { transform: translateX(2px); }
+    .row-wrap:hover .arrow {
+      opacity: 1;
+    }
+    .arrow:hover {
+      background: #000e;
+    }
+    .arrow.left:hover {
+      transform: translateX(-2px);
+    }
+    .arrow.right:hover {
+      transform: translateX(2px);
+    }
   }
   @media (hover: none) {
-    .arrow { opacity: 0.5; font-size: 1.5rem; width: 36px; }
+    .arrow {
+      opacity: 0.5;
+      font-size: 1.5rem;
+      width: 36px;
+    }
   }
 
   .cards {
@@ -644,7 +719,10 @@
     border-radius: 4px;
     border: none;
     z-index: 2;
-    transition: opacity 0.15s, background 0.15s, color 0.15s;
+    transition:
+      opacity 0.15s,
+      background 0.15s,
+      color 0.15s;
   }
   .card:hover .cw-remove {
     opacity: 1;

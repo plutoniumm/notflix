@@ -14,7 +14,6 @@ const hlsCacheMaxAge = 7 * 24 * time.Hour
 
 var hashDirRe = regexp.MustCompile(`^\d{7}$`)
 
-
 func dirLatestMTime(dir string) time.Time {
 	info, err := os.Stat(dir)
 	if err != nil {

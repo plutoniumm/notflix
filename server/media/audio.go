@@ -11,7 +11,7 @@ import (
 )
 
 type AudioTrack struct {
-	Track    int    `json:"track"`   
+	Track    int    `json:"track"`
 	Language string `json:"language"`
 	Codec    string `json:"codec"`
 	Channels int    `json:"channels"`

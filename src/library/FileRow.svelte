@@ -128,9 +128,18 @@
     letter-spacing: 0.02em;
     margin-right: 6px;
   }
-  .disk-tag[data-root="Ravan"] { background: #3a2a2a; color: #f2a3a3; }
-  .disk-tag[data-root="Oni"] { background: #2a323a; color: #a3c8f2; }
-  .disk-tag[data-root="Kumbhakarn"] { background: #2a3a2d; color: #a3f2b8; }
+  .disk-tag[data-root="Ravan"] {
+    background: #3a2a2a;
+    color: #f2a3a3;
+  }
+  .disk-tag[data-root="Oni"] {
+    background: #2a323a;
+    color: #a3c8f2;
+  }
+  .disk-tag[data-root="Kumbhakarn"] {
+    background: #2a3a2d;
+    color: #a3f2b8;
+  }
 
   .form {
     flex: 1;

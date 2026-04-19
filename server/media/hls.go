@@ -29,9 +29,9 @@ const (
 var hlsInFlight sync.Map
 
 type hlsProfile struct {
-	h               int
-	scale, vbr, ab  string
-	crf             int // libx264 quality target; lower = better
+	h              int
+	scale, vbr, ab string
+	crf            int // libx264 quality target; lower = better
 }
 
 // vbr here doubles as the maxrate cap; bufsize = 2× vbr. CRF targets quality,

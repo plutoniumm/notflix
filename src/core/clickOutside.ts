@@ -1,8 +1,8 @@
 export function clickOutside(onClose: () => void): () => void {
   const handler = () => onClose();
-  const t = setTimeout(() => window.addEventListener('click', handler), 0);
+  const t = setTimeout(() => window.addEventListener("click", handler), 0);
   return () => {
     clearTimeout(t);
-    window.removeEventListener('click', handler);
+    window.removeEventListener("click", handler);
   };
 }

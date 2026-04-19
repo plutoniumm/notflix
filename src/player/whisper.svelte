@@ -1,10 +1,15 @@
 <script lang="ts">
-  import type { WhisperCue } from './subs';
+  import type { WhisperCue } from "./subs";
 
-  let { msg, cues, currentTime }: { msg: string; cues: WhisperCue[]; currentTime: number } = $props();
+  let {
+    msg,
+    cues,
+    currentTime,
+  }: { msg: string; cues: WhisperCue[]; currentTime: number } = $props();
 
   const activeCue = $derived(
-    cues?.findLast((c) => currentTime >= c.start && currentTime < c.end) ?? null
+    cues?.findLast((c) => currentTime >= c.start && currentTime < c.end) ??
+      null,
   );
 </script>
 
@@ -26,7 +31,11 @@
     text-align: center;
     font-size: 1.4rem;
     color: #fff;
-    text-shadow: 0 0 4px #000, 0 1px 3px #000, 1px 0 3px #000, -1px 0 3px #000;
+    text-shadow:
+      0 0 4px #000,
+      0 1px 3px #000,
+      1px 0 3px #000,
+      -1px 0 3px #000;
     pointer-events: none;
   }
 

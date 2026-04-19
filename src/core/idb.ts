@@ -15,24 +15,23 @@ export class IDB {
     });
   }
 
-  async get<T> (store: string, key: IDBValidKey): Promise<T | undefined> {
+  async get<T>(store: string, key: IDBValidKey): Promise<T | undefined> {
     const db = await this.#db;
 
     return new Promise((resolve, reject) => {
-      const req = db.transaction(store, 'readonly')
-        .objectStore(store)
-        .get(key);
+      const req = db.transaction(store, "readonly").objectStore(store).get(key);
 
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
   }
 
-  async set (store: string, value: unknown): Promise<void> {
+  async set(store: string, value: unknown): Promise<void> {
     const db = await this.#db;
 
     return new Promise((resolve, reject) => {
-      const req = db.transaction(store, 'readwrite')
+      const req = db
+        .transaction(store, "readwrite")
         .objectStore(store)
         .put(value as any);
 
@@ -41,11 +40,12 @@ export class IDB {
     });
   }
 
-  async del (store: string, key: IDBValidKey): Promise<void> {
+  async del(store: string, key: IDBValidKey): Promise<void> {
     const db = await this.#db;
 
     return new Promise((resolve, reject) => {
-      const req = db.transaction(store, 'readwrite')
+      const req = db
+        .transaction(store, "readwrite")
         .objectStore(store)
         .delete(key);
 
@@ -54,24 +54,22 @@ export class IDB {
     });
   }
 
-  async has (store: string, key: IDBValidKey): Promise<boolean> {
+  async has(store: string, key: IDBValidKey): Promise<boolean> {
     return (await this.get(store, key)) !== undefined;
   }
 
-  async all<T> (store: string): Promise<T[]> {
+  async all<T>(store: string): Promise<T[]> {
     const db = await this.#db;
 
     return new Promise((resolve, reject) => {
-      const req = db.transaction(store, 'readonly')
-        .objectStore(store)
-        .getAll();
+      const req = db.transaction(store, "readonly").objectStore(store).getAll();
 
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
   }
 
-  async tx (
+  async tx(
     stores: string[],
     mode: IDBTransactionMode,
     fn: (tx: IDBTransaction) => void,
