@@ -274,22 +274,36 @@ func cleanTitle(name string) string {
 	return strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(s, " "))
 }
 
+const osUA = "notflix v1.0.0"
+
 func osSearch(key, params string, byHash bool) []SubResult {
 	req, err := http.NewRequest("GET", "https://api.opensubtitles.com/api/v1/subtitles?"+params, nil)
-
 	if err != nil {
 		return nil
 	}
 
 	req.Header.Set("Api-Key", key)
-	req.Header.Set("User-Agent", "notflix v1.0")
+	req.Header.Set("User-Agent", osUA)
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
-
 	if err != nil {
+		log.Printf("[subs] osSearch request error: %v", err)
+
 		return nil
 	}
 	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[subs] osSearch status=%d body=%s params=%q", resp.StatusCode, string(data), params)
+
+		return nil
+	}
 
 	var payload struct {
 		Data []struct {
@@ -304,11 +318,9 @@ func osSearch(key, params string, byHash bool) []SubResult {
 		} `json:"data"`
 	}
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil
-	}
 	if err := json.Unmarshal(data, &payload); err != nil {
+		log.Printf("[subs] osSearch parse error: %v body=%s", err, string(data))
+
 		return nil
 	}
 
@@ -351,8 +363,9 @@ func fetchToken(key string) string {
 		return ""
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Api-Key", key)
-	req.Header.Set("User-Agent", "notflix v1.0")
+	req.Header.Set("User-Agent", osUA)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -420,10 +433,11 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 		}
 
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
 		if key != "" {
 			req.Header.Set("Api-Key", key)
 		}
-		req.Header.Set("User-Agent", "notflix v1.0")
+		req.Header.Set("User-Agent", osUA)
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
