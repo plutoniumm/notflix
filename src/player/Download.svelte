@@ -15,7 +15,7 @@
   type State = "idle" | "downloading" | "done" | "error";
 
   const bgfetch = isSupported();
-  const show = videoParam.endsWith(".mp4");
+  const show = $derived(videoParam.endsWith(".mp4"));
 
   let state = $state<State>("idle");
   let progress = $state(0);

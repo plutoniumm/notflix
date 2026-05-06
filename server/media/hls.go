@@ -41,9 +41,9 @@ var hlsProfiles = map[string]hlsProfile{
 	"240p":  {240, "scale=-2:240", "400k", "80k", 27},
 	"360p":  {360, "scale=-2:360", "650k", "96k", 26},
 	"480p":  {480, "scale=-2:480", "1000k", "112k", 24},
-	"720p":  {720, "scale=-2:720", "2500k", "128k", 23},
-	"1080p": {1080, "scale=-2:1080", "5000k", "192k", 22},
-	"2160p": {2160, "scale=-2:2160", "15000k", "256k", 21},
+	"720p":  {720, "scale=-2:720", "4000k", "128k", 21},
+	"1080p": {1080, "scale=-2:1080", "8000k", "192k", 20},
+	"2160p": {2160, "scale=-2:2160", "25000k", "256k", 19},
 }
 
 func doubleKRate(s string) string {
@@ -214,17 +214,82 @@ func rungBandwidth(si *srcInfo, q string, profile hlsProfile) int {
 	return hlsBandwidth[q]
 }
 
-// Hints sit ~25% above the encoder's VBR target. ultrafast often overshoots
-// the configured -b:v, and overstating BANDWIDTH biases ABR conservative so
-// the player picks a rung the segment generator can sustain.
+// AVERAGE-BANDWIDTH: copy-mode reports the actual probed peak (pre-overhead);
+// transcode rungs report the configured VBR target so ABR has a realistic
+// sustained estimate instead of the padded peak we use for BANDWIDTH.
+func rungAvgBandwidth(si *srcInfo, q string, profile hlsProfile) int {
+	if canCopyVideo(si, profile) && si.peakBitrate > 0 {
+		return si.peakBitrate
+	}
+	if n, err := strconv.Atoi(strings.TrimSuffix(profile.vbr, "k")); err == nil {
+		return n * 1000
+	}
+	return hlsBandwidth[q]
+}
+
+// H.264 codec string for the STREAM-INF CODECS= attribute. Levels cover the
+// segment encoder's likely output: ≤480p=L3.1, ≤720p=L3.1, ≤1080p=L4.0,
+// 2160p=L5.1. All High profile (libx264 default).
+func avcCodec(h int) string {
+	switch {
+	case h > 1080:
+		return "avc1.640033"
+	case h > 720:
+		return "avc1.640028"
+	case h > 480:
+		return "avc1.64001f"
+	default:
+		return "avc1.640016"
+	}
+}
+
+// Rung width derived from source aspect. Scale filter is "-2:H", so output
+// width matches the source's pixel aspect and rounds to an even number.
+func rungWidth(srcW, srcH, rungH int) int {
+	if srcW <= 0 || srcH <= 0 {
+		// Fall back to 16:9 when probing failed.
+		w := rungH * 16 / 9
+		if w%2 != 0 {
+			w++
+		}
+		return w
+	}
+	w := srcW * rungH / srcH
+	if w%2 != 0 {
+		w++
+	}
+	return w
+}
+
+// Build a full #EXT-X-STREAM-INF attribute list with BANDWIDTH,
+// AVERAGE-BANDWIDTH, RESOLUTION, CODECS, and any caller-supplied extras
+// (e.g. AUDIO="audio" for multi-audio masters).
+func streamInfLine(si *srcInfo, q string, p hlsProfile, srcW, srcH int, extra string) string {
+	peak := rungBandwidth(si, q, p)
+	avg := rungAvgBandwidth(si, q, p)
+	if avg > peak {
+		avg = peak
+	}
+	w := rungWidth(srcW, srcH, p.h)
+	codecs := avcCodec(p.h) + ",mp4a.40.2"
+	attrs := fmt.Sprintf("BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s\"", peak, avg, w, p.h, codecs)
+	if extra != "" {
+		attrs += "," + extra
+	}
+	return "#EXT-X-STREAM-INF:" + attrs + "\n"
+}
+
+// Peak-bitrate hints for ABR. Copy-mode rungs substitute the probed source
+// peak via rungBandwidth; these fall-back values mirror the VBR caps in
+// hlsProfiles and are what ABR uses to pick a sustainable rung.
 var hlsBandwidth = map[string]int{
 	"144p":  200_000,
 	"240p":  400_000,
 	"360p":  650_000,
 	"480p":  1_000_000,
-	"720p":  2_500_000,
-	"1080p": 5_000_000,
-	"2160p": 15_000_000,
+	"720p":  4_000_000,
+	"1080p": 8_000_000,
+	"2160p": 25_000_000,
 }
 
 func HLSAVOffset(c *gin.Context, lib *library.Library) {
@@ -272,6 +337,7 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 	}
 
 	srcHeight := 0
+	srcWidth := 0
 	type aTrack struct {
 		language string
 		codec    string
@@ -283,6 +349,7 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 		for _, s := range streams {
 			if s.CodecType == "video" && srcHeight == 0 {
 				srcHeight = s.Height
+				srcWidth = s.Width
 			}
 			if s.CodecType == "audio" {
 				lang := s.Tags["language"]
@@ -341,7 +408,7 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 			if srcHeight > 0 && p.h > srcHeight {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AUDIO=\"audio\"\n", rungBandwidth(si, q, p)))
+			sb.WriteString(streamInfLine(si, q, p, srcWidth, srcHeight, "AUDIO=\"audio\""))
 			sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s\n", encFile, q))
 		}
 	} else {
@@ -353,7 +420,7 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 			if srcHeight > 0 && p.h > srcHeight {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d\n", rungBandwidth(si, q, p)))
+			sb.WriteString(streamInfLine(si, q, p, srcWidth, srcHeight, ""))
 			sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s&audio=%s\n", encFile, q, audio))
 		}
 	}
@@ -573,7 +640,7 @@ func generateSegment(srcPath, segPath string, start, segDur float64, p hlsProfil
 	tmp := segPath + ".tmp"
 
 	args := []string{
-		"-nostdin", "-y", "-v", "error",
+		"-y",
 		"-ss", fmt.Sprintf("%.3f", start),
 		"-i", srcPath,
 		"-t", fmt.Sprintf("%.3f", segDur),
@@ -618,13 +685,10 @@ func generateSegment(srcPath, segPath string, start, segDur float64, p hlsProfil
 		"-f", "mpegts", tmp,
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	stderr, err := library.FFRun{Args: args, Timeout: 60 * time.Second}.Run()
+	if err != nil {
 		os.Remove(tmp)
-		return fmt.Errorf("%v: %s", err, string(out))
+		return library.FFErr(stderr, err)
 	}
 
 	return os.Rename(tmp, segPath)

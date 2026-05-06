@@ -21,21 +21,27 @@ var keepExts = map[string]bool{
 	".torrent": true, ".aria2": true,
 }
 
-func CleanAll(roots []string) {
+func CleanAll(roots []string, skip map[string]bool) {
 	for _, root := range roots {
 		if _, err := os.Stat(root); err != nil {
 			continue
 		}
 
-		cleanRoot(root)
+		cleanRoot(root, skip)
 	}
 
 	log.Println("[CleanAll] finished")
 }
 
-func cleanRoot(root string) {
+func cleanRoot(root string, skip map[string]bool) {
+	active := activeDirs(root, skip)
+
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+
+		if active[filepath.Dir(path)] {
 			return nil
 		}
 
@@ -58,8 +64,42 @@ func cleanRoot(root string) {
 			continue
 		}
 
-		processSubdir(root, filepath.Join(root, e.Name()))
+		dir := filepath.Join(root, e.Name())
+		if dirActive(dir, active) {
+			log.Printf("[CleanAll] aria2 active, skipping: %s", e.Name())
+			continue
+		}
+
+		processSubdir(root, dir)
 	}
+}
+
+func activeDirs(root string, skip map[string]bool) map[string]bool {
+	dirs := map[string]bool{}
+	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+
+		if strings.HasSuffix(d.Name(), ".aria2") || skip[path] {
+			dirs[filepath.Dir(path)] = true
+		}
+
+		return nil
+	})
+
+	return dirs
+}
+
+func dirActive(dir string, active map[string]bool) bool {
+	prefix := dir + string(filepath.Separator)
+	for d := range active {
+		if d == dir || strings.HasPrefix(d, prefix) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func collect(dir string) (videos, subs []string) {

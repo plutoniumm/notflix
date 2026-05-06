@@ -2,7 +2,9 @@
   import { onMount, onDestroy } from "svelte";
   import { api } from "../core/api";
   import { kv } from "../core/kv";
+  import { toast } from "../core/toast.svelte";
   import { JOBS_POLL_MS, DL_POLL_MS, PWA_POLL_MS } from "../core/events.svelte";
+  import { usePoll } from "../core/poll";
   import { Down, isSupported } from "./dl";
   import { clean } from "../core/video";
 
@@ -14,7 +16,7 @@
   declare const __BUILD_TIME__: string;
   const frontendBuild = __BUILD_TIME__;
 
-  type FileEntry = { name: string; root: string };
+  type FileEntry = { name: string; root: string; corrupt?: boolean };
   let data: Record<string, FileEntry[]> = $state({});
   let disks: DiskInfo[] = $state([]);
   let hiddenSet = $state(new Set<string>());
@@ -35,28 +37,40 @@
   >([]);
   let dirSizes = $state<Record<string, { bytes: number; root: string }>>({});
 
-  let jobsTimer: ReturnType<typeof setInterval>;
-  let dlTimer: ReturnType<typeof setInterval>;
-  let pwaTimer: ReturnType<typeof setInterval>;
+  let pollers: (() => void)[] = [];
   let pwaUnsub: (() => void) | null = null;
 
   onDestroy(() => {
-    clearInterval(jobsTimer);
-    clearInterval(dlTimer);
-    clearInterval(pwaTimer);
+    pollers.forEach((stop) => stop());
     pwaUnsub?.();
   });
 
   async function pollPwaDownloads() {
-    const records = await Down.all();
+    let records: DownloadRecord[];
+    try {
+      records = await Down.all();
+    } catch (err) {
+      console.warn("[pollPwa all()]", err);
+      return;
+    }
     const active = records.filter((r) => r.status === "downloading");
     const updated = await Promise.all(
-      active.map(async (r) => ({
-        videoParam: r.videoParam,
-        title: r.title,
-        bgFetchId: r.bgFetchId,
-        progress: r.bgFetchId ? await Down.progress(r.bgFetchId) : 0,
-      })),
+      active.map(async (r) => {
+        let progress = 0;
+        if (r.bgFetchId) {
+          try {
+            progress = await Down.progress(r.bgFetchId);
+          } catch (err) {
+            console.warn("[pollPwa progress]", r.videoParam, err);
+          }
+        }
+        return {
+          videoParam: r.videoParam,
+          title: r.title,
+          bgFetchId: r.bgFetchId,
+          progress,
+        };
+      }),
     );
     pwaDownloads = updated;
   }
@@ -64,48 +78,57 @@
   onMount(() => {
     loadAll();
 
-    api.build().then((r) => {
-      if (r?.backend) backendBuild = r.backend;
-    });
-    api.manage.dirSizes().then((sizes: any[]) => {
-      if (!Array.isArray(sizes)) return;
-      const map: Record<string, { bytes: number; root: string }> = {};
-      for (const s of sizes) map[s.dir] = { bytes: s.bytes, root: s.root };
-      dirSizes = map;
-    });
+    api
+      .build({ silent: true })
+      .then((r) => {
+        if (r?.backend) backendBuild = r.backend;
+      })
+      .catch((err) => console.warn("[build]", err));
+    api.manage
+      .dirSizes({ silent: true })
+      .then((sizes: any[]) => {
+        if (!Array.isArray(sizes)) return;
+        const map: Record<string, { bytes: number; root: string }> = {};
+        for (const s of sizes) map[s.dir] = { bytes: s.bytes, root: s.root };
+        dirSizes = map;
+      })
+      .catch((err) => console.warn("[dirSizes]", err));
 
-    jobsTimer = setInterval(async () => {
-      if (document.hidden) return;
-      jobs = (await api.conversions()) ?? [];
-      if (processingLib && jobs.length === 0) processingLib = false;
-    }, JOBS_POLL_MS);
+    pollers.push(
+      usePoll(async () => {
+        jobs = (await api.conversions({ silent: true })) ?? [];
+        if (processingLib && jobs.length === 0) processingLib = false;
+      }, JOBS_POLL_MS),
+    );
 
-    dlTimer = setInterval(async () => {
-      if (document.hidden) return;
-      dlJobs = (await api.aria2.list()) ?? [];
-    }, DL_POLL_MS);
+    pollers.push(
+      usePoll(async () => {
+        dlJobs = (await api.aria2.list({ silent: true })) ?? [];
+      }, DL_POLL_MS),
+    );
 
     if (isSupported()) {
-      pollPwaDownloads();
-      pwaTimer = setInterval(() => {
-        if (document.hidden) return;
-        pollPwaDownloads();
-      }, PWA_POLL_MS);
+      pollers.push(usePoll(pollPwaDownloads, PWA_POLL_MS, { immediate: true }));
       pwaUnsub = Down.on(() => pollPwaDownloads());
     }
   });
 
   async function loadAll() {
     loading = true;
-    const [d, disk, hidden] = await Promise.all([
-      api.manage.list(),
-      api.manage.diskInfo(),
-      api.manage.hidden(),
-    ]);
-    data = d;
-    disks = disk;
-    hiddenSet = new Set(Array.isArray(hidden) ? hidden : []);
-    loading = false;
+    try {
+      const [d, disk, hidden] = await Promise.all([
+        api.manage.list(),
+        api.manage.diskInfo(),
+        api.manage.hidden(),
+      ]);
+      data = d ?? {};
+      disks = Array.isArray(disk) ? disk : [];
+      hiddenSet = new Set(Array.isArray(hidden) ? hidden : []);
+    } catch (err: any) {
+      toast.err(`Failed to load library: ${err?.message ?? err}`);
+    } finally {
+      loading = false;
+    }
   }
 
   async function toggleHidden(dir: string) {
@@ -119,7 +142,8 @@
   }
 
   async function reloadData() {
-    data = await api.manage.list();
+    const d = await api.manage.list();
+    if (d) data = d;
   }
 
   function fmtBytes(b: number): string {
@@ -149,14 +173,19 @@
     const res = await api.rename(path, name);
     if (res?.ok) {
       await reloadData();
+      toast.ok(`Renamed to ${name}`);
     } else {
-      alert("Rename failed: " + (res?.error ?? "unknown"));
+      toast.err("Rename failed: " + (res?.error ?? "unknown"));
     }
   }
 
   async function delFile(dir: string, f: string) {
     const rel = dir === "." ? f : `${dir}/${f}`;
-    await api.deleteVideo(rel);
+    const res = await api.deleteVideo(rel);
+    if (res === null) {
+      toast.err(`Delete failed: ${rel}`);
+      return;
+    }
 
     data[dir] = data[dir].filter((x) => x.name !== f);
     if (!data[dir]?.length) delete data[dir];
@@ -165,7 +194,7 @@
   async function delDir(dir: string) {
     const res = await api.deleteDir(dir);
     if (!res?.ok) {
-      alert("Delete failed: " + (res?.error ?? "unknown"));
+      toast.err("Delete failed: " + (res?.error ?? "unknown"));
       return;
     }
 
@@ -173,30 +202,48 @@
   }
 
   async function addDownload(magnet: string, dir: string) {
-    await api.aria2.add(magnet, dir);
+    const res = await api.aria2.add(magnet, dir);
+    if (res === null) return;
+    toast.ok("Torrent added");
   }
 
   async function addTorrentFile(file: File, dir: string) {
-    const form = new FormData();
-    form.append("torrent", file);
-    form.append("dir", dir);
-    await fetch("/api/aria2/add-torrent", { method: "POST", body: form });
+    try {
+      const form = new FormData();
+      form.append("torrent", file);
+      form.append("dir", dir);
+      const r = await fetch("/api/aria2/add-torrent", {
+        method: "POST",
+        body: form,
+      });
+      if (!r.ok) {
+        const text = await r.text().catch(() => "");
+        toast.err(`Torrent upload failed: HTTP ${r.status} ${text.slice(0, 80)}`);
+        return;
+      }
+      toast.ok(`Torrent uploaded: ${file.name}`);
+    } catch (err: any) {
+      toast.err(`Torrent upload failed: ${err?.message ?? err}`);
+    }
   }
 
   async function removeDownload(gid: string) {
-    await api.aria2.remove(gid);
+    const res = await api.aria2.remove(gid);
+    if (res === null) return;
     dlJobs = dlJobs.filter((j) => j.gid !== gid);
   }
 
   async function pauseDownload(gid: string) {
-    await api.aria2.pause(gid);
+    const res = await api.aria2.pause(gid);
+    if (res === null) return;
     dlJobs = dlJobs.map((j) =>
       j.gid === gid ? { ...j, status: "paused", speed: 0 } : j,
     );
   }
 
   async function resumeDownload(gid: string) {
-    await api.aria2.resume(gid);
+    const res = await api.aria2.resume(gid);
+    if (res === null) return;
     dlJobs = dlJobs.map((j) =>
       j.gid === gid ? { ...j, status: "active" } : j,
     );
@@ -204,7 +251,12 @@
 
   async function processLibrary() {
     processingLib = true;
-    await api.process();
+    const res = await api.process();
+    if (res === null) {
+      processingLib = false;
+      return;
+    }
+    toast.ok("Library processing started");
   }
 
   let rows = $derived(
@@ -247,8 +299,8 @@
     />
 
     {#if pwaDownloads.length > 0}
-      <section class="pwa-dl rx5 flow-h">
-        <h3 class="m0 p10 fs-sm fw6 bg-3">
+      <section class="pwa-dl surface flow-h">
+        <h3 class="m0 p10 fs-sm fw6">
           Offline Downloads ({pwaDownloads.length})
         </h3>
         {#each pwaDownloads as dl (dl.videoParam)}
@@ -258,11 +310,8 @@
                 >{clean(dl.title || dl.videoParam)}</span
               >
               <div class="f al-ct g10">
-                <div class="pwa-bar rx2">
-                  <div
-                    class="pwa-fill h-100 rx2"
-                    style="width:{dl.progress}%"
-                  ></div>
+                <div class="bar-track pwa-bar">
+                  <div class="bar-fill pwa-fill" style="width:{dl.progress}%"></div>
                 </div>
                 <span class="fs-xs tx-1">{dl.progress}%</span>
               </div>
@@ -319,35 +368,41 @@
     padding: 24px 40px 60px;
     max-width: 960px;
     --i: 0;
+    position: relative;
+    z-index: 1;
   }
 
   .pwa-dl {
-    margin-bottom: 20px;
-    border: 1px solid var(--bg-3);
+    margin-bottom: 24px;
+  }
+  .pwa-dl h3 {
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--tx-4);
+    border-bottom: 1px solid var(--glass-bd);
   }
   .pwa-item {
-    padding: 10px 14px;
-    border-top: 1px solid var(--bg-3);
+    padding: 12px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
   }
-  .pwa-info {
-    flex: 1;
-    min-width: 0;
-  }
+  .pwa-info { flex: 1; min-width: 0; }
   .pwa-bar {
     flex: 1;
-    height: 4px;
-    background: var(--bg-4);
-    margin-top: 4px;
+    height: 6px;
+    margin-top: 6px;
   }
   .pwa-fill {
-    background: var(--grn);
-    transition: width 0.5s;
+    background: linear-gradient(90deg, var(--grn) 0%, var(--cyan) 100%);
+    box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
   }
 
   .build-info {
-    margin-top: 40px;
-    padding: 12px 0;
-    border-top: 1px solid var(--bg-3);
+    margin-top: 56px;
+    padding: 16px 0;
+    border-top: 1px solid var(--glass-bd);
     text-align: center;
+    color: var(--tx-1);
+    font-family: var(--font-display);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 </style>

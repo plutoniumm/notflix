@@ -1,4 +1,4 @@
-const CACHE = 'notflix-v3';
+const CACHE = 'notflix-v4';
 const OFFLINE_CACHE = 'notflix-offline-v1';
 const SHELL = [
   '/',
@@ -175,76 +175,110 @@ async function broadcast ( msg ) {
 
 async function getDone ( e ) {
   const reg = e.registration;
-  const mapping = await db.get( 'bgfetch-map', reg.id );
-  if ( !mapping ) return;
-
-  const { videoParam } = mapping;
-  const records = await reg.matchAll();
-  const cache = await caches.open( OFFLINE_CACHE );
-
-  for ( const record of records ) {
-    const response = await record.responseReady;
-    await cache.put( record.request, response );
+  const mapping = await db.get( 'bgfetch-map', reg.id ).catch( ( err ) => {
+    console.error( '[sw getDone] mapping lookup failed', err );
+    return null;
+  } );
+  if ( !mapping ) {
+    console.warn( '[sw getDone] no mapping for', reg.id );
+    return;
   }
 
-  const subPath = videoParam.replace( /\.mp4$/i, '.vtt' );
+  const { videoParam } = mapping;
+  let cacheFailure = null;
+
   try {
-    const subRes = await fetch( `/subs/${ subPath }` );
-    if ( subRes.ok )
-      await cache.put( `/subs/${ subPath }`, subRes );
-  } catch ( _ ) { }
+    const records = await reg.matchAll();
+    const cache = await caches.open( OFFLINE_CACHE );
 
-  const dlRecord = await db.get( 'downloads', videoParam );
+    for ( const record of records ) {
+      const response = await record.responseReady;
+      await cache.put( record.request, response );
+    }
+
+    const subPath = videoParam.replace( /\.mp4$/i, '.vtt' );
+    try {
+      const subRes = await fetch( `/subs/${ subPath }` );
+      if ( subRes.ok )
+        await cache.put( `/subs/${ subPath }`, subRes );
+    } catch ( err ) {
+      console.warn( '[sw getDone] subtitle cache skipped', err );
+    }
+  } catch ( err ) {
+    console.error( '[sw getDone] cache.put failed', err );
+    cacheFailure = err?.message || String( err );
+  }
+
+  const dlRecord = await db.get( 'downloads', videoParam ).catch( () => null );
   if ( dlRecord ) {
-    dlRecord.status = 'done';
-    dlRecord.downloadedAt = Date.now();
+    dlRecord.status = cacheFailure ? 'error' : 'done';
+    if ( cacheFailure ) dlRecord.error = cacheFailure;
+    else dlRecord.downloadedAt = Date.now();
 
-    await db.put( 'downloads', dlRecord );
+    try {
+      await db.put( 'downloads', dlRecord );
+    } catch ( err ) {
+      console.error( '[sw getDone] db.put failed', err );
+    }
   }
 
   await broadcast( {
-    type: 'download-complete',
+    type: cacheFailure ? 'download-error' : 'download-complete',
     videoParam,
-    record: dlRecord
-  } );
+    record: dlRecord,
+    error: cacheFailure || undefined,
+  } ).catch( ( err ) => console.warn( '[sw broadcast]', err ) );
   try {
     await e.updateUI( {
-      title: `Downloaded: ${ dlRecord?.title ?? videoParam }`
+      title: cacheFailure
+        ? `Download failed: ${ dlRecord?.title ?? videoParam }`
+        : `Downloaded: ${ dlRecord?.title ?? videoParam }`
     } );
-  } catch ( _ ) { }
+  } catch ( err ) {
+    console.warn( '[sw updateUI]', err );
+  }
 }
 
 async function getFail ( e ) {
   const reg = e.registration;
-  const mapping = await db.get( 'bgfetch-map', reg.id );
+  const mapping = await db.get( 'bgfetch-map', reg.id ).catch( () => null );
   if ( !mapping ) return;
 
   const { videoParam } = mapping;
-  const dlRecord = await db.get( 'downloads', videoParam );
-  if ( dlRecord ) {
-    dlRecord.status = 'error';
-    await db.put( 'downloads', dlRecord );
+  let dlRecord = null;
+  try {
+    dlRecord = await db.get( 'downloads', videoParam );
+    if ( dlRecord ) {
+      dlRecord.status = 'error';
+      await db.put( 'downloads', dlRecord );
+    }
+  } catch ( err ) {
+    console.error( '[sw getFail] db op failed', err );
   }
 
   await broadcast( {
     type: 'download-error',
     videoParam,
     record: dlRecord
-  } );
+  } ).catch( ( err ) => console.warn( '[sw broadcast]', err ) );
 }
 
 async function getStop ( e ) {
   const reg = e.registration;
-  const mapping = await db.get( 'bgfetch-map', reg.id );
+  const mapping = await db.get( 'bgfetch-map', reg.id ).catch( () => null );
   if ( !mapping ) return;
 
   const { videoParam } = mapping;
-  await db.del( 'downloads', videoParam );
-  await db.del( 'bgfetch-map', reg.id );
+  try {
+    await db.del( 'downloads', videoParam );
+    await db.del( 'bgfetch-map', reg.id );
+  } catch ( err ) {
+    console.error( '[sw getStop] db op failed', err );
+  }
 
   await broadcast( {
     type: 'download-abort',
     videoParam,
     record: null
-  } );
+  } ).catch( ( err ) => console.warn( '[sw broadcast]', err ) );
 }

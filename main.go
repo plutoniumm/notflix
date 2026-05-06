@@ -53,6 +53,8 @@ func main() {
 	jobs.OnDownloads = media.ProcessAll
 
 	go media.ProcessAll(lib)
+	go library.ScanCorrupt(lib)
+	go media.NormalizeSubs(lib)
 	go jobs.Aria2Init(lib)
 	media.StartCacheCleanLoop(lib, time.Hour)
 

@@ -16,13 +16,13 @@
   } = $props();
 </script>
 
-<header class="f fw al-ct g10 p-stx">
+<header class="glass-header f fw al-ct g10">
   <a href="/" class="back fs tx-3">←</a>
   <h1 class="m0 fw6">Manage Library</h1>
   <span class="fs tx-1">{rows.length} folders · {total} files</span>
 
   {#if onProcess}
-    <button class="proc-btn rx2" onclick={onProcess} disabled={processing}>
+    <button class="proc-btn glass glass-hover" onclick={onProcess} disabled={processing}>
       {processing ? "Processing…" : "Process Library"}
     </button>
   {/if}
@@ -48,38 +48,43 @@
 <style>
   header {
     padding: 20px 40px;
-    background: var(--bg-2);
-    border-bottom: 1px solid var(--bg-3);
-    top: 0;
-    z-index: 10;
+  }
+  header h1 {
+    font-size: 22px;
+  }
+  .back {
+    padding: 4px 10px;
+    border-radius: var(--r-md);
+    transition: color 0.18s var(--ease-out), background 0.18s var(--ease-out);
   }
   .back:hover {
     color: var(--tx-5);
+    background: var(--glass);
   }
   .disk-bar {
-    width: 80px;
-    height: 4px;
-    background: var(--bg-3);
+    width: 88px;
+    height: 5px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 999px;
     overflow: hidden;
   }
   .proc-btn {
-    padding: 4px 12px;
-    background: var(--bg-3);
-    color: var(--tx-3);
-    border: none;
-    cursor: pointer;
+    padding: 6px 14px;
+    color: var(--tx-4);
+    font-family: inherit;
     font-size: 13px;
-  }
-  .proc-btn:hover:not(:disabled) {
-    background: var(--bg-4);
-    color: var(--tx-5);
+    font-weight: 500;
+    border-radius: var(--r-md);
+    cursor: pointer;
   }
   .proc-btn:disabled {
     opacity: 0.5;
     cursor: default;
   }
   .disk-fill {
-    background: linear-gradient(90deg, #e11, #f63, #fa0);
-    transition: width 0.4s cubic-bezier(0.2, 0.9, 0.3, 1);
+    height: 100%;
+    background: linear-gradient(90deg, var(--red), #ff7849, var(--gold));
+    border-radius: 999px;
+    transition: width 0.4s var(--ease-out);
   }
 </style>

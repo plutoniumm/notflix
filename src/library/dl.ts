@@ -1,4 +1,5 @@
 import { IDB } from "../core/idb";
+import { toast } from "./../core/toast.svelte";
 
 const OFFLINE_CACHE = "notflix-offline-v1";
 
@@ -78,59 +79,89 @@ class Downloads {
 
   async recover(): Promise<void> {
     if (!isSupported()) return;
-    const records = await this.all();
+    let records: DownloadRecord[];
+    try {
+      records = await this.all();
+    } catch (err) {
+      console.warn("[recover] all()", err);
+      return;
+    }
     const reg = await navigator.serviceWorker.ready;
     const bgFetch = (reg as any).backgroundFetch;
 
     for (const r of records) {
       if (r.status !== "downloading" || !r.bgFetchId) continue;
-      const bgReg = await bgFetch.get(r.bgFetchId);
-      if (!bgReg) {
-        r.status = "error";
-        await db.set("downloads", r);
-        this.#emit(r.videoParam, r);
+      try {
+        const bgReg = await bgFetch.get(r.bgFetchId);
+        if (!bgReg) {
+          r.status = "error";
+          await db.set("downloads", r);
+          this.#emit(r.videoParam, r);
+          toast.err(`Download "${r.title}" was lost — please retry`);
+        }
+      } catch (err) {
+        console.warn("[recover] per-record", err);
       }
     }
   }
 
   async start(videoParam: string, title: string, key: string): Promise<void> {
-    const reg = await navigator.serviceWorker.ready;
-    const bgFetch = (reg as any).backgroundFetch;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const bgFetch = (reg as any).backgroundFetch;
 
-    const head = await fetch(`/video/${videoParam}`, { method: "HEAD" });
-    const size = parseInt(head.headers.get("Content-Length") ?? "0", 10);
+      const head = await fetch(`/video/${videoParam}`, { method: "HEAD" });
+      if (!head.ok) {
+        throw new Error(`HEAD /video/${videoParam} returned ${head.status}`);
+      }
+      const size = parseInt(head.headers.get("Content-Length") ?? "0", 10);
+      if (!size) {
+        console.warn("[Down.start] no Content-Length — downloading with unknown size");
+      }
 
-    if (navigator.storage?.persist) await navigator.storage.persist();
+      if (navigator.storage?.persist) {
+        try {
+          await navigator.storage.persist();
+        } catch (err) {
+          console.warn("[storage.persist]", err);
+        }
+      }
 
-    const bgFetchId = `dl-${videoParam}`;
-    const bgReg = await bgFetch.fetch(bgFetchId, `/video/${videoParam}`, {
-      title,
-      downloadTotal: size || undefined,
-      icons: [
-        {
-          src: "/assets/icon.svg",
-          type: "image/svg+xml",
-        },
-      ],
-    });
-
-    const record: DownloadRecord = {
-      videoParam,
-      title,
-      key,
-      size,
-      status: "downloading",
-      downloadedAt: null,
-      bgFetchId: bgReg.id,
-    };
-
-    await db.tx(["downloads", "bgfetch-map"], "readwrite", (tx) => {
-      tx.objectStore("downloads").put(record);
-      tx.objectStore("bgfetch-map").put({
-        bgFetchId: bgReg.id,
-        videoParam,
+      const bgFetchId = `dl-${videoParam}`;
+      const bgReg = await bgFetch.fetch(bgFetchId, `/video/${videoParam}`, {
+        title,
+        downloadTotal: size || undefined,
+        icons: [
+          {
+            src: "/assets/icon.svg",
+            type: "image/svg+xml",
+          },
+        ],
       });
-    });
+
+      const record: DownloadRecord = {
+        videoParam,
+        title,
+        key,
+        size,
+        status: "downloading",
+        downloadedAt: null,
+        bgFetchId: bgReg.id,
+      };
+
+      await db.tx(["downloads", "bgfetch-map"], "readwrite", (tx) => {
+        tx.objectStore("downloads").put(record);
+        tx.objectStore("bgfetch-map").put({
+          bgFetchId: bgReg.id,
+          videoParam,
+        });
+      });
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      console.error("[Down.start]", err);
+      toast.err(`Download failed: ${msg}`);
+      throw err;
+    }
   }
 
   async progress(bgFetchId: string): Promise<number> {

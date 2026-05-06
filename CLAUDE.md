@@ -6,13 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```sh
 make run          # build (Go + frontend) and start server on :4242
-make build        # just compile
+make build        # build Go binary + frontend (no run)
 pnpm run dev      # frontend watch mode (Vite)
 pnpm run build    # frontend production build → public/assets/
-go build -o notflix .   # Go binary only
 ```
 
-`make run` is the canonical way to build and start the server. The Makefile cleans, compiles Go, builds the Svelte frontend, then runs the binary.
+`make run` is the canonical way to build and start the server. The Makefile cleans, builds the Go binary with a `-ldflags "-X main.buildTime=..."` injection, builds the Svelte frontend, then runs the binary. Don't invoke `go build` directly — you'll lose the buildTime stamp.
 
 There are no tests in this project.
 
@@ -30,7 +29,7 @@ Package dependencies: `library` is standalone. `jobs` imports `library` (for `Fi
 
 **Svelte 5 frontend** compiled by Vite into `public/assets/`. Entry: `src/main.ts` → `src/App.svelte`. The tree mirrors the backend:
 
-- `src/core/` — shared primitives: `api.ts` (raw `GET/POST/DEL` + typed `api.*` namespace), `kv.ts` (typed KV helpers), `events.svelte.ts` (`PlayerState` class + timing constants), `idb.ts`, `clickOutside.ts`, `video.ts` utilities.
+- `src/core/` — shared primitives: `api.ts` (raw `GET/POST/DEL` + typed `api.*` namespace), `kv.ts` (typed KV helpers), `events.svelte.ts` (`PlayerState` class + timing constants), `toast.svelte.ts` + `ToastHost.svelte` (app-wide toast bus, mounted once in `App.svelte`), `idb.ts`, `clickOutside.ts`, `video.ts` utilities.
 - `src/library/` — Home, Manage, and their components (FileRow, FolderRow, Header, Magnet, Downloads) plus `dl.ts` (BackgroundFetch + IndexedDB download manager).
 - `src/player/` — Player, Subs, AudioPicker, Dropdown, all player subcomponents (bar, progress, volume, sync, whisper, related, Download), plus `subs.ts`, `ux.ts`, `avsync.ts`, `tracker.ts`, `view.svelte.ts` (`PlayerView` composing `PlayerState + SubsManager + AudioManager`).
 

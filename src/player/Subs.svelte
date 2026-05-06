@@ -128,12 +128,14 @@
 
   .badge {
     font-size: 10px;
-    color: var(--tx-2);
-    background: var(--bg-4);
-    padding: 1px 5px;
-    border-radius: 3px;
+    color: var(--cyan);
+    background: rgba(94, 234, 212, 0.12);
+    border: 1px solid rgba(94, 234, 212, 0.3);
+    padding: 1px 7px;
+    border-radius: 999px;
     flex-shrink: 0;
     letter-spacing: 0.04em;
+    font-weight: 600;
   }
 
   .empty {

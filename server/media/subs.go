@@ -10,24 +10,15 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/martinlindhe/subtitles"
 	"github.com/opensubtitlescli/moviehash"
 
 	"notflix/server/library"
-)
-
-var (
-	tok    string
-	tokExp time.Time
-	tokMu  sync.Mutex
 )
 
 type embedTrack struct {
@@ -128,47 +119,14 @@ func Subctx(c *gin.Context, lib *library.Library) {
 		})
 	}
 
-	cmd := exec.Command("ffprobe",
-		"-v", "error",
-		"-select_streams", "s",
-		"-show_entries", "stream=index,codec_name:stream_tags=language",
-		"-of", "json",
-		path,
-	)
-	out, err := cmd.Output()
-
-	var embedded []embedTrack
-	if err == nil {
-		var probe struct {
-			Streams []struct {
-				Index     int               `json:"index"`
-				CodecName string            `json:"codec_name"`
-				Tags      map[string]string `json:"tags"`
-			} `json:"streams"`
+	embedded := []embedTrack{}
+	streams, _ := library.Prober.Streams(c.Request.Context(), path)
+	textCodecs := map[string]bool{"subrip": true, "ass": true, "webvtt": true, "mov_text": true}
+	for _, s := range streams {
+		if s.CodecType != "subtitle" || !textCodecs[strings.ToLower(s.CodecName)] {
+			continue
 		}
-
-		if json.Unmarshal(out, &probe) == nil {
-			textCodecs := map[string]bool{
-				"subrip": true, "ass": true, "webvtt": true, "mov_text": true,
-			}
-
-			for _, s := range probe.Streams {
-				if !textCodecs[strings.ToLower(s.CodecName)] {
-					continue
-				}
-
-				lang := ""
-				if s.Tags != nil {
-					lang = s.Tags["language"]
-				}
-
-				embedded = append(embedded, embedTrack{Index: s.Index, Language: lang})
-			}
-		}
-	}
-
-	if embedded == nil {
-		embedded = []embedTrack{}
+		embedded = append(embedded, embedTrack{Index: s.Index, Language: s.Tags["language"]})
 	}
 
 	hasWhisper := false
@@ -203,11 +161,8 @@ func SubsExtract(c *gin.Context, lib *library.Library) {
 	outPath := nextSubPath(base, body.Language)
 
 	spec := fmt.Sprintf("0:%d", body.Track)
-	cmd := exec.Command("ffmpeg", "-y", "-i", path, "-map", spec, "-c:s", "webvtt", outPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("ffmpeg failed: %v — %s", err, string(out)),
-		})
+	if stderr, err := library.FF("-y", "-i", path, "-map", spec, "-c:s", "webvtt", outPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": library.FFErr(stderr, err).Error()})
 		return
 	}
 
@@ -223,8 +178,7 @@ func SubsSearch(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	key := os.Getenv("OPENSUBTITLES_API_KEY")
-	if key == "" {
+	if !osClient.Enabled() {
 		c.JSON(http.StatusOK, gin.H{"results": []SubResult{}, "error": "no_api_key"})
 		return
 	}
@@ -246,7 +200,7 @@ func SubsSearch(c *gin.Context, lib *library.Library) {
 	var results []SubResult
 
 	if err == nil && hash != "" {
-		results = osSearch(key, "moviehash="+hash+"&languages=en&order_by=download_count", true)
+		results = osClient.Search("moviehash="+hash+"&languages=en&order_by=download_count", true)
 	}
 
 	base := filepath.Base(path)
@@ -255,7 +209,7 @@ func SubsSearch(c *gin.Context, lib *library.Library) {
 
 	if len(results) == 0 {
 		q := url.QueryEscape(title)
-		results = osSearch(key, "query="+q+"&languages=en&order_by=download_count", false)
+		results = osClient.Search("query="+q+"&languages=en&order_by=download_count", false)
 	}
 
 	if len(results) == 0 {
@@ -358,128 +312,6 @@ func cleanTitle(name string) string {
 	return strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(s, " "))
 }
 
-const osUA = "notflix v1.0.0"
-
-func osSearch(key, params string, byHash bool) []SubResult {
-	req, err := http.NewRequest("GET", "https://api.opensubtitles.com/api/v1/subtitles?"+params, nil)
-	if err != nil {
-		return nil
-	}
-
-	req.Header.Set("Api-Key", key)
-	req.Header.Set("User-Agent", osUA)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("[subs] osSearch request error: %v", err)
-
-		return nil
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("[subs] osSearch status=%d body=%s params=%q", resp.StatusCode, string(data), params)
-
-		return nil
-	}
-
-	var payload struct {
-		Data []struct {
-			Attributes struct {
-				Language      string `json:"language"`
-				Release       string `json:"release"`
-				DownloadCount int    `json:"download_count"`
-				Files         []struct {
-					FileID int `json:"file_id"`
-				} `json:"files"`
-			} `json:"attributes"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(data, &payload); err != nil {
-		log.Printf("[subs] osSearch parse error: %v body=%s", err, string(data))
-
-		return nil
-	}
-
-	var out []SubResult
-	for _, item := range payload.Data {
-		a := item.Attributes
-		fid := 0
-		if len(a.Files) > 0 {
-			fid = a.Files[0].FileID
-		}
-
-		out = append(out, SubResult{
-			Provider:      "os",
-			FileID:        fid,
-			Language:      a.Language,
-			Release:       a.Release,
-			DownloadCount: a.DownloadCount,
-			HashMatch:     byHash,
-		})
-	}
-
-	return out
-}
-
-func fetchToken(key string) string {
-	user := os.Getenv("OPENSUBTITLES_USER")
-	pass := os.Getenv("OPENSUBTITLES_PASS")
-	if user == "" || pass == "" {
-		return ""
-	}
-
-	tokMu.Lock()
-	defer tokMu.Unlock()
-
-	if tok != "" && time.Now().Before(tokExp) {
-		return tok
-	}
-
-	body, _ := json.Marshal(map[string]string{"username": user, "password": pass})
-	req, err := http.NewRequest("POST", "https://api.opensubtitles.com/api/v1/login", bytes.NewReader(body))
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Api-Key", key)
-	req.Header.Set("User-Agent", osUA)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("[subs] login request failed: %v", err)
-		return ""
-	}
-	defer resp.Body.Close()
-
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("[subs] login failed: status=%d body=%s", resp.StatusCode, string(data))
-		return ""
-	}
-
-	var result struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		log.Printf("[subs] login parse error: %v", err)
-		return ""
-	}
-
-	log.Printf("[subs] login ok, token acquired")
-	tok = result.Token
-	tokExp = time.Now().Add(23 * time.Hour)
-	return tok
-}
-
 func GetSubs(c *gin.Context, lib *library.Library) {
 	var body struct {
 		Provider string `json:"provider"`
@@ -504,79 +336,13 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	key := os.Getenv("OPENSUBTITLES_API_KEY")
-	token := fetchToken(key)
-	rb, _ := json.Marshal(map[string]int{"file_id": body.FileID})
-
-	var dl struct {
-		Link     string `json:"link"`
-		FileName string `json:"file_name"`
-	}
-
-	var lastErr string
-	for attempt := range 3 {
-		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * time.Second)
-		}
-
-		req, err := http.NewRequest("POST", "https://api.opensubtitles.com/api/v1/download", bytes.NewReader(rb))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "request error"})
-			return
-		}
-
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-		if key != "" {
-			req.Header.Set("Api-Key", key)
-		}
-		req.Header.Set("User-Agent", osUA)
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			log.Printf("[subs] download request error (attempt %d): %v", attempt+1, err)
-			lastErr = "download request failed"
-			continue
-		}
-
-		data, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		log.Printf("[subs] OS download attempt=%d status=%d body=%s", attempt+1, resp.StatusCode, string(data))
-
-		if resp.StatusCode == http.StatusOK {
-			if err := json.Unmarshal(data, &dl); err != nil || dl.Link == "" {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid download response"})
-				return
-			}
-			break
-		}
-
-		var osErr struct {
-			Message string   `json:"message"`
-			Errors  []string `json:"errors"`
-		}
-		lastErr = fmt.Sprintf("OpenSubtitles error (HTTP %d)", resp.StatusCode)
-		if json.Unmarshal(data, &osErr) == nil && osErr.Message != "" {
-			lastErr = osErr.Message
-			if len(osErr.Errors) > 0 {
-				lastErr += ": " + strings.Join(osErr.Errors, "; ")
-			}
-		}
-
-		if resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode != http.StatusTooManyRequests {
-			break
-		}
-	}
-
-	if dl.Link == "" {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": lastErr})
+	link, fileName, errMsg := osClient.Download(body.FileID)
+	if link == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
 		return
 	}
 
-	sr, err := http.Get(dl.Link)
+	sr, err := http.Get(link)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to download subtitle"})
 		return
@@ -589,7 +355,7 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	ext := strings.ToLower(filepath.Ext(dl.FileName))
+	ext := strings.ToLower(filepath.Ext(fileName))
 	var vtt string
 
 	switch ext {

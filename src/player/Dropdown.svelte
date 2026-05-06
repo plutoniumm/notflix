@@ -32,36 +32,41 @@
 <style>
   .dropdown {
     position: absolute;
-    top: calc(100% + 6px);
+    top: calc(100% + 8px);
     right: 0;
     overflow-y: auto;
-    background: #0d0d0de6;
-    backdrop-filter: blur(14px) saturate(130%);
-    border: 1px solid #fff2;
-    border-radius: 10px;
+    background: rgba(13, 11, 18, 0.78);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--glass-bd);
+    border-radius: var(--r-lg);
     z-index: 100;
-    box-shadow: 0 6px 14px #0008;
+    box-shadow: var(--sh-3);
     transform-origin: top right;
-    animation: dropdown-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+    padding: 4px;
+    animation: dropdown-in 0.22s var(--ease-snap);
   }
 
   .dropdown :global(.item) {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
-    padding: 10px 12px;
+    padding: 9px 11px;
+    border-radius: var(--r-md);
     text-align: left;
-    color: var(--tx-4);
+    color: var(--tx-3);
     font-size: 13px;
-    transition: background 0.1s;
+    font-weight: 500;
+    transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
   }
   .dropdown :global(.item:hover) {
-    background: #fff1;
+    background: var(--glass);
     color: var(--tx-5);
   }
   .dropdown :global(.item.active) {
     color: var(--tx-5);
+    background: var(--glass-2);
   }
   .dropdown :global(.item.busy) {
     opacity: 0.6;
@@ -72,14 +77,16 @@
     width: 14px;
     text-align: center;
     flex-shrink: 0;
+    color: var(--red);
   }
 
   .dropdown :global(.section-hd) {
-    padding: 8px 12px 4px;
-    font-size: 11px;
+    padding: 10px 12px 6px;
+    font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--tx-3);
+    letter-spacing: 0.1em;
+    font-weight: 600;
+    color: var(--tx-2);
   }
   .dropdown :global(.section-hd.row) {
     display: flex;
@@ -89,8 +96,8 @@
 
   .dropdown :global(.divider) {
     height: 1px;
-    background: #fff1;
-    margin: 4px 0;
+    background: var(--glass-bd);
+    margin: 6px 4px;
   }
 
   @keyframes dropdown-in {

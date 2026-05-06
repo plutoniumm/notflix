@@ -1,73 +1,135 @@
-export const GET = (url: string) =>
-  fetch(url)
-    .then((r) => r.json())
-    .catch(() => null);
+import { toast } from "./toast.svelte";
 
-export const POST = (url: string, data: any) =>
+export type ReqOpts = {
+  silent?: boolean;
+  tag?: string;
+};
+
+async function parseBody(r: Response) {
+  const ct = r.headers.get("content-type") ?? "";
+  const text = await r.text();
+  if (!text) return null;
+  if (ct.includes("application/json")) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+  return text;
+}
+
+function report(tag: string, msg: string, silent?: boolean) {
+  if (silent) {
+    console.warn(`[api ${tag}]`, msg);
+    return;
+  }
+  toast.err(`${tag}: ${msg}`);
+}
+
+async function request(
+  method: string,
+  url: string,
+  body: any | undefined,
+  opts: ReqOpts = {},
+): Promise<any> {
+  const tag = opts.tag ?? `${method} ${url.split("?")[0]}`;
+  try {
+    const init: RequestInit = { method };
+    if (body !== undefined) {
+      init.headers = { "Content-Type": "application/json" };
+      init.body = typeof body === "string" ? body : JSON.stringify(body);
+    }
+    const r = await fetch(url, init);
+    if (!r.ok) {
+      const payload = await parseBody(r);
+      const msg =
+        (payload && typeof payload === "object" && (payload.error || payload.message)) ||
+        (typeof payload === "string" && payload.slice(0, 160)) ||
+        `HTTP ${r.status}`;
+      report(tag, String(msg), opts.silent);
+      return null;
+    }
+    return await parseBody(r);
+  } catch (e: any) {
+    report(tag, e?.message || "network error", opts.silent);
+    return null;
+  }
+}
+
+export const GET = (url: string, opts?: ReqOpts) => request("GET", url, undefined, opts);
+export const POST = (url: string, data: any, opts?: ReqOpts) => request("POST", url, data ?? {}, opts);
+export const DEL = (url: string, opts?: ReqOpts) => request("DELETE", url, undefined, opts);
+
+export async function HEAD(url: string): Promise<boolean> {
+  try {
+    const r = await fetch(url, { method: "HEAD" });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export function prefetchRange(url: string, bytes = 1_048_575): void {
   fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: typeof data === "string" ? data : JSON.stringify(data),
-  })
-    .then((r) => r.json())
-    .catch(() => null);
-
-export const DEL = (url: string) =>
-  fetch(url, { method: "DELETE" })
-    .then((r) => r.json())
-    .catch(() => null);
+    headers: { Range: `bytes=0-${bytes}` },
+    priority: "low" as any,
+  }).catch((err) => console.warn("[prefetch]", err));
+}
 
 const E = encodeURIComponent;
 
 export const api = {
-  videoList: () => GET("/list/video"),
+  videoList: (opts?: ReqOpts) => GET("/list/video", opts),
 
   video: {
-    info: (file: string) => GET(`/api/video/info?file=${E(file)}`),
+    info: (file: string, opts?: ReqOpts) => GET(`/api/video/info?file=${E(file)}`, opts),
   },
 
   audio: {
-    info: (file: string) => GET(`/api/audio/info?file=${E(file)}`),
+    info: (file: string, opts?: ReqOpts) => GET(`/api/audio/info?file=${E(file)}`, opts),
   },
 
   hls: {
-    avoffset: (file: string) => GET(`/api/hls/avoffset?file=${E(file)}`),
+    avoffset: (file: string, opts?: ReqOpts) => GET(`/api/hls/avoffset?file=${E(file)}`, opts),
   },
 
   subs: {
-    info: (file: string) => GET(`/api/subs/info?file=${E(file)}`),
-    search: (file: string) => GET(`/api/subs/search?file=${E(file)}`),
+    info: (file: string, opts?: ReqOpts) => GET(`/api/subs/info?file=${E(file)}`, opts),
+    search: (file: string, opts?: ReqOpts) => GET(`/api/subs/search?file=${E(file)}`, opts),
     download: (
       pick: { provider?: string; file_id?: number; url?: string },
       file: string,
-    ) => POST("/api/subs/download", { ...pick, file }),
-    extract: (file: string, track: number, language: string) =>
-      POST("/api/subs/extract", { file, track, language }),
-    whisper: (file: string) => POST("/api/subs/whisper", { file }),
-    whisperStatus: (file: string) =>
-      GET(`/api/subs/whisper/status?file=${E(file)}`),
+      opts?: ReqOpts,
+    ) => POST("/api/subs/download", { ...pick, file }, opts),
+    extract: (file: string, track: number, language: string, opts?: ReqOpts) =>
+      POST("/api/subs/extract", { file, track, language }, opts),
+    whisper: (file: string, opts?: ReqOpts) => POST("/api/subs/whisper", { file }, opts),
+    whisperStatus: (file: string, opts?: ReqOpts) =>
+      GET(`/api/subs/whisper/status?file=${E(file)}`, opts),
   },
 
   manage: {
-    list: () => GET("/api/manage/list"),
-    diskInfo: () => GET("/api/manage/diskinfo"),
-    dirSizes: () => GET("/api/manage/dirsizes"),
-    hidden: () => GET("/api/manage/hidden"),
+    list: (opts?: ReqOpts) => GET("/api/manage/list", opts),
+    diskInfo: (opts?: ReqOpts) => GET("/api/manage/diskinfo", opts),
+    dirSizes: (opts?: ReqOpts) => GET("/api/manage/dirsizes", opts),
+    hidden: (opts?: ReqOpts) => GET("/api/manage/hidden", opts),
   },
 
-  conversions: () => GET("/api/conversions"),
-  process: () => POST("/api/process", {}),
-  build: () => GET("/api/build"),
-  rename: (path: string, name: string) => POST("/api/rename", { path, name }),
-  deleteDir: (path: string) => DEL(`/api/dir?path=${E(path)}`),
-  deleteVideo: (rel: string) => DEL(`/video/${rel}`),
+  conversions: (opts?: ReqOpts) => GET("/api/conversions", opts),
+  process: (opts?: ReqOpts) => POST("/api/process", {}, opts),
+  build: (opts?: ReqOpts) => GET("/api/build", opts),
+  rename: (path: string, name: string, opts?: ReqOpts) =>
+    POST("/api/rename", { path, name }, opts),
+  deleteDir: (path: string, opts?: ReqOpts) => DEL(`/api/dir?path=${E(path)}`, opts),
+  deleteVideo: (rel: string, opts?: ReqOpts) => DEL(`/video/${rel}`, opts),
 
   aria2: {
-    list: () => GET("/api/aria2/list"),
-    add: (magnet: string, dir: string) =>
-      POST("/api/aria2/add", { magnet, dir }),
-    pause: (gid: string) => POST(`/api/aria2/pause?gid=${gid}`, {}),
-    resume: (gid: string) => POST(`/api/aria2/resume?gid=${gid}`, {}),
-    remove: (gid: string) => DEL(`/api/aria2/remove?gid=${gid}`),
+    list: (opts?: ReqOpts) => GET("/api/aria2/list", opts),
+    add: (magnet: string, dir: string, opts?: ReqOpts) =>
+      POST("/api/aria2/add", { magnet, dir }, opts),
+    pause: (gid: string, opts?: ReqOpts) => POST(`/api/aria2/pause?gid=${gid}`, {}, opts),
+    resume: (gid: string, opts?: ReqOpts) => POST(`/api/aria2/resume?gid=${gid}`, {}, opts),
+    remove: (gid: string, opts?: ReqOpts) => DEL(`/api/aria2/remove?gid=${gid}`, opts),
   },
 };

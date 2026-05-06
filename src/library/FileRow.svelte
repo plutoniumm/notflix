@@ -5,6 +5,7 @@
     dir,
     f,
     root = null,
+    corrupt = false,
     job,
     editing,
     val = $bindable(""),
@@ -28,7 +29,7 @@
   }
 </script>
 
-<li class="file">
+<li class="file" class:corrupt>
   {#if job}
     <div class="conv-track">
       <div class="conv-fill" style="width:{job.percent.toFixed(1)}%"></div>
@@ -36,12 +37,21 @@
   {/if}
 
   <div class="row f al-ct g10">
-    <span
-      class="fs-xs tx-1 sh-0 tc icon"
-      title={f.split(".").pop()?.toUpperCase()}
-    >
-      {icon(f)}
-    </span>
+    {#if corrupt}
+      <span
+        class="fs-xs sh-0 tc icon skull"
+        title="ffprobe failed to read this file — likely corrupt or truncated"
+      >
+        💀
+      </span>
+    {:else}
+      <span
+        class="fs-xs tx-1 sh-0 tc icon"
+        title={f.split(".").pop()?.toUpperCase()}
+      >
+        {icon(f)}
+      </span>
+    {/if}
 
     {#if editing === fpath}
       <form class="form f" onsubmit={confirmEdit}>
@@ -71,13 +81,13 @@
 
 <style>
   .file {
-    border-top: 1px solid var(--bg-3);
-    transition: background 0.1s;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    transition: background 0.15s var(--ease-out);
     position: relative;
     overflow: hidden;
   }
   .file:hover {
-    background: var(--bg-3);
+    background: var(--glass);
   }
   .file:hover .actions,
   .file:hover .btn-icon {
@@ -90,21 +100,35 @@
     left: 0;
     right: 0;
     height: 2px;
-    background: var(--bg-4);
+    background: rgba(255, 255, 255, 0.06);
   }
   .conv-fill {
     height: 100%;
-    background: var(--red);
-    transition: width 0.5s;
+    background: linear-gradient(90deg, var(--red) 0%, #ff7849 100%);
+    box-shadow: 0 0 6px var(--red-glow);
+    transition: width 0.5s var(--ease-out);
     min-width: 2px;
   }
 
   .row {
-    padding: 7px 14px 7px 42px;
+    padding: 9px 16px 9px 44px;
   }
 
   .icon {
     width: 16px;
+  }
+  .skull {
+    filter: drop-shadow(0 0 4px var(--red));
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 3px var(--red));
+    }
+    50% {
+      filter: drop-shadow(0 0 7px var(--red));
+    }
   }
 
   .names {
@@ -117,28 +141,15 @@
 
   .actions {
     opacity: 0;
-    transition: opacity 0.15s;
+    transition: opacity 0.18s var(--ease-out);
+  }
+  .file.corrupt .actions,
+  .file.corrupt .btn-icon {
+    opacity: 1;
   }
 
-  .disk-tag {
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: var(--bg-4);
-    color: var(--tx-4);
-    letter-spacing: 0.02em;
+  :global(.disk-tag) {
     margin-right: 6px;
-  }
-  .disk-tag[data-root="Ravan"] {
-    background: #3a2a2a;
-    color: #f2a3a3;
-  }
-  .disk-tag[data-root="Oni"] {
-    background: #2a323a;
-    color: #a3c8f2;
-  }
-  .disk-tag[data-root="Kumbhakarn"] {
-    background: #2a3a2d;
-    color: #a3f2b8;
   }
 
   .form {
@@ -151,7 +162,9 @@
     background: var(--bg-2);
     border: 1px solid var(--red);
     color: var(--tx-5);
-    padding: 3px 10px;
-    border-radius: 3px;
+    padding: 5px 12px;
+    border-radius: var(--r-md);
+    font-family: inherit;
+    box-shadow: 0 0 0 4px var(--red-soft);
   }
 </style>

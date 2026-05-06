@@ -82,22 +82,32 @@
 
 <style>
   .pill {
-    bottom: 20px;
+    bottom: 22px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 10;
-    background: linear-gradient(to right, #fff6 var(--pct), #0008 var(--pct));
-    backdrop-filter: blur(8px);
-    color: #fffd;
+    background: linear-gradient(
+      to right,
+      rgba(255, 255, 255, 0.45) var(--pct),
+      rgba(7, 6, 10, 0.55) var(--pct)
+    );
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid var(--glass-bd);
+    color: #fff;
+    font-family: var(--font-display);
     font-variant-numeric: tabular-nums;
-    font-size: 15px;
-    padding: 8px 18px;
+    font-weight: 500;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+    padding: 9px 20px;
     white-space: nowrap;
     pointer-events: auto;
-    transition: opacity 0.3s;
+    box-shadow: var(--sh-2);
+    transition: opacity 0.3s var(--ease-out);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     cursor: ns-resize;
     overflow: hidden;
     perspective: 800px;

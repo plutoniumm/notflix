@@ -4,12 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,7 +33,8 @@ func ProcessAll(lib *library.Library) {
 
 	jobs.WaitAria2()
 	ConvertAll(lib)
-	library.CleanAll(lib.Roots)
+	library.CleanAll(lib.Roots, jobs.Aria2ActivePaths())
+	library.ScanCorrupt(lib)
 	RegenerateThumbnails(lib, 0)
 	log.Println("[ProcessAll] done")
 }
@@ -56,7 +53,7 @@ func ConvertAll(lib *library.Library) {
 		wg.Add(1)
 		go func(root string) {
 			defer wg.Done()
-			convertRoot(root)
+			convertRoot(root, jobs.NewPool(3))
 		}(root)
 	}
 
@@ -72,8 +69,7 @@ func freeBytes(dir string) int64 {
 	return int64(st.Bavail) * int64(st.Bsize)
 }
 
-func convertRoot(root string) {
-	pool := jobs.NewPool(3)
+func convertRoot(root string, pool *jobs.Pool) {
 	var wg sync.WaitGroup
 	downloading := jobs.Aria2ActivePaths()
 	var diskFull atomic.Bool
@@ -88,13 +84,24 @@ func convertRoot(root string) {
 			return filepath.SkipAll
 		}
 
+		name := d.Name()
+		if strings.HasSuffix(name, ".audio.tmp") || strings.HasSuffix(name, ".audio.tmp.mp4") {
+			if err := os.Remove(path); err == nil {
+				log.Printf("[convert] removed stale temp: %s", name)
+			}
+			return nil
+		}
+
 		ext := strings.ToLower(filepath.Ext(d.Name()))
+		isMP4 := ext == ".mp4"
 		switch ext {
 		case ".mp4":
-			return nil
 		case ".mkv", ".mov", ".webm", ".avi", ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp":
-
 		default:
+			return nil
+		}
+
+		if isMP4 && !audioNeedsTranscode(path) {
 			return nil
 		}
 
@@ -122,14 +129,20 @@ func convertRoot(root string) {
 		pool.Acquire()
 		wg.Add(1)
 
-		go func(p string) {
+		go func(p string, audioOnly bool) {
 			defer wg.Done()
 			defer pool.Release()
 
-			if err := toMP4(p); err == errNoSpace {
+			var err error
+			if audioOnly {
+				err = remuxAudio(p)
+			} else {
+				err = toMP4(p)
+			}
+			if err == errNoSpace {
 				diskFull.Store(true)
 			}
-		}(path)
+		}(path, isMP4)
 
 		return nil
 	})
@@ -172,31 +185,6 @@ func toMP4(srcPath string) error {
 	return nil
 }
 
-var timeRe = regexp.MustCompile(`time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
-
-type progressWriter struct {
-	name        string
-	durationSec float64
-	buf         strings.Builder
-}
-
-func (pw *progressWriter) Write(p []byte) (int, error) {
-	s := string(p)
-	pw.buf.WriteString(s)
-	if pw.durationSec > 0 {
-		if m := timeRe.FindStringSubmatch(s); m != nil {
-			h, _ := strconv.Atoi(m[1])
-			min, _ := strconv.Atoi(m[2])
-			sec, _ := strconv.Atoi(m[3])
-			cs, _ := strconv.Atoi(m[4])
-			t := float64(h*3600+min*60+sec) + float64(cs)/100
-			pct := math.Min(t/pw.durationSec*100, 99)
-			progress.Update(pw.name, pct)
-		}
-	}
-	return len(p), nil
-}
-
 func duration(path string) float64 {
 	f, err := library.Prober.Format(context.Background(), path)
 	if err != nil {
@@ -224,24 +212,86 @@ func codecs(videoPath string) (videoCodec string, audioCodecs []string) {
 	return
 }
 
+func audioOK(codec string) bool {
+	switch strings.ToLower(codec) {
+	case "aac", "mp3":
+		return true
+	}
+	return false
+}
+
 func mp4AudioOK(codecs []string) bool {
-	ok := map[string]bool{"aac": true, "mp3": true, "ac3": true}
 	for _, c := range codecs {
-		if !ok[strings.ToLower(c)] {
+		if !audioOK(c) {
 			return false
 		}
 	}
 	return len(codecs) > 0
 }
 
+func audioNeedsTranscode(path string) bool {
+	streams, err := library.Prober.Streams(context.Background(), path)
+	if err != nil {
+		return false
+	}
+	for _, s := range streams {
+		if s.CodecType == "audio" && !audioOK(s.CodecName) {
+			return true
+		}
+	}
+	return false
+}
+
+func remuxAudio(srcPath string) error {
+	name := filepath.Base(srcPath)
+
+	progress.Update(name, 0)
+	defer progress.Finish(name)
+
+	dur := duration(srcPath)
+	if dur <= 0 {
+		log.Printf("[convert] skipping unreadable/corrupt file: %s", name)
+		return nil
+	}
+
+	tmp := srcPath + ".audio.tmp"
+
+	vc, _ := codecs(srcPath)
+	args := []string{
+		"-i", srcPath,
+		"-map", "0:v:0", "-map", "0:a", "-map_chapters", "-1",
+		"-c:v", "copy",
+	}
+	if vc == "hevc" {
+		args = append(args, "-tag:v", "hvc1")
+	}
+	args = append(args,
+		"-c:a", "aac", "-b:a", "192k",
+		"-movflags", "+faststart", "-f", "mp4", tmp,
+	)
+
+	stderr, err := library.FFRun{
+		Args:     args,
+		Duration: dur,
+		OnPct:    func(p float64) { progress.Update(name, p) },
+	}.Run()
+	if err != nil {
+		log.Printf("ffmpeg audio remux error for %s:\n%s", name, stderr)
+		os.Remove(tmp)
+		if strings.Contains(stderr, "No space left on device") {
+			return errNoSpace
+		}
+		return err
+	}
+
+	return os.Rename(tmp, srcPath)
+}
+
 func remux(src, dst string, durationSec float64, name string) error {
 	tmp := dst + ".tmp"
 
 	vc, ac := codecs(src)
-	args := []string{
-		"-nostdin", "-v", "error", "-i", src,
-		"-map", "0:v:0", "-map", "0:a",
-	}
+	args := []string{"-i", src, "-map", "0:v:0", "-map", "0:a"}
 
 	switch vc {
 	case "h264":
@@ -260,18 +310,12 @@ func remux(src, dst string, durationSec float64, name string) error {
 
 	args = append(args, "-movflags", "+faststart", "-f", "mp4", tmp)
 
-	pw := &progressWriter{name: name, durationSec: durationSec}
-	cmd := exec.Command("ffmpeg", args...)
-	cmd.Stderr = pw
-
-	if devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0); err == nil {
-		cmd.Stdin = devNull
-		cmd.Stdout = devNull
-		defer devNull.Close()
-	}
-
-	if err := cmd.Run(); err != nil {
-		stderr := pw.buf.String()
+	stderr, err := library.FFRun{
+		Args:     args,
+		Duration: durationSec,
+		OnPct:    func(p float64) { progress.Update(name, p) },
+	}.Run()
+	if err != nil {
 		log.Printf("ffmpeg error for %s:\n%s", name, stderr)
 		os.Remove(tmp)
 		if strings.Contains(stderr, "No space left on device") {
@@ -312,13 +356,10 @@ func extractAllSubs(srcPath, base string) {
 			continue
 		}
 
-		cmd := exec.Command("ffmpeg", "-y", "-v", "quiet", "-i", srcPath,
+		if stderr, err := library.FF("-y", "-i", srcPath,
 			"-map", fmt.Sprintf("0:%d", s.Index),
-			"-c:s", "webvtt",
-			outPath,
-		)
-		if err := cmd.Run(); err != nil {
-			log.Printf("[convert] sub extraction failed (stream %d, %s): %v", s.Index, lang, err)
+			"-c:s", "webvtt", outPath); err != nil {
+			log.Printf("[convert] sub extraction failed (stream %d, %s): %v %s", s.Index, lang, err, stderr)
 			os.Remove(outPath)
 		} else {
 			log.Printf("[convert] extracted sub: %s", filepath.Base(outPath))

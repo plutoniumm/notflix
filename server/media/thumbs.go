@@ -6,7 +6,6 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -28,19 +27,9 @@ func makeThumb(src, dst string) error {
 	}
 
 	ts := fmt.Sprintf("%.2f", dur/2+rand.Float64()*10-5)
-	cmd := exec.Command("ffmpeg", "-y", "-v", "error", "-ss", ts, "-i", src, "-vframes", "1", dst)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			return fmt.Errorf("ffmpeg: %w", err)
-		}
-
-		return fmt.Errorf("ffmpeg: %s", msg)
+	if stderr, err := library.FF("-y", "-ss", ts, "-i", src, "-vframes", "1", dst); err != nil {
+		return library.FFErr(stderr, err)
 	}
-
 	return nil
 }
 

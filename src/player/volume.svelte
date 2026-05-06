@@ -10,7 +10,7 @@
   </svg>
 
   <div class="track rx2 flow-h p-rel">
-    <div class="fill p-fix rx2" style="height:{level * 100}%"></div>
+    <div class="fill p-abs rx2" style="height:{level * 100}%"></div>
   </div>
 </div>
 
