@@ -1,9 +1,8 @@
 package media
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
-	"os/exec"
 
 	"github.com/gin-gonic/gin"
 
@@ -30,40 +29,21 @@ func AudioInfo(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	cmd := exec.Command("ffprobe",
-		"-v", "error",
-		"-select_streams", "a",
-		"-show_entries", "stream=codec_name,channels:stream_tags=language",
-		"-of", "json",
-		path,
-	)
-	out, _ := cmd.Output()
-
-	var tracks []AudioTrack
-	var probe struct {
-		Streams []struct {
-			CodecName string            `json:"codec_name"`
-			Channels  int               `json:"channels"`
-			Tags      map[string]string `json:"tags"`
-		} `json:"streams"`
-	}
-	if json.Unmarshal(out, &probe) == nil {
-		for i, s := range probe.Streams {
-			lang := ""
-			if s.Tags != nil {
-				lang = s.Tags["language"]
-			}
-			tracks = append(tracks, AudioTrack{
-				Track:    i,
-				Language: lang,
-				Codec:    s.CodecName,
-				Channels: s.Channels,
-			})
+	tracks := []AudioTrack{}
+	streams, _ := library.Prober.Streams(context.Background(), path)
+	i := 0
+	for _, s := range streams {
+		if s.CodecType != "audio" {
+			continue
 		}
+		tracks = append(tracks, AudioTrack{
+			Track:    i,
+			Language: s.Tags["language"],
+			Codec:    s.CodecName,
+			Channels: s.Channels,
+		})
+		i++
 	}
 
-	if tracks == nil {
-		tracks = []AudioTrack{}
-	}
 	c.JSON(http.StatusOK, tracks)
 }

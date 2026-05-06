@@ -2,49 +2,48 @@
   import Down from "./Download.svelte";
   import SubsDropdown from "./Subs.svelte";
   import AudioPicker from "./AudioPicker.svelte";
+  import type { PlayerView } from "./view.svelte";
 
   let {
+    view,
     title,
-    hidden,
     embed,
-    videoKey,
     videoParam,
     runWhisper,
-    subsOpen,
-    subsInfo,
-    onlineResults,
-    searching,
-    activeSub,
     onToggleSubs,
     onSelectLocal,
     onSelectEmbedded,
     onSelectOnline,
     onSubsOff,
-    onCloseSubs,
-    audioTracks,
-    audioTrack,
-    audioOpen,
-    onToggleAudio,
     onSelectAudio,
-    onCloseAudio,
-    hasSubs,
-    whisperActive,
-  }: any = $props();
+  }: {
+    view: PlayerView;
+    title: string;
+    embed: boolean;
+    videoParam: string;
+    runWhisper: () => void;
+    onToggleSubs: () => void;
+    onSelectLocal: (file: string, label: string) => void;
+    onSelectEmbedded: (idx: number, lang: string) => Promise<void>;
+    onSelectOnline: (pick: any) => Promise<void>;
+    onSubsOff: () => void;
+    onSelectAudio: (track: number) => void;
+  } = $props();
 </script>
 
 {#if !embed}
-  <div class="bar p-fix p20 f al-ct g10" class:hidden>
+  <div class="bar p-fix p20 f al-ct g10" class:hidden={view.state.hideUI}>
     <a href="/" class="back fs sh-0">←</a>
     <div class="title fw5 trunc">{title}</div>
 
     <div class="f g5 sh-0 al-ct">
-      {#if audioTracks?.length > 1}
+      {#if view.audio.tracks.length > 1}
         <div class="btn-wrap p-rel">
           <!-- svelte-ignore a11y_consider_explicit_label -->
           <button
             class="ibtn cc rx5 ptr p5"
-            class:active={audioOpen}
-            onclick={onToggleAudio}
+            class:active={view.audio.open}
+            onclick={() => view.audio.toggle()}
           >
             <svg
               width="18"
@@ -61,12 +60,12 @@
               <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
             </svg>
           </button>
-          {#if audioOpen}
+          {#if view.audio.open}
             <AudioPicker
-              tracks={audioTracks}
-              activeTrack={audioTrack}
+              tracks={view.audio.tracks}
+              activeTrack={view.audio.active}
               onSelect={onSelectAudio}
-              onClose={onCloseAudio}
+              onClose={() => view.audio.close()}
             />
           {/if}
         </div>
@@ -76,7 +75,7 @@
         <!-- svelte-ignore a11y_consider_explicit_label -->
         <button
           class="ibtn cc rx5 ptr p5"
-          class:active={subsOpen || hasSubs}
+          class:active={view.subs.open || view.state.hasSubs}
           onclick={onToggleSubs}
         >
           <svg width="20" height="15" viewBox="0 0 20 15" fill="none">
@@ -108,17 +107,17 @@
           </svg>
         </button>
 
-        {#if subsOpen}
+        {#if view.subs.open}
           <SubsDropdown
-            info={subsInfo}
-            {onlineResults}
-            {searching}
-            {activeSub}
+            info={view.subs.info}
+            onlineResults={view.subs.onlineResults}
+            searching={view.subs.searching}
+            activeSub={view.subs.activeSub}
             {onSelectLocal}
             {onSelectEmbedded}
             {onSelectOnline}
             {onSubsOff}
-            onClose={onCloseSubs}
+            onClose={() => view.subs.close()}
           />
         {/if}
       </div>
@@ -126,7 +125,7 @@
       <!-- svelte-ignore a11y_consider_explicit_label -->
       <button
         class="ibtn cc rx5 ptr p5"
-        class:pulse={whisperActive}
+        class:pulse={!!view.state.wMsg}
         onclick={runWhisper}
       >
         <svg
@@ -143,8 +142,8 @@
         </svg>
       </button>
 
-      {#if videoKey}
-        <Down {videoParam} {title} key={videoKey} />
+      {#if view.state.videoKey}
+        <Down {videoParam} {title} key={view.state.videoKey} />
       {/if}
     </div>
   </div>
@@ -156,9 +155,16 @@
     left: 0;
     right: 0;
     z-index: 10;
-    background: linear-gradient(to bottom, #000c 0%, transparent 100%);
-    transition: opacity 0.3s;
-    animation: slide-down 0.3s ease;
+    background: linear-gradient(
+      to bottom,
+      rgba(7, 6, 10, 0.78) 0%,
+      rgba(7, 6, 10, 0.4) 50%,
+      transparent 100%
+    );
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    transition: opacity 0.3s var(--ease-out);
+    animation: slide-down 0.34s var(--ease-out);
   }
   .bar.hidden {
     opacity: 0;
@@ -168,14 +174,26 @@
   .back {
     color: var(--tx-4);
     white-space: nowrap;
-    transition: color 0.15s;
+    font-size: 22px;
+    padding: 4px 10px;
+    border-radius: var(--r-md);
+    transition: color 0.18s var(--ease-out), background 0.18s var(--ease-out),
+      transform 0.16s var(--ease-snap);
   }
   .back:hover {
     color: var(--tx-5);
+    background: var(--glass);
+  }
+  .back:active {
+    transform: scale(0.92);
   }
 
   .title {
     flex: 1;
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 16px;
+    letter-spacing: -0.012em;
   }
 
   .btn-wrap {
@@ -184,18 +202,23 @@
   }
 
   .ibtn {
-    color: var(--tx-4);
+    color: var(--tx-3);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-md) !important;
     transition:
-      color 0.15s,
-      background 0.15s,
-      transform 0.12s;
-    min-width: 36px;
-    min-height: 36px;
+      color 0.18s var(--ease-out),
+      background 0.18s var(--ease-out),
+      border-color 0.18s var(--ease-out),
+      transform 0.16s var(--ease-snap);
+    min-width: 38px;
+    min-height: 38px;
   }
   @media (hover: hover) {
     .ibtn:hover {
       color: var(--tx-5);
-      background: #fff2;
+      background: var(--glass);
+      border-color: var(--glass-bd);
     }
   }
   @media (hover: none) {
@@ -206,12 +229,14 @@
   }
   .ibtn:active {
     color: var(--tx-5);
-    background: #fff3;
-    transform: scale(0.88);
+    background: var(--glass-2);
+    transform: scale(0.9);
   }
   .ibtn.active {
     color: var(--tx-5);
-    background: #fff2;
+    background: var(--glass-2);
+    border-color: var(--glass-bd);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
   }
 
   .ibtn.pulse {
@@ -221,10 +246,11 @@
   @keyframes pulse {
     0%,
     100% {
-      color: var(--tx-4);
+      color: var(--tx-3);
     }
     50% {
       color: var(--red);
+      filter: drop-shadow(0 0 6px var(--red-glow));
     }
   }
 </style>

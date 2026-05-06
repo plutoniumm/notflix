@@ -13,4 +13,13 @@ export const kv = {
   set: (key: string, value: any) => POST("/kv/set", { key, value }),
 
   setBulk: (items: { key: string; value: any }[]) => POST("/kv/set", items),
+
+  // Fire-and-forget beacon for use in beforeunload handlers — sync over the
+  // wire with no response, no completion event.
+  beacon: (key: string, value: any) => {
+    navigator.sendBeacon(
+      "/kv/set",
+      new Blob([JSON.stringify({ key, value })], { type: "application/json" }),
+    );
+  },
 };

@@ -92,10 +92,9 @@ func extractToWAV(src string) (string, error) {
 	tmpPath := tmp.Name()
 
 	log.Printf("[whisper] extracting audio: %s → %s", src, tmpPath)
-	cmd := exec.Command("ffmpeg", "-y", "-i", src, "-ar", "16000", "-ac", "1", tmpPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if stderr, err := library.FF("-y", "-i", src, "-ar", "16000", "-ac", "1", tmpPath); err != nil {
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("ffmpeg: %v — %s", err, string(out))
+		return "", library.FFErr(stderr, err)
 	}
 
 	if fi, err := os.Stat(tmpPath); err == nil {

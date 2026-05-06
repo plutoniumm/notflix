@@ -2,6 +2,7 @@
   import Home from "./library/Home.svelte";
   import Player from "./player/Player.svelte";
   import Manage from "./library/Manage.svelte";
+  import Toast from "./core/ToastHost.svelte";
 
   const loc = window.location;
 
@@ -16,6 +17,8 @@
 {:else}
   <Home />
 {/if}
+
+<Toast />
 
 <style lang="scss">
 </style>

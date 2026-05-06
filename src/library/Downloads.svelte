@@ -15,8 +15,8 @@
 </script>
 
 {#if jobs.length > 0}
-  <section class="rx5 flow-h">
-    <h3 class="m0 p10 fs-sm fw6 bg-3">
+  <section class="surface flow-h">
+    <h3 class="m0 p10 fs-sm fw6">
       Downloading ({jobs.length})
     </h3>
 
@@ -25,9 +25,9 @@
         <div class="info">
           <span class="name d-b fs-sm tx-4 flow-h">{j.name || j.gid}</span>
           <div class="f al-ct g10">
-            <div class="bar rx2">
+            <div class="bar bar-track">
               <div
-                class="fill h-100 rx2"
+                class="bar-fill"
                 class:active={j.status !== "paused"}
                 style="width:{j.percent.toFixed(1)}%"
               ></div>
@@ -69,54 +69,40 @@
 
 <style>
   section {
-    margin-bottom: 20px;
-    border: 1px solid var(--bg-3);
+    margin-bottom: 24px;
+  }
+  section h3 {
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--tx-4);
+    border-bottom: 1px solid var(--glass-bd);
   }
   .item {
-    padding: 10px 14px;
-    border-top: 1px solid var(--bg-3);
+    padding: 12px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
   }
-  .info {
-    flex: 1;
-    min-width: 0;
-  }
+  .item:first-child { border-top: none; }
+  .info { flex: 1; min-width: 0; }
   .name {
     white-space: nowrap;
     text-overflow: ellipsis;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    font-weight: 500;
   }
-  .item .btn-icon {
-    opacity: 1;
-  }
-  .bar {
-    flex: 1;
-    height: 5px;
-    background: var(--bg-4);
-    overflow: hidden;
-    border-radius: 3px;
-    box-shadow: inset 0 1px 1px #0005;
-  }
-  @media (max-width: 640px) {
-    .item {
-      padding: 10px 8px;
-    }
-    .name {
-      font-size: 12px;
-    }
-  }
-  .fill {
-    background: linear-gradient(90deg, #e11, #f63);
-    transition: width 0.5s;
-  }
-  .fill.active {
+  .item :global(.btn-icon) { opacity: 1; }
+  .bar { flex: 1; height: 6px; }
+  .bar-fill.active {
     background-image: linear-gradient(
       45deg,
-      #e11 0 25%,
-      #f63 25% 50%,
-      #e11 50% 75%,
-      #f63 75% 100%
+      var(--red) 0 25%,
+      #ff7849 25% 50%,
+      var(--red) 50% 75%,
+      #ff7849 75% 100%
     );
     background-size: 28px 28px;
     animation: stripe-shift 0.8s linear infinite;
+  }
+  @media (max-width: 640px) {
+    .item { padding: 10px 8px; }
+    .name { font-size: 12px; }
   }
 </style>

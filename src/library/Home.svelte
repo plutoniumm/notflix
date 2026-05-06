@@ -1,134 +1,16 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount } from "svelte";
   import { clean, vidURL } from "../core/video";
-  import { api } from "../core/api";
-  import { kv } from "../core/kv";
-  import { Down } from "./dl";
+  import { toast } from "../core/toast.svelte";
+  import { HomeData } from "./homeData.svelte";
+  import Continues from "./Continues.svelte";
 
-  let data: VideoData = $state({});
+  const home = new HomeData();
   let search = $state("");
-  let loading = $state(true);
-  let offline = $state(false);
   let swUpdate = $state<ServiceWorkerRegistration | null>(null);
-  let downloadedSet = $state(new Set<string>());
-  let inProg: DownloadRecord[] = $state([]);
-  let continues: {
-    dir: string;
-    name: string;
-    key: string;
-    t: number;
-  }[] = $state([]);
-
-  async function loadState(d: VideoData) {
-    const allParams: {
-      dir: string;
-      name: string;
-      key: string;
-      param: string;
-    }[] = [];
-
-    for (const [dir, files] of Object.entries(d)) {
-      for (const f of files ?? []) {
-        const param = dir === "." ? f.name : `${dir}/${f.name}`;
-        allParams.push({
-          dir,
-          name: f.name,
-          key: f.key,
-          param,
-        });
-      }
-    }
-    if (!allParams.length) return;
-
-    const keys = allParams.map((v) => "watched:" + v.param);
-    const store: Record<string, { t: number; at: number } | null> =
-      (await kv.get(keys)) ?? {};
-
-    continues = allParams
-      .filter((v) => {
-        const val = store[`watched:${v.param}`];
-        return val && val.t > 60;
-      })
-      .sort((a, b) => {
-        const at = store[`watched:${a.param}`]?.at ?? 0;
-        const bt = store[`watched:${b.param}`]?.at ?? 0;
-        return bt - at;
-      })
-      .slice(0, 20)
-      .map((v) => ({
-        dir: v.dir,
-        name: v.name,
-        key: v.key,
-        t: store[`watched:${v.param}`]!.t,
-      }));
-  }
-
-  function removeContinue(e: Event, dir: string, name: string) {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const param = dir === "." ? name : `${dir}/${name}`;
-    kv.set(`watched:${param}`, null);
-
-    continues = continues.filter((c) => !(c.dir === dir && c.name === name));
-  }
-
-  async function cancelDownload(videoParam: string) {
-    await Down.del(videoParam);
-
-    inProg = inProg.filter((r) => r.videoParam !== videoParam);
-  }
-
-  function buildOfflineData(records: DownloadRecord[]): VideoData {
-    const out: VideoData = {};
-    for (const r of records) {
-      if (r.status !== "done") continue;
-      const slash = r.videoParam.lastIndexOf("/");
-      const dir = slash >= 0 ? r.videoParam.slice(0, slash) : ".";
-      const name = slash >= 0 ? r.videoParam.slice(slash + 1) : r.videoParam;
-      if (!out[dir]) out[dir] = [];
-      out[dir].push({ name, key: r.key });
-    }
-    return out;
-  }
 
   onMount(() => {
-    const recordsP = Down.all();
-
-    (async () => {
-      const d = await api.videoList();
-      if (d && Object.keys(d).length) {
-        data = d;
-        loadState(d);
-      } else {
-        offline = true;
-        data = buildOfflineData(await recordsP);
-      }
-      loading = false;
-    })();
-
-    recordsP.then((records) => {
-      downloadedSet = new Set(
-        records.filter((r) => r.status === "done").map((r) => r.videoParam),
-      );
-      inProg = records.filter((r) => r.status === "downloading");
-    });
-
-    Down.recover();
-
-    const unsubSW = Down.on((videoParam, record) => {
-      const next = new Set(downloadedSet);
-      if (record?.status === "done") {
-        next.add(videoParam);
-        inProg = inProg.filter((r) => r.videoParam !== videoParam);
-      } else if (record?.status === "downloading") {
-        inProg = [...inProg.filter((r) => r.videoParam !== videoParam), record];
-      } else {
-        next.delete(videoParam);
-        inProg = inProg.filter((r) => r.videoParam !== videoParam);
-      }
-      downloadedSet = next;
-    });
+    const unsubSW = home.start();
 
     const onSwUpdate = (e: Event) => {
       swUpdate = (e as CustomEvent).detail;
@@ -141,10 +23,6 @@
     };
   });
 
-  let rows = $derived(
-    Object.entries(data).filter(([, files]) => files?.length),
-  );
-
   let debouncedSearch = $state("");
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
@@ -155,20 +33,18 @@
     }, 150);
   });
 
-  let results = $derived.by(() => {
-    const q = debouncedSearch.trim().toLowerCase();
-    if (!q) return null;
+  let results = $derived(home.filter(debouncedSearch));
 
-    return Object.entries(data).flatMap(([dir, files]) =>
-      (files || [])
-        .filter((f) => {
-          const name = f.name.toLowerCase();
+  function removeContinue(e: Event, dir: string, name: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    home.removeContinue(dir, name);
+  }
 
-          return clean(name).includes(q) || name.includes(q);
-        })
-        .map((f) => ({ dir, ...f })),
-    );
-  });
+  async function cancelDownload(videoParam: string) {
+    const err = await home.cancelDownload(videoParam);
+    if (err) toast.err(`Cancel failed: ${err}`);
+  }
 
   function applyUpdate() {
     swUpdate?.waiting?.postMessage({ type: "SKIP_WAITING" });
@@ -180,14 +56,14 @@
 </script>
 
 <div style="min-height: 100vh;">
-  <header class="f al-ct g20 p-stx">
+  <header class="glass-header f al-ct g20">
     <a href="/">
       <img src="/assets/tight.svg" alt="Notflix" height="50" />
     </a>
 
     <div class="search-wrap">
       <input
-        class="rx5 w-100"
+        class="field w-100"
         type="search"
         placeholder="Search…"
         bind:value={search}
@@ -196,17 +72,17 @@
       />
     </div>
 
-    <a href="/manage" class="manage rx5">Manage</a>
+    <a href="/manage" class="manage glass glass-hover">Manage</a>
 
     {#if swUpdate}
-      <button class="update-btn rx5 ptr fs-xs fw5" onclick={applyUpdate}>
+      <button class="update-btn btn-action ptr fs-xs" onclick={applyUpdate}>
         Update available — tap to reload
       </button>
     {/if}
   </header>
 
   <main>
-    {#if loading}
+    {#if home.loading}
       <div class="skel-grid">
         {#each Array(14) as _, i}
           <div class="skel-card" style="--i:{i}"></div>
@@ -229,7 +105,7 @@
             item.dir === "." ? item.name : `${item.dir}/${item.name}`}
           <a
             href={vidURL(item.dir, item.name)}
-            class="card ptr rx5 flow-h p-rel"
+            class="media-card ptr flow-h p-rel"
             style="--i: {idx}"
           >
             <div class="thumb p-rel flow-h">
@@ -245,7 +121,7 @@
                 }}
               />
               <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
-              {#if downloadedSet.has(vidParam)}
+              {#if home.downloadedSet.has(vidParam)}
                 <div class="dot p-abs"></div>
               {/if}
             </div>
@@ -266,87 +142,27 @@
         {/if}
       </div>
     {:else}
-      {#if offline}
+      {#if home.offline}
         <div class="offline-banner f al-ct g10">
           <span class="offline-dot"></span>
           Offline — showing downloaded videos
         </div>
       {/if}
-      {#if continues.length > 0}
-        <section class="row">
-          <h2>Continue Watching</h2>
-          <div class="row-wrap f al-ct p-rel">
-            <button
-              class="arrow cc o-0 h-100 p0 left"
-              onclick={(e) => {
-                const el: any = e.currentTarget.nextElementSibling;
-                scrollRow(el, -1);
-              }}>‹</button
-            >
-            <div class="cards f flow-x-s g5">
-              {#each continues as item, idx}
-                {@const vidParam =
-                  item.dir === "." ? item.name : `${item.dir}/${item.name}`}
-                <a
-                  href={vidURL(item.dir, item.name)}
-                  class="card ptr rx5 flow-h p-rel"
-                  style="--i: {idx}"
-                >
-                  <div class="thumb p-rel flow-h">
-                    <img
-                      class="h-100 w-100 d-b"
-                      src="/images/{item.key}.jpg"
-                      alt=""
-                      loading="lazy"
-                      onerror={(e) => {
-                        const i = e.currentTarget as HTMLImageElement;
-                        i.src = "/assets/tight.svg";
-                        i.onerror = null;
-                      }}
-                    />
-                    <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
-                    {#if downloadedSet.has(vidParam)}
-                      <div class="dot p-abs"></div>
-                    {/if}
-                    <!-- svelte-ignore a11y_consider_explicit_label -->
-                    <button
-                      class="cw-remove p-abs cc o-0 ptr"
-                      onclick={(e) => removeContinue(e, item.dir, item.name)}
-                      >✕</button
-                    >
-                    <div class="cw-bar p-abs"></div>
-                  </div>
-                  <div class="card-name">
-                    {clean(item.name)}
-                  </div>
-                  <div class="cw-time fs-xs">
-                    {Math.floor(item.t / 3600) > 0
-                      ? `${Math.floor(item.t / 3600)}h ${Math.floor((item.t % 3600) / 60)}m`
-                      : `${Math.floor(item.t / 60)}m`}
-                  </div>
-                </a>
-              {/each}
-            </div>
-            <button
-              class="arrow cc o-0 h-100 p0 right"
-              onclick={(e) => {
-                const el: any = e.currentTarget.previousElementSibling;
-                scrollRow(el, 1);
-              }}>›</button
-            >
-          </div>
-        </section>
-      {/if}
-      {#each rows as [dir, files]}
+      <Continues
+        items={home.continues}
+        downloadedSet={home.downloadedSet}
+        onRemove={removeContinue}
+      />
+      {#each home.rows as [dir, files]}
         {#if files?.length}
           <section class="row">
             <h2>
               {dir === "." ? "Movies" : clean(dir) || dir}
             </h2>
 
-            <div class="row-wrap f al-ct p-rel">
+            <div class="scroll-row f al-ct p-rel">
               <button
-                class="arrow cc o-0 h-100 p0 left"
+                class="scroll-arrow cc h-100 p0 left"
                 onclick={(e) => {
                   const el: any = e.currentTarget.nextElementSibling;
                   scrollRow(el, -1);
@@ -358,7 +174,7 @@
                   {@const vidParam = dir === "." ? f.name : `${dir}/${f.name}`}
                   <a
                     href={vidURL(dir, f.name)}
-                    class="card ptr rx5 flow-h p-rel"
+                    class="media-card ptr flow-h p-rel"
                     style="--i: {idx}"
                   >
                     <div class="thumb p-rel flow-h">
@@ -374,7 +190,7 @@
                         }}
                       />
                       <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
-                      {#if downloadedSet.has(vidParam)}
+                      {#if home.downloadedSet.has(vidParam)}
                         <div class="dot p-abs"></div>
                       {/if}
                     </div>
@@ -387,7 +203,7 @@
               </div>
 
               <button
-                class="arrow cc o-0 h-100 p0 right"
+                class="scroll-arrow cc h-100 p0 right"
                 onclick={(e) => {
                   const el: any = e.currentTarget.previousElementSibling;
                   scrollRow(el, 1);
@@ -400,13 +216,13 @@
     {/if}
   </main>
 
-  {#if inProg.length > 0}
-    <div class="panel p-fix rx10 flow-h">
+  {#if home.inProg.length > 0}
+    <div class="panel glass-strong p-fix flow-h">
       <div class="header f al-ct j-bw">
         <span class="title fw6">Downloading</span>
-        <span class="count fs-xs fw7 cc rx20">{inProg.length}</span>
+        <span class="count fs-xs fw7 cc rx20">{home.inProg.length}</span>
       </div>
-      {#each inProg as dl (dl.videoParam)}
+      {#each home.inProg as dl (dl.videoParam)}
         <div class="item f al-ct g10">
           <div class="name fs-xs flow-h" style="flex:1">
             {clean(dl.title || dl.videoParam)}
@@ -424,121 +240,45 @@
 
 <style>
   header {
-    top: 0;
-    z-index: 100;
-    background: linear-gradient(to bottom, #000 80%, transparent);
-    padding: 18px 48px;
+    padding: 16px 48px;
   }
-  @media (max-width: 640px) {
-    header {
-      padding: 12px 16px;
-      gap: 10px;
-    }
-    header img {
-      height: 36px;
-    }
-    .grid {
-      padding: 0 16px;
-      gap: 6px;
-      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    }
-    .row h2 {
-      padding: 0 16px;
-      font-size: 15px;
-    }
-    .cards {
-      padding: 6px 16px 12px;
-    }
-    .card {
-      width: 140px;
-    }
-    .card:hover {
-      transform: none;
-      box-shadow: 0 6px 14px #000b;
-    }
-    .search-header {
-      padding: 16px 16px 12px;
-    }
-    main {
-      padding: 0 0 40px;
-    }
-    .manage {
-      padding: 4px 10px;
-      font-size: 12px;
-    }
-    .update-btn {
-      font-size: 11px;
-      padding: 4px 8px;
-    }
-  }
-
   .search-wrap {
     flex: 1;
-    max-width: 340px;
+    max-width: 380px;
   }
-
-  .search-wrap input {
-    background: #0008;
-    border: 1px solid var(--bg-5);
-    color: var(--tx-5);
-    padding: 8px 14px;
-    backdrop-filter: blur(6px);
-    transition:
-      border-color 0.15s,
-      box-shadow 0.2s,
-      background 0.2s;
-  }
-  .search-wrap input:focus {
-    outline: none;
-    border-color: var(--red);
-    background: #000c;
-    box-shadow: 0 0 0 2px #e112;
-  }
-  .search-wrap input::placeholder {
-    color: var(--tx-1);
-  }
-
-  .update-btn {
-    background: var(--red);
-    color: #fff;
-    border: none;
-    padding: 6px 14px;
-    white-space: nowrap;
-    animation: pulse-bg 2s ease infinite;
-  }
-
-  @keyframes pulse-bg {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.7;
-    }
-  }
-
   .manage {
     margin-left: auto;
     color: var(--tx-4);
-    padding: 6px 12px;
-    border: 1px solid var(--bg-5);
-    transition:
-      color 0.15s,
-      border-color 0.15s;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: var(--r-md);
   }
-  .manage:hover {
-    color: var(--tx-5);
-    border-color: var(--tx-2);
+
+  .update-btn {
+    padding: 7px 14px;
+    animation: pulse-bg 2s ease infinite;
+  }
+  @keyframes pulse-bg {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.85; }
   }
 
   main {
-    padding: 0 0 60px;
+    padding: 24px 0 60px;
+    position: relative;
+    z-index: 1;
   }
 
   .offline-banner {
-    padding: 10px 48px;
+    margin: 0 48px 16px;
+    padding: 10px 16px;
     color: var(--tx-3);
     font-size: 13px;
+    background: var(--glass);
+    border: 1px solid var(--glass-bd);
+    border-radius: var(--r-md);
+    backdrop-filter: blur(8px);
   }
   .offline-dot {
     width: 8px;
@@ -546,23 +286,19 @@
     border-radius: 50%;
     background: var(--red);
     flex-shrink: 0;
+    box-shadow: 0 0 8px var(--red-glow);
     animation: breathe 2s ease-in-out infinite;
   }
   .skel-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 10px;
+    gap: 12px;
     padding: 24px 48px;
   }
   .skel-card {
     aspect-ratio: 16 / 9;
-    border-radius: 5px;
-    background: linear-gradient(
-      90deg,
-      var(--bg-3) 0%,
-      var(--bg-4) 40%,
-      var(--bg-3) 80%
-    );
+    border-radius: var(--r-lg);
+    background: linear-gradient(90deg, var(--bg-3) 0%, var(--bg-4) 40%, var(--bg-3) 80%);
     background-size: 400px 100%;
     opacity: 0;
     animation:
@@ -574,87 +310,51 @@
   .search-header {
     padding: 24px 48px 16px;
     color: var(--tx-3);
+    font-size: 15px;
   }
   .search-header strong {
     color: var(--tx-5);
+    font-family: var(--font-display);
+    font-weight: 600;
   }
   .clear {
-    background: none;
-    border: 1px solid var(--bg-5);
-    color: var(--tx-2);
-    padding: 4px 10px;
+    background: var(--glass);
+    border: 1px solid var(--glass-bd);
+    color: var(--tx-3);
+    padding: 5px 11px;
+    border-radius: var(--r-md);
   }
   .clear:hover {
     color: var(--tx-5);
-    border-color: var(--tx-2);
+    background: var(--glass-2);
+    border-color: rgba(255, 255, 255, 0.16);
   }
 
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
     padding: 0 48px;
   }
-  .grid .card {
+  .grid :global(.media-card) {
     width: auto;
   }
   .no-results {
     grid-column: 1 / -1;
-    color: var(--tx-1);
-    padding: 40px 0;
+    color: var(--tx-2);
+    padding: 60px 0;
+    text-align: center;
+    font-family: var(--font-display);
+    font-size: 18px;
   }
 
   .row {
-    margin-bottom: 32px;
+    margin-bottom: 36px;
   }
   .row h2 {
     padding: 0 48px;
-    margin: 0 0 12px;
-    color: var(--tx-4);
-  }
-
-  .arrow {
-    position: absolute;
-    z-index: 10;
-    background: #000b;
-    color: var(--tx-5);
-    font-size: 2rem;
-    width: 44px;
-    transition:
-      opacity 0.2s,
-      background 0.2s,
-      transform 0.2s;
-  }
-  .arrow.left {
-    left: 0;
-  }
-  .arrow.right {
-    right: 0;
-  }
-  .arrow:active {
-    transform: scale(0.9);
-    background: #000e;
-  }
-  @media (hover: hover) {
-    .row-wrap:hover .arrow {
-      opacity: 1;
-    }
-    .arrow:hover {
-      background: #000e;
-    }
-    .arrow.left:hover {
-      transform: translateX(-2px);
-    }
-    .arrow.right:hover {
-      transform: translateX(2px);
-    }
-  }
-  @media (hover: none) {
-    .arrow {
-      opacity: 0.5;
-      font-size: 1.5rem;
-      width: 36px;
-    }
+    margin: 0 0 14px;
+    font-size: 22px;
   }
 
   .cards {
@@ -662,102 +362,19 @@
     scrollbar-width: none;
     animation-delay: calc(var(--i) * 50ms);
   }
-
-  .card {
-    flex-shrink: 0;
-    width: 200px;
-    transition:
-      transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.1),
-      box-shadow 0.25s ease;
-    z-index: 1;
-    animation: slide-up 0.3s ease both;
-  }
-  .card:hover {
-    transform: scale(1.06) translateY(-2px);
-    z-index: 10;
-    box-shadow:
-      0 10px 22px #000c,
-      0 0 0 1px #fff2;
-  }
-  .card:active {
-    transform: scale(1.03) translateY(-1px);
-    transition-duration: 0.1s;
-  }
-
-  .thumb {
-    aspect-ratio: 16/9 !important;
-    background: var(--bg-3);
-  }
-
-  .play-icon {
-    inset: 0;
-    background: #0006;
-    transition: opacity 0.2s;
-  }
-  .card:hover .play-icon {
-    opacity: 1;
-  }
-
-  .dot {
-    bottom: 6px;
-    right: 6px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--grn);
-    box-shadow: 0 0 4px #4d8a;
-  }
-
-  .cw-remove {
-    top: 4px;
-    right: 4px;
-    width: 22px;
-    height: 22px;
-    font-size: 11px;
-    background: #000b;
-    color: var(--tx-3);
-    border-radius: 4px;
-    border: none;
-    z-index: 2;
-    transition:
-      opacity 0.15s,
-      background 0.15s,
-      color 0.15s;
-  }
-  .card:hover .cw-remove {
-    opacity: 1;
-  }
-  .cw-remove:hover {
-    background: var(--red);
-    color: #fff;
-  }
-
-  .cw-bar {
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: var(--red);
-    opacity: 0.8;
-  }
-
-  .cw-time {
-    color: var(--tx-2);
-    padding: 2px 4px 4px;
-    background: var(--bg-3);
+  :global(.media-card) {
+    width: 220px;
   }
 
   .cancel-btn {
-    background: #fff1;
-    border: 1px solid #fff2;
+    background: var(--glass);
+    border: 1px solid var(--glass-bd);
     color: var(--tx-3);
     width: 22px;
     height: 22px;
     flex-shrink: 0;
     font-size: 11px;
-    transition:
-      background 0.15s,
-      color 0.15s;
+    border-radius: var(--r-sm);
   }
   .cancel-btn:hover {
     background: var(--red);
@@ -765,66 +382,91 @@
     border-color: var(--red);
   }
 
-  .card-name {
-    color: var(--tx-4);
-    padding: 6px 4px 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    background: var(--bg-3);
-  }
-
   .card-dir {
-    color: var(--tx-1);
-    padding: 0 4px 4px;
+    color: var(--tx-2);
+    padding: 0 10px 8px;
     background: var(--bg-3);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    border-radius: 0 0 var(--r-lg) var(--r-lg);
   }
 
   .panel {
     bottom: 24px;
     right: 24px;
     width: 320px;
-    background: var(--bg-3);
-    border: 1px solid var(--bg-4);
+    border-radius: var(--r-xl);
     z-index: 200;
-    box-shadow: 0 8px 32px #0009;
-    animation: slide-in-r 0.3s ease;
+    box-shadow: var(--sh-4);
+    animation: slide-in-r 0.36s var(--ease-out);
   }
-
   .header {
-    padding: 10px 14px;
-    background: var(--bg-3);
-    border-bottom: 1px solid var(--bg-4);
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid var(--glass-bd);
   }
-
   .title {
     color: var(--tx-4);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+    font-size: 11px;
   }
-
   .count {
-    background: var(--red);
+    background: linear-gradient(135deg, var(--red) 0%, #ff7849 100%);
     color: var(--tx-5);
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    box-shadow: 0 4px 12px -2px var(--red-glow);
   }
-
   .item {
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--bg-3);
+    padding: 11px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   }
   .item:last-child {
     border-bottom: none;
   }
-
   .name {
     color: var(--tx-4);
     white-space: nowrap;
     text-overflow: ellipsis;
     margin-bottom: 6px;
+  }
+
+  @media (max-width: 640px) {
+    header {
+      padding: 10px 16px;
+      gap: 10px;
+    }
+    header img {
+      height: 32px;
+    }
+    .grid {
+      padding: 0 16px;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    }
+    .row h2 {
+      padding: 0 16px;
+      font-size: 17px;
+    }
+    .cards {
+      padding: 6px 16px 12px;
+    }
+    .search-header {
+      padding: 16px 16px 12px;
+    }
+    main {
+      padding: 0 0 40px;
+    }
+    .manage {
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+    .update-btn {
+      font-size: 11px;
+      padding: 5px 10px;
+    }
   }
 </style>

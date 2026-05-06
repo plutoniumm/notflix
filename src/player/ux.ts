@@ -1,3 +1,18 @@
+import { toast } from "../core/toast.svelte";
+
+function safePlay(player: any) {
+  const p = player?.play();
+  if (p && typeof p.then === "function") {
+    p.catch((err: any) => {
+      if (err?.name === "NotAllowedError") {
+        toast.info("Tap the video to start playback");
+      } else if (err?.name !== "AbortError") {
+        toast.err(`Playback blocked: ${err?.message ?? err}`);
+      }
+    });
+  }
+}
+
 export function Touch(
   player: any,
   el: HTMLElement,
@@ -39,7 +54,7 @@ export function Touch(
         if (tapTimer) clearTimeout(tapTimer);
         tapTimer = setTimeout(() => {
           tapTimer = null;
-          player.paused() ? player.play() : player.pause();
+          player.paused() ? safePlay(player) : player.pause();
         }, 300);
       }
     }
@@ -95,7 +110,7 @@ export function Hotkeys(
       player.volume(Math.max(0, Math.round((player.volume() - 0.1) * 10) / 10));
     } else if (key === " ") {
       e.preventDefault();
-      player.paused() ? player.play() : player.pause();
+      player.paused() ? safePlay(player) : player.pause();
     } else if (lkey === "f") {
       document.fullscreenElement
         ? document.exitFullscreen()

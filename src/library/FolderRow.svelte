@@ -2,7 +2,7 @@
   import { clean } from "../core/video";
   import FileRow from "./FileRow.svelte";
 
-  type FileEntry = { name: string; root: string };
+  type FileEntry = { name: string; root: string; corrupt?: boolean };
 
   let {
     dir,
@@ -144,6 +144,7 @@
         {dir}
         f={f.name}
         root={uniformRoot ? null : f.root}
+        corrupt={f.corrupt}
         job={jobs.find((j) => j.name === f.name) ?? null}
         {editing}
         bind:val
@@ -158,16 +159,24 @@
 
 <style>
   .folder {
-    border: 1px solid var(--bg-3);
-    margin-bottom: 8px;
-    animation: slide-up 0.25s ease both;
+    border: 1px solid var(--glass-bd);
+    background: rgba(22, 19, 28, 0.5);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: var(--r-lg);
+    margin-bottom: 10px;
+    animation: slide-up 0.32s var(--ease-out) both;
     animation-delay: calc(var(--i) * 40ms);
     transition:
       opacity 0.2s,
-      border-color 0.2s;
+      border-color 0.2s,
+      box-shadow 0.25s var(--ease-out);
+  }
+  .folder[open] {
+    box-shadow: var(--sh-2);
   }
   .folder[open] > .folder-hd {
-    border-bottom: 1px solid var(--bg-4);
+    border-bottom: 1px solid var(--glass-bd);
   }
   .folder.is-hidden {
     opacity: 0.55;
@@ -182,24 +191,28 @@
   .folder.is-hidden .folder-hd {
     background: repeating-linear-gradient(
       -45deg,
-      var(--bg-3),
-      var(--bg-3) 8px,
-      var(--bg-2) 8px,
-      var(--bg-2) 16px
+      rgba(255, 255, 255, 0.04),
+      rgba(255, 255, 255, 0.04) 8px,
+      transparent 8px,
+      transparent 16px
     );
   }
 
   .folder-hd {
-    padding: 10px 14px;
-    background: var(--bg-3);
+    padding: 12px 16px;
+    background: transparent;
+    border-radius: var(--r-lg);
     user-select: none;
-    transition: background 0.15s;
+    transition: background 0.18s var(--ease-out);
+  }
+  .folder[open] > .folder-hd {
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
   }
   .folder-hd:hover {
-    background: var(--bg-4);
+    background: var(--glass);
   }
   .folder-hd:active {
-    background: var(--bg-5);
+    background: var(--glass-2);
   }
   @media (hover: hover) {
     .folder-hd:hover .btn-icon {
@@ -208,7 +221,7 @@
   }
   @media (max-width: 640px) {
     .folder-hd {
-      padding: 12px 10px;
+      padding: 12px 12px;
     }
   }
 
@@ -223,29 +236,8 @@
     height: 7px;
     border-radius: 50%;
     background: var(--red);
-    box-shadow: 0 0 4px var(--red);
+    box-shadow: 0 0 8px var(--red-glow);
     animation: breathe 1.4s ease-in-out infinite;
-  }
-
-  .disk-tag {
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: var(--bg-4);
-    color: var(--tx-4);
-    letter-spacing: 0.02em;
-    flex-shrink: 0;
-  }
-  .disk-tag[data-root="Ravan"] {
-    background: #3a2a2a;
-    color: #f2a3a3;
-  }
-  .disk-tag[data-root="Oni"] {
-    background: #2a323a;
-    color: #a3c8f2;
-  }
-  .disk-tag[data-root="Kumbhakarn"] {
-    background: #2a3a2d;
-    color: #a3f2b8;
   }
 
   .rename-form {
@@ -258,7 +250,9 @@
     background: var(--bg-2);
     border: 1px solid var(--red);
     color: var(--tx-5);
-    padding: 3px 10px;
-    border-radius: 3px;
+    padding: 5px 12px;
+    border-radius: var(--r-md);
+    font-family: inherit;
+    box-shadow: 0 0 0 4px var(--red-soft);
   }
 </style>

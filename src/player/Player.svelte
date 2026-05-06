@@ -5,9 +5,12 @@
 
   const Vhs = (videojs as any).Vhs;
   if (Vhs) {
-    Vhs.GOAL_BUFFER_LENGTH = 30;
-    Vhs.MAX_GOAL_BUFFER_LENGTH = 300;
+    Vhs.GOAL_BUFFER_LENGTH = 60;
+    Vhs.MAX_GOAL_BUFFER_LENGTH = 600;
     Vhs.GOAL_BUFFER_LENGTH_RATE = 3;
+    // Bias first-segment ABR to a high rung on a fat pipe. Without this VHS
+    // starts at the lowest rendition and climbs only after measuring.
+    Vhs.INITIAL_BANDWIDTH = 20_000_000;
   }
 
   import Bar from "./bar.svelte";
@@ -18,33 +21,33 @@
   import Whisper from "./whisper.svelte";
 
   import { clean, parseRaw, nextVid } from "../core/video";
-  import { api } from "../core/api";
-  import { kv } from "../core/kv";
+  import { api, HEAD, prefetchRange } from "../core/api";
+  import { toast } from "../core/toast.svelte";
   import Subs from "./subs";
-  import Tracker from "./tracker";
+  import WatchProgress from "./watch";
   import { Down, isSupported } from "../library/dl";
   import { Touch, Hotkeys } from "./ux";
-  import {
-    PlayerState,
-    SAVE_INTERVAL_MS,
-    RESUME_THRESHOLD_S,
-    END_CUTOFF_S,
-  } from "../core/events.svelte";
+  import { SAVE_INTERVAL_MS } from "../core/events.svelte";
   import { AVSync } from "./avsync";
-  import type { SubsInfo, WhisperCue } from "./subs";
-  import type { AudioTrack } from "./AudioPicker.svelte";
+  import { PlayerView } from "./view.svelte";
+  import type { WhisperCue } from "./subs";
 
   let { videoParam }: any = $props();
 
-  const { dir, name } = parseRaw(videoParam);
-  const title = clean(name);
-  const sub = videoParam.replace(/\.mp4$/i, ".vtt");
-  const masterSrc = `/api/hls/master?file=${encodeURIComponent(videoParam)}`;
+  const parsed = $derived(parseRaw(videoParam));
+  const dir = $derived(parsed.dir);
+  const name = $derived(parsed.name);
+  const title = $derived(clean(name));
+  const sub = $derived(videoParam.replace(/\.mp4$/i, ".vtt"));
+  const masterSrc = $derived(
+    `/api/hls/master?file=${encodeURIComponent(videoParam)}`,
+  );
   const autoplay =
     new URLSearchParams(window.location.search).get("autoplay") === "1";
   const embed = window.location.pathname === "/embed";
-  const tracker = new Tracker();
-  const ps = new PlayerState();
+  const watch = new WatchProgress();
+  const view = new PlayerView();
+  const ps = view.state;
 
   let videoEl: HTMLVideoElement | undefined;
   let pageEl: HTMLElement | undefined;
@@ -53,16 +56,22 @@
   let cleanups: (() => void)[] = [];
   let playerError = $state("");
 
+  function safePlay() {
+    const p = player?.play();
+    if (p && typeof p.then === "function") {
+      p.catch((err: any) => {
+        if (err?.name === "NotAllowedError") {
+          toast.info("Tap the video to start playback");
+        } else if (err?.name !== "AbortError") {
+          toast.err(`Playback blocked: ${err?.message ?? err}`);
+        }
+      });
+    }
+  }
+
   function goNext() {
     if (!ps.nextURL) return;
-    tracker.del(videoParam);
-    navigator.sendBeacon(
-      "/kv/set",
-      new Blob(
-        [JSON.stringify({ key: `watched:${videoParam}`, value: null })],
-        { type: "application/json" },
-      ),
-    );
+    watch.clear(videoParam);
     window.location.href = ps.nextURL;
   }
 
@@ -76,58 +85,47 @@
     }
   }
 
-  let subsInfo = $state<SubsInfo | null>(null);
   let whisperCues = $state<WhisperCue[]>([]);
-  let subsOpen = $state(false);
-  let onlineResults = $state<any[] | null>(null);
-  let searchingSubs = $state(false);
-  let activeSub = $state<string | null>(null);
-
-  let audioTracks = $state<AudioTrack[]>([]);
-  let audioTrack = $state(0);
-  let audioOpen = $state(false);
 
   async function searchSubs() {
-    searchingSubs = true;
-    onlineResults = await Subs.search(videoParam);
-    searchingSubs = false;
+    view.subs.setSearching(true);
+    view.subs.setResults(await Subs.search(videoParam));
+    view.subs.setSearching(false);
   }
 
   function toggleSubs() {
-    subsOpen = !subsOpen;
-    if (subsOpen && onlineResults === null && !searchingSubs) {
+    view.subs.toggle();
+    if (view.subs.open && view.subs.onlineResults === null && !view.subs.searching) {
       searchSubs();
     }
   }
 
   function selectLocal(file: string, label: string) {
-    const dir =
-      videoParam.lastIndexOf("/") >= 0
-        ? videoParam.slice(0, videoParam.lastIndexOf("/") + 1)
-        : "";
+    const slash = videoParam.lastIndexOf("/");
+    const dir = slash >= 0 ? videoParam.slice(0, slash + 1) : "";
     Subs.reload(player, `/subs/${dir}${file}`, label, true);
-    activeSub = file;
-    subsOpen = false;
+    view.subs.markActive(file);
+    view.subs.close();
   }
 
   async function selectEmbedded(idx: number, lang: string) {
     const file = await Subs.extractEmbedded(player, videoParam, idx, lang);
     if (file) {
-      activeSub = file;
-      subsInfo = await api.subs.info(videoParam);
+      view.subs.markActive(file);
+      view.subs.setInfo(await api.subs.info(videoParam));
     }
-    subsOpen = false;
+    view.subs.close();
   }
 
   async function selectOnline(pick: any) {
     const res = await Subs.downloadOnline(player, videoParam, pick);
     if ("file" in res) {
-      activeSub = res.file;
-      subsInfo = await api.subs.info(videoParam);
+      view.subs.markActive(res.file);
+      view.subs.setInfo(await api.subs.info(videoParam));
     } else {
-      alert(res.error);
+      toast.err(res.error || "Failed to download subtitle");
     }
-    subsOpen = false;
+    view.subs.close();
   }
 
   function subsOff() {
@@ -135,21 +133,31 @@
     for (let i = 0; i < tracks.length; i++) {
       if (tracks[i].mode === "showing") tracks[i].mode = "hidden";
     }
-    activeSub = null;
-    subsOpen = false;
+    view.subs.markActive(null);
+    view.subs.close();
   }
 
   function selectAudio(track: number) {
-    const atl = player.audioTracks();
+    const atl = player?.audioTracks();
+    if (!atl || atl.length === 0) {
+      toast.err("Audio tracks not available");
+      view.audio.close();
+      return;
+    }
+    if (track < 0 || track >= atl.length) {
+      toast.err(`Audio track ${track} out of range`);
+      view.audio.close();
+      return;
+    }
     for (let i = 0; i < atl.length; i++) {
       atl[i].enabled = i === track;
     }
-    audioTrack = track;
-    audioOpen = false;
+    view.audio.select(track);
+    view.audio.close();
   }
 
   function runWhisper() {
-    if (subsInfo?.whisper) {
+    if (view.subs.info?.whisper) {
       const wsub = sub.replace(".vtt", ".whisper.vtt");
       Subs.reload(player, `/subs/${wsub}`, "Whisper", true);
       return;
@@ -177,11 +185,15 @@
 
     let initSrc = masterSrc;
     let initType = "application/vnd.apple.mpegurl";
-    if (isSupported() && videoParam.endsWith(".mp4")) {
-      const record = await Down.get(videoParam);
-      if (record?.status === "done") {
-        initSrc = `/video/${videoParam}`;
-        initType = "video/mp4";
+    let isOffline = false;
+    if (videoParam.endsWith(".mp4")) {
+      // Direct MP4 range-serve preserves source quality and skips HLS
+      // repackaging. Works for both streaming and SW-cached offline copies.
+      initSrc = `/video/${videoParam}`;
+      initType = "video/mp4";
+      if (isSupported()) {
+        const record = await Down.get(videoParam);
+        isOffline = record?.status === "done";
       }
     }
 
@@ -190,24 +202,17 @@
       preload: "auto",
       fill: true,
       playbackRates: [0.5, 1, 1.25, 1.5, 2],
+      html5: {
+        vhs: {
+          limitRenditionByPlayerDimensions: false,
+          useBandwidthFromLocalStorage: true,
+        },
+      },
     });
 
     player.on("error", () => {
       const err = player.error();
       if (err) playerError = err.message || "Playback error";
-    });
-
-    player.on("loadedmetadata", () => {
-      const tech = player.tech_ as any;
-      tech?.on?.("bandwidthupdate", () => {
-        const vhs = tech?.vhs;
-        if (!vhs || !Vhs) return;
-        const bw = vhs.systemBandwidth || vhs.bandwidth || 0;
-        const req = vhs.playlists?.media?.()?.attributes?.BANDWIDTH || 0;
-        if (bw <= 0 || req <= 0) return;
-        const spare = bw / req;
-        Vhs.MAX_GOAL_BUFFER_LENGTH = Math.min(600, Math.max(60, 60 * spare));
-      });
     });
 
     player.src({ src: initSrc, type: initType });
@@ -224,18 +229,14 @@
     };
     player.isFullscreen = () => !!document.fullscreenElement;
 
-    const isOffline = initType === "video/mp4" && initSrc.startsWith("/video/");
-
     player.ready(() => {
-      if (autoplay) player.play()?.catch(() => {});
-      const saved = tracker.get(videoParam);
+      if (autoplay) safePlay();
+      const saved = watch.localResume(videoParam);
       if (saved > 0) {
         player.currentTime(saved);
       } else {
-        kv.get("watched:" + videoParam).then((res: any) => {
-          const t = res?.value?.t;
-          if (t > RESUME_THRESHOLD_S)
-            player.currentTime(Math.max(0, t - RESUME_THRESHOLD_S));
+        watch.serverResume(videoParam).then((t) => {
+          if (t > 0) player.currentTime(t);
         });
       }
 
@@ -265,16 +266,7 @@
       );
 
       const saveProgress = () => {
-        const t = player.currentTime() ?? 0;
-        const d = player.duration() ?? 0;
-        tracker.set(videoParam, t);
-
-        if (d > 0 && d - t < END_CUTOFF_S) {
-          tracker.del(videoParam);
-          kv.set(`watched:${videoParam}`, null);
-        } else if (t > RESUME_THRESHOLD_S) {
-          kv.set(`watched:${videoParam}`, { t, at: Date.now() });
-        }
+        watch.save(videoParam, player.currentTime() ?? 0, player.duration() ?? 0);
       };
       const trackTimer = setInterval(() => {
         if (document.hidden) return;
@@ -284,33 +276,7 @@
       player.on("seeked", saveProgress);
 
       const saveOnLeave = () => {
-        const t = player.currentTime() ?? 0;
-        const d = player.duration() ?? 0;
-        if (d > 0 && d - t < END_CUTOFF_S) {
-          tracker.del(videoParam);
-          navigator.sendBeacon(
-            "/kv/set",
-            new Blob(
-              [JSON.stringify({ key: `watched:${videoParam}`, value: null })],
-              { type: "application/json" },
-            ),
-          );
-        } else if (t > RESUME_THRESHOLD_S) {
-          tracker.set(videoParam, t);
-          navigator.sendBeacon(
-            "/kv/set",
-            new Blob(
-              [
-                JSON.stringify({
-                  key: `watched:${videoParam}`,
-                  value: { t, at: Date.now() },
-                }),
-              ],
-              { type: "application/json" },
-            ),
-          );
-        }
-        tracker.flush();
+        watch.flushOnLeave(videoParam, player.currentTime() ?? 0, player.duration() ?? 0);
       };
       window.addEventListener("beforeunload", saveOnLeave);
 
@@ -333,45 +299,50 @@
     });
 
     if (isOffline) {
-      try {
-        const subUrl = `/subs/${sub}`;
-        const res = await fetch(subUrl, { method: "HEAD" });
-        if (res.ok) {
-          Subs.reload(player, subUrl, "Subtitles", true);
-        }
-      } catch {}
+      const subUrl = `/subs/${sub}`;
+      if (await HEAD(subUrl)) {
+        Subs.reload(player, subUrl, "Subtitles", true);
+      }
     } else {
-      subsInfo = await Subs.start(player, videoParam, sub);
-      if (subsInfo?.local?.length) {
-        const eng = subsInfo.local.findIndex((t) =>
+      const info = await Subs.start(player, videoParam, sub);
+      view.subs.setInfo(info);
+      if (info?.local?.length) {
+        const eng = info.local.findIndex((t) =>
           ["eng", "en", "english", "sdh"].includes(
             t.language.replace(/\d+$/, ""),
           ),
         );
-        activeSub = subsInfo.local[eng >= 0 ? eng : 0]?.file ?? null;
+        view.subs.markActive(info.local[eng >= 0 ? eng : 0]?.file ?? null);
       }
     }
 
     avSync = new AVSync().init(videoEl!);
     if (!isOffline) {
-      api.hls.avoffset(videoParam).then((res: any) => {
-        if (res?.offset_ms > 0) {
-          ps.showSync(avSync!.set(res.offset_ms));
-        }
-      });
+      api.hls
+        .avoffset(videoParam, { silent: true })
+        .then((res: any) => {
+          if (res?.offset_ms > 0) {
+            ps.showSync(avSync!.set(res.offset_ms));
+          }
+        })
+        .catch((err: any) => console.warn("[avoffset]", err));
 
-      api.audio.info(videoParam).then((tracks: any) => {
-        if (Array.isArray(tracks) && tracks.length > 1) {
-          audioTracks = tracks;
-          const atl = player.audioTracks();
-          for (let i = 0; i < atl.length; i++) {
-            if (atl[i].enabled) {
-              audioTrack = i;
-              break;
+      api.audio
+        .info(videoParam)
+        .then((tracks: any) => {
+          if (Array.isArray(tracks) && tracks.length > 1) {
+            view.audio.setTracks(tracks);
+            const atl = player.audioTracks();
+            if (!atl) return;
+            for (let i = 0; i < atl.length; i++) {
+              if (atl[i].enabled) {
+                view.audio.select(i);
+                break;
+              }
             }
           }
-        }
-      });
+        })
+        .catch((err: any) => console.warn("[audio info]", err));
     }
 
     if ("mediaSession" in navigator) {
@@ -381,7 +352,7 @@
         artist: dir === "." ? "Notflix" : dir,
         artwork: [{ src: "/assets/icon.svg", type: "image/svg+xml" }],
       });
-      ms.setActionHandler("play", () => player.play());
+      ms.setActionHandler("play", () => safePlay());
       ms.setActionHandler("pause", () => player.pause());
       ms.setActionHandler("seekbackward", () =>
         player.currentTime(Math.max(0, player.currentTime() - 10)),
@@ -446,18 +417,14 @@
           const nextParam = new URLSearchParams(
             ps.nextURL.slice(ps.nextURL.indexOf("?")),
           ).get("video");
-          if (nextParam)
-            fetch(`/video/${encodeURIComponent(nextParam)}`, {
-              headers: { Range: "bytes=0-1048575" },
-              priority: "low" as any,
-            }).catch(() => {});
+          if (nextParam) prefetchRange(`/video/${encodeURIComponent(nextParam)}`);
         }
       })
-      .catch(() => {});
+      .catch((err: any) => console.warn("[videoList]", err));
 
     return () => {
       cleanups.forEach((fn) => fn());
-      ps.destroy();
+      view.destroy();
       avSync?.destroy();
       player?.dispose();
     };
@@ -474,31 +441,17 @@
   ontouchstart={() => ps.showUI(ps.paused)}
 >
   <Bar
+    {view}
     {title}
     {embed}
-    hidden={ps.hideUI}
-    videoKey={ps.videoKey}
     {videoParam}
     {runWhisper}
-    {subsOpen}
-    {subsInfo}
-    {onlineResults}
-    searching={searchingSubs}
-    {activeSub}
     onToggleSubs={toggleSubs}
     onSelectLocal={selectLocal}
     onSelectEmbedded={selectEmbedded}
     onSelectOnline={selectOnline}
     onSubsOff={subsOff}
-    onCloseSubs={() => (subsOpen = false)}
-    {audioTracks}
-    {audioTrack}
-    {audioOpen}
-    onToggleAudio={() => (audioOpen = !audioOpen)}
     onSelectAudio={selectAudio}
-    onCloseAudio={() => (audioOpen = false)}
-    hasSubs={ps.hasSubs}
-    whisperActive={!!ps.wMsg}
   />
 
   <div class="video-wrap p-abs">
@@ -539,7 +492,7 @@
       player?.playbackRate(
         Math.min(4, Math.round((player.playbackRate() + 0.25) * 4) / 4),
       )}
-    onPlayPause={() => (player?.paused() ? player.play() : player.pause())}
+    onPlayPause={() => (player?.paused() ? safePlay() : player.pause())}
     onNext={ps.nextURL ? goNext : undefined}
   />
   <Volume level={ps.volLevel} visible={ps.volVisible} />

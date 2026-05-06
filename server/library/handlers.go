@@ -11,8 +11,9 @@ import (
 )
 
 type FileEntry struct {
-	Name string `json:"name"`
-	Root string `json:"root"`
+	Name    string `json:"name"`
+	Root    string `json:"root"`
+	Corrupt bool   `json:"corrupt,omitempty"`
 }
 
 type DiskStat struct {
@@ -87,7 +88,8 @@ func ManageList(c *gin.Context, lib *Library) {
 
 			ext := strings.ToLower(filepath.Ext(f.Name()))
 			if ext == ".mp4" || ext == ".mkv" || ext == ".mov" {
-				files = append(files, FileEntry{Name: f.Name(), Root: root})
+				abs := filepath.Join(dir, f.Name())
+				files = append(files, FileEntry{Name: f.Name(), Root: root, Corrupt: IsCorrupt(abs)})
 			}
 		}
 
