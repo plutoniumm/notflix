@@ -1,4 +1,4 @@
-const CACHE = 'notflix-v4';
+const CACHE = 'notflix-v7';
 const OFFLINE_CACHE = 'notflix-offline-v1';
 const SHELL = [
   '/',

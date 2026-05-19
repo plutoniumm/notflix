@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -89,7 +90,15 @@ func Aria2Init(lib *library.Library) {
 		"--split=16",
 		"--min-split-size=1M",
 		"--max-concurrent-downloads=5",
-		"--bt-max-peers=100",
+		"--optimize-concurrent-downloads=true",
+		"--max-overall-download-limit=0",
+		"--file-allocation=falloc",
+		"--disk-cache=64M",
+		"--bt-max-peers=0",
+		"--bt-request-peer-speed-limit=50M",
+		"--bt-max-open-files=256",
+		"--enable-dht=true",
+		"--enable-peer-exchange=true",
 	}
 	if _, err := os.Stat(aria2Session); err == nil {
 		args = append(args, "--input-file="+aria2Session)
@@ -116,6 +125,26 @@ func Aria2Init(lib *library.Library) {
 	if !ready {
 		log.Println("[aria2] RPC never became ready")
 	}
+
+	go func() {
+		for {
+			time.Sleep(2 * time.Second)
+			raw, err := a2call("aria2.tellActive")
+			if err != nil {
+				continue
+			}
+			var act []a2StatusRaw
+			if json.Unmarshal(raw, &act) != nil {
+				continue
+			}
+			live := make(map[string]bool, len(act))
+			for _, s := range act {
+				recordSpeed(s.GID, scanInt(s.CompletedLength))
+				live[s.GID] = true
+			}
+			pruneSpeed(live)
+		}
+	}()
 
 	go func() {
 		seenActive := make(map[string]bool)
@@ -218,7 +247,7 @@ func (s a2StatusRaw) toItem() Downjob {
 		Total:   total,
 		Done:    done,
 		Percent: pct,
-		Speed:   scanInt(s.DownloadSpeed),
+		Speed:   avgSpeed(s.GID, scanInt(s.DownloadSpeed)),
 	}
 }
 
@@ -226,6 +255,64 @@ func scanInt(s string) int64 {
 	var n int64
 	fmt.Sscan(s, &n)
 	return n
+}
+
+const speedWindow = 10 * time.Second
+
+type speedSample struct {
+	t    time.Time
+	done int64
+}
+
+var (
+	speedMu      sync.Mutex
+	speedHistory = map[string][]speedSample{} // gid -> samples, oldest first
+)
+
+// recordSpeed appends a (now, completedLength) sample and trims everything
+// before the trailing window, keeping the one bracketing sample so the
+// window stays fully covered.
+func recordSpeed(gid string, done int64) {
+	now := time.Now()
+	speedMu.Lock()
+	defer speedMu.Unlock()
+
+	s := append(speedHistory[gid], speedSample{now, done})
+	cut := now.Add(-speedWindow)
+	i := 0
+	for i < len(s)-1 && s[i+1].t.Before(cut) {
+		i++
+	}
+	speedHistory[gid] = s[i:]
+}
+
+// avgSpeed returns bytes/s averaged over the sampled window, or fallback
+// (aria2's instantaneous figure) when there isn't enough history yet.
+func avgSpeed(gid string, fallback int64) int64 {
+	speedMu.Lock()
+	defer speedMu.Unlock()
+
+	s := speedHistory[gid]
+	if len(s) < 2 {
+		return fallback
+	}
+	first, last := s[0], s[len(s)-1]
+	dt := last.t.Sub(first.t).Seconds()
+	db := last.done - first.done
+	if dt <= 0 || db < 0 {
+		return fallback
+	}
+	return int64(float64(db) / dt)
+}
+
+func pruneSpeed(live map[string]bool) {
+	speedMu.Lock()
+	defer speedMu.Unlock()
+	for gid := range speedHistory {
+		if !live[gid] {
+			delete(speedHistory, gid)
+		}
+	}
 }
 
 func Aria2Add(c *gin.Context, lib *library.Library) {
@@ -243,7 +330,7 @@ func Aria2Add(c *gin.Context, lib *library.Library) {
 	if len(abbrev) > 80 {
 		abbrev = abbrev[:80] + "…"
 	}
-	log.Printf("[aria2] add: magnet=%s dir=%q", abbrev, body.Dir)
+	log.Printf("[aria2] add: uri=%s dir=%q", abbrev, body.Dir)
 
 	absDir, err := filepath.Abs(body.Dir)
 	if err != nil {
@@ -261,6 +348,17 @@ func Aria2Add(c *gin.Context, lib *library.Library) {
 	if !allowed {
 		log.Printf("[aria2] add: dir %q not in roots", absDir)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "dir not allowed"})
+		return
+	}
+
+	if IsYTCandidate(body.Magnet) {
+		gid, err := YTDlpAdd(body.Magnet, absDir, lib)
+		if err != nil {
+			log.Printf("[aria2] add: yt-dlp start failed: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "gid": gid, "via": "yt-dlp"})
 		return
 	}
 
@@ -363,11 +461,6 @@ func Aria2List(c *gin.Context) {
 	activeRaw, err1 := a2call("aria2.tellActive")
 	waitRaw, err2 := a2call("aria2.tellWaiting", 0, 100)
 
-	if err1 != nil && err2 != nil {
-		c.JSON(http.StatusOK, []Downjob{})
-		return
-	}
-
 	var active, waiting []a2StatusRaw
 	if err1 == nil {
 		json.Unmarshal(activeRaw, &active)
@@ -376,10 +469,12 @@ func Aria2List(c *gin.Context) {
 		json.Unmarshal(waitRaw, &waiting)
 	}
 
-	items := make([]Downjob, 0, len(active)+len(waiting))
+	yt := YTDlpListItems()
+	items := make([]Downjob, 0, len(active)+len(waiting)+len(yt))
 	for _, s := range append(active, waiting...) {
 		items = append(items, s.toItem())
 	}
+	items = append(items, yt...)
 
 	c.JSON(http.StatusOK, items)
 }
@@ -388,6 +483,14 @@ func Aria2Pause(c *gin.Context) {
 	gid := c.Query("gid")
 	if gid == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing gid"})
+		return
+	}
+	if IsYT(gid) {
+		if err := YTDlpPause(gid); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 		return
 	}
 	if _, err := a2call("aria2.pause", gid); err != nil {
@@ -403,6 +506,14 @@ func Aria2Resume(c *gin.Context) {
 	gid := c.Query("gid")
 	if gid == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing gid"})
+		return
+	}
+	if IsYT(gid) {
+		if err := YTDlpResume(gid); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 		return
 	}
 	if _, err := a2call("aria2.unpause", gid); err != nil {
@@ -421,6 +532,12 @@ func Aria2Remove(c *gin.Context) {
 		return
 	}
 	log.Printf("[aria2] remove: gid=%s", gid)
+
+	if IsYT(gid) {
+		YTDlpRemove(gid)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
 
 	a2call("aria2.forceRemove", gid)          //nolint
 	a2call("aria2.removeDownloadResult", gid) //nolint

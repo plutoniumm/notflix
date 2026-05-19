@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/martinlindhe/subtitles"
 	"github.com/opensubtitlescli/moviehash"
 
 	"notflix/server/library"
@@ -360,21 +359,21 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 
 	switch ext {
 	case ".srt":
-		parsed, err := subtitles.NewFromSRT(string(raw))
+		parsed, err := parseSRT(string(raw))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "srt parse error: " + err.Error()})
 			return
 		}
 		vtt = parsed.AsVTT()
 	case ".vtt":
-		parsed, err := subtitles.NewFromVTT(string(raw))
+		parsed, err := parseVTT(string(raw))
 		if err != nil {
 			vtt = string(raw)
 		} else {
 			vtt = parsed.AsVTT()
 		}
 	default:
-		parsed, err := subtitles.NewFromSRT(string(raw))
+		parsed, err := parseSRT(string(raw))
 		if err != nil {
 			vtt = string(raw)
 		} else {
@@ -420,7 +419,7 @@ func subdlFetch(c *gin.Context, videoPath, src string) {
 		return
 	}
 
-	parsed, err := subtitles.NewFromSRT(string(srt))
+	parsed, err := parseSRT(string(srt))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "srt parse: " + err.Error()})
 		return
@@ -488,7 +487,7 @@ func SubsSend(c *gin.Context, lib *library.Library) {
 			data, err := os.ReadFile(srtP)
 
 			if err == nil {
-				parsed, err := subtitles.NewFromSRT(string(data))
+				parsed, err := parseSRT(string(data))
 				if err == nil {
 					vtt := parsed.AsVTT()
 					out := srtP[:len(srtP)-len(".srt")] + ".vtt"

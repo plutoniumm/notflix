@@ -639,6 +639,24 @@ video {
   border-radius: 999px;
   transition: width 0.5s var(--ease-out);
 }
+/* Standard fill variants (kept global so they survive Svelte style scoping
+   when used inside the shared ProgressBar component). */
+.bar-fill.success {
+  background: linear-gradient(90deg, var(--grn) 0%, var(--cyan) 100%);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+}
+.bar-fill.striped {
+  background-image: linear-gradient(
+    45deg,
+    var(--red) 0 25%,
+    #ff7849 25% 50%,
+    var(--red) 50% 75%,
+    #ff7849 75% 100%
+  );
+  background-size: 28px 28px;
+  box-shadow: none;
+  animation: stripe-shift 0.8s linear infinite;
+}
 
 /* ── misc ── */
 .trunc {

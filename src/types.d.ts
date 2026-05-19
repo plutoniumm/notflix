@@ -20,7 +20,25 @@ type Downjob = {
   speed: number;
 };
 
-type VideoData = Record<string, VideoEntry[]>;
+type Torrent = {
+  name: string;
+  magnet: string;
+  infoHash: string;
+  size: number;
+  seeders: number;
+  leechers: number;
+  files: number;
+  added: number;
+  category: string;
+  status: string;
+};
+
+interface VideoGroup {
+  dir: string;
+  files: VideoEntry[];
+}
+
+type VideoData = VideoGroup[];
 
 interface Job {
   name: string;

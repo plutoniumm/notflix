@@ -1,7 +1,6 @@
 package media
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -154,30 +153,6 @@ func serve(c *gin.Context, file *os.File, info os.FileInfo, name string) {
 	if _, err := io.CopyN(c.Writer, file, blen); err != nil && err != io.EOF && !clientGone(err) {
 		log.Printf("Error serving partial video %s: %v", name, err)
 	}
-}
-
-func VideoInfo(c *gin.Context, lib *library.Library) {
-	file := c.Query("file")
-	path := lib.FindFile(file)
-	if path == "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
-		return
-	}
-
-	streams, err := library.Prober.Streams(context.Background(), path)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	height := 0
-	for _, s := range streams {
-		if s.CodecType == "video" {
-			height = s.Height
-			break
-		}
-	}
-	dur := duration(path)
-	c.JSON(http.StatusOK, gin.H{"height": height, "duration": dur})
 }
 
 func clientGone(err error) bool {

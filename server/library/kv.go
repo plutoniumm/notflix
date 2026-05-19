@@ -40,6 +40,50 @@ func kvWrite(m map[string]any) error {
 	return os.WriteFile(kvPath, data, 0644)
 }
 
+// KVGetValue is the in-process counterpart to KVGet. Returns nil if the key
+// is absent; caller decides what to do with the type.
+func KVGetValue(key string) any {
+	return kvRead()[key]
+}
+
+// KVSetValue is the in-process counterpart to KVSet. Reads-modifies-writes
+// the whole store under the kvMu lock chain; safe under concurrent callers.
+func KVSetValue(key string, value any) error {
+	store := kvRead()
+	store[key] = value
+	return kvWrite(store)
+}
+
+// DirRecency maps a library dir to the most-recent `watched:<param>.at`
+// timestamp (ms) seen for any video under it. Dirs with no watch history are
+// absent. Drives the LRU ordering of the Home video list.
+func DirRecency() map[string]float64 {
+	store := kvRead()
+	out := make(map[string]float64)
+	for k, v := range store {
+		if !strings.HasPrefix(k, "watched:") {
+			continue
+		}
+		m, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		at, ok := m["at"].(float64)
+		if !ok {
+			continue
+		}
+		param := strings.TrimPrefix(k, "watched:")
+		dir := "."
+		if i := strings.LastIndex(param, "/"); i >= 0 {
+			dir = param[:i]
+		}
+		if at > out[dir] {
+			out[dir] = at
+		}
+	}
+	return out
+}
+
 func HiddenDirs() map[string]bool {
 	store := kvRead()
 	out := make(map[string]bool)

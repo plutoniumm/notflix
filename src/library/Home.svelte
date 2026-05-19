@@ -4,6 +4,9 @@
   import { toast } from "../core/toast.svelte";
   import { HomeData } from "./homeData.svelte";
   import Continues from "./Continues.svelte";
+  import ProgressBar from "../components/ProgressBar.svelte";
+  import EmptyState from "../components/EmptyState.svelte";
+  import Icon from "../components/Icon.svelte";
 
   const home = new HomeData();
   let search = $state("");
@@ -72,7 +75,14 @@
       />
     </div>
 
-    <a href="/manage" class="manage glass glass-hover">Manage</a>
+    <nav class="actions f al-ct g8">
+      <a href="/search" class="icon-btn glass glass-hover" aria-label="Explore" title="Explore">
+        <Icon name="search" />
+      </a>
+      <a href="/manage" class="icon-btn glass glass-hover" aria-label="Settings" title="Settings">
+        <Icon name="settings" />
+      </a>
+    </nav>
 
     {#if swUpdate}
       <button class="update-btn btn-action ptr fs-xs" onclick={applyUpdate}>
@@ -138,7 +148,7 @@
         {/each}
 
         {#if results.length === 0}
-          <p class="no-results">Nothing found.</p>
+          <EmptyState variant="hero" gridSpan>Nothing found.</EmptyState>
         {/if}
       </div>
     {:else}
@@ -216,24 +226,39 @@
     {/if}
   </main>
 
-  {#if home.inProg.length > 0}
+  {#if home.conversions.length > 0 || home.inProg.length > 0}
     <div class="panel glass-strong p-fix flow-h">
-      <div class="header f al-ct j-bw">
-        <span class="title fw6">Downloading</span>
-        <span class="count fs-xs fw7 cc rx20">{home.inProg.length}</span>
-      </div>
-      {#each home.inProg as dl (dl.videoParam)}
-        <div class="item f al-ct g10">
-          <div class="name fs-xs flow-h" style="flex:1">
-            {clean(dl.title || dl.videoParam)}
-          </div>
-          <button
-            class="cancel-btn fs-xs cc ptr rx3"
-            onclick={() => cancelDownload(dl.videoParam)}
-            title="Cancel download">✕</button
-          >
+      {#if home.conversions.length > 0}
+        <div class="header f al-ct j-bw">
+          <span class="title fw6">Converting</span>
+          <span class="count fs-xs fw7 cc rx20">{home.conversions.length}</span>
         </div>
-      {/each}
+        {#each home.conversions as job (job.name)}
+          <div class="item conv f-col g5">
+            <div class="name fs-xs flow-h">{clean(job.name)}</div>
+            <ProgressBar value={job.percent} height="4px" />
+          </div>
+        {/each}
+      {/if}
+
+      {#if home.inProg.length > 0}
+        <div class="header f al-ct j-bw">
+          <span class="title fw6">Downloading</span>
+          <span class="count fs-xs fw7 cc rx20">{home.inProg.length}</span>
+        </div>
+        {#each home.inProg as dl (dl.videoParam)}
+          <div class="item f al-ct g10">
+            <div class="name fs-xs flow-h" style="flex:1">
+              {clean(dl.title || dl.videoParam)}
+            </div>
+            <button
+              class="cancel-btn fs-xs cc ptr rx3"
+              onclick={() => cancelDownload(dl.videoParam)}
+              title="Cancel download">✕</button
+            >
+          </div>
+        {/each}
+      {/if}
     </div>
   {/if}
 </div>
@@ -246,13 +271,20 @@
     flex: 1;
     max-width: 380px;
   }
-  .manage {
+  .actions {
     margin-left: auto;
+  }
+  .icon-btn {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
     color: var(--tx-4);
-    padding: 7px 14px;
-    font-size: 13px;
-    font-weight: 500;
     border-radius: var(--r-md);
+    transition: color 0.18s var(--ease-out);
+  }
+  .icon-btn:hover {
+    color: var(--tx-5);
   }
 
   .update-btn {
@@ -339,14 +371,6 @@
   .grid :global(.media-card) {
     width: auto;
   }
-  .no-results {
-    grid-column: 1 / -1;
-    color: var(--tx-2);
-    padding: 60px 0;
-    text-align: center;
-    font-family: var(--font-display);
-    font-size: 18px;
-  }
 
   .row {
     margin-bottom: 36px;
@@ -396,6 +420,8 @@
     bottom: 24px;
     right: 24px;
     width: 320px;
+    max-height: 60vh;
+    overflow-y: auto;
     border-radius: var(--r-xl);
     z-index: 200;
     box-shadow: var(--sh-4);
@@ -433,6 +459,9 @@
     text-overflow: ellipsis;
     margin-bottom: 6px;
   }
+  .item.conv .name {
+    margin-bottom: 0;
+  }
 
   @media (max-width: 640px) {
     header {
@@ -460,9 +489,9 @@
     main {
       padding: 0 0 40px;
     }
-    .manage {
-      padding: 5px 10px;
-      font-size: 12px;
+    .icon-btn {
+      width: 32px;
+      height: 32px;
     }
     .update-btn {
       font-size: 11px;

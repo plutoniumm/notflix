@@ -13,7 +13,7 @@ pnpm run build    # frontend production build → public/assets/
 
 `make run` is the canonical way to build and start the server. The Makefile cleans, builds the Go binary with a `-ldflags "-X main.buildTime=..."` injection, builds the Svelte frontend, then runs the binary. Don't invoke `go build` directly — you'll lose the buildTime stamp.
 
-There are no tests in this project.
+Tests live in `server/media/dual_path_test.go` and cover the codec selector, segPaths layout, master/playlist generation, and an ffmpeg-driven AV1 init/segment round-trip. Run with `go test ./server/media/`. The e2e tests skip cleanly if `libsvtav1` isn't in the local ffmpeg build (`testing.Short()` also skips them).
 
 ## Architecture
 
@@ -39,9 +39,11 @@ Routing is hash-based in `App.svelte` (Home / Player / Manage).
 
 **Video streaming** has two paths:
 1. Direct MP4 → HTTP 206 range requests (`server/media/player.go`)
-2. HLS adaptive → master playlist with quality levels 144p–2160p, 4s MPEG-TS segments generated on-demand by ffmpeg, cached to `./cache/` (`server/media/hls.go`)
+2. HLS → `server/media/hls.go`. Codec is per-video via the KV store (`MediaCodec`/`codec.go`), default h264:
+   - **h264** (grandfathered library): adaptive ladder 144p–2160p, 4s MPEG-TS segments transcoded on-demand (h264_videotoolbox if available), or keyframe-aligned `-c:v copy` passthrough when the source already matches a rung.
+   - **av1** (new conversions, marked `codec:<hash>=av1`): **demuxed CMAF** — hls.js can't demux fMP4, so video and audio ship as two *separate single-track* renditions. Video: one source-passthrough rung (`q=src`, no audio param) `-c:v copy`'d into fMP4 (.m4s) + av01-only init. Audio: a separate AAC fMP4 rendition (`q=audio`, `-vn -c:a aac`) + mp4a-only init, joined via `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud"` / `AUDIO="aud"`. Both cut on the same keyframe-aligned `si.bounds` (CMAF sync). EXT-X-VERSION:6 + EXT-X-MAP per rendition. No transcode ladder (no AV1 HW encoder → live transcode rebuffers; copy is ~instant). Marked-but-not-copy-eligible av1 → `HLSMaster` falls back to the h264 ladder. **Never reintroduce a muxed AV1 segment** — it serves HTTP 200 but plays frozen in hls.js. Only the AV1 branch differs from h264; the h264 muxed-TS path is untouched.
 
-**Background conversion** (`server/media/convert.go`): non-MP4 formats auto-convert on startup. Max 3 concurrent ffmpeg processes. Progress parsed from ffmpeg stderr via regex.
+**Background conversion** (`server/media/convert.go`): non-MP4 formats auto-convert on startup, **stored as AV1** (`av1File`, libsvtav1 preset 6, 8-bit yuv420p; `-c:v copy` if the source is already AV1), then marked `codec=av1` so HLS serves them via AV1 copy-passthrough. Max 3 concurrent ffmpeg processes. Progress parsed from ffmpeg stderr via regex.
 
 **Subtitle waterfall** (`server/media/subs.go` + `src/player/subs.ts`): tries local VTT → SRT → embedded extraction → OpenSubtitles (hash, then title) → Subdl (title) → Whisper transcription. Each step is attempted only if prior steps fail. `SubResult.Provider` distinguishes "os" from "subdl"; `GetSubs` branches on it — OS uses the /download endpoint with a `file_id`, Subdl fetches a `.zip` (or `.srt`) directly from the URL and converts the first `.srt` to `.vtt`.
 

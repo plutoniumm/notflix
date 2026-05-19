@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ProgressBar from "../components/ProgressBar.svelte";
+
   let {
     jobs,
     fmtBytes,
@@ -25,14 +27,13 @@
         <div class="info">
           <span class="name d-b fs-sm tx-4 flow-h">{j.name || j.gid}</span>
           <div class="f al-ct g10">
-            <div class="bar bar-track">
-              <div
-                class="bar-fill"
-                class:active={j.status !== "paused"}
-                style="width:{j.percent.toFixed(1)}%"
-              ></div>
+            <div style="flex:1; min-width:0">
+              <ProgressBar
+                value={j.percent}
+                variant={j.status !== "paused" ? "striped" : "default"}
+                label
+              />
             </div>
-            <span class="fs-xs tx-1">{Math.round(j.percent)}%</span>
             <span class="fs-xs tx-1">
               {j.status === "paused" ? "paused" : `${fmtBytes(j.speed)}/s`}
             </span>
@@ -89,18 +90,6 @@
     font-weight: 500;
   }
   .item :global(.btn-icon) { opacity: 1; }
-  .bar { flex: 1; height: 6px; }
-  .bar-fill.active {
-    background-image: linear-gradient(
-      45deg,
-      var(--red) 0 25%,
-      #ff7849 25% 50%,
-      var(--red) 50% 75%,
-      #ff7849 75% 100%
-    );
-    background-size: 28px 28px;
-    animation: stripe-shift 0.8s linear infinite;
-  }
   @media (max-width: 640px) {
     .item { padding: 10px 8px; }
     .name { font-size: 12px; }

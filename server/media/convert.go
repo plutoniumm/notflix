@@ -137,7 +137,7 @@ func convertRoot(root string, pool *jobs.Pool) {
 			if audioOnly {
 				err = remuxAudio(p)
 			} else {
-				err = toMP4(p)
+				err = toMP4(p, root)
 			}
 			if err == errNoSpace {
 				diskFull.Store(true)
@@ -152,7 +152,7 @@ func convertRoot(root string, pool *jobs.Pool) {
 
 var errNoSpace = fmt.Errorf("no space left on device")
 
-func toMP4(srcPath string) error {
+func toMP4(srcPath, root string) error {
 	dir := filepath.Dir(srcPath)
 	srcName := filepath.Base(srcPath)
 	cleanedBase := library.CleanName(srcName)
@@ -182,6 +182,18 @@ func toMP4(srcPath string) error {
 	}
 
 	os.Remove(srcPath)
+
+	// remux() now stores AV1 on disk (copy if the source was already AV1, else
+	// a one-time libsvtav1 re-encode). The mark is honest: the bytes really are
+	// AV1, and HLS serves them via single-rung copy-passthrough (remux into
+	// fMP4, no live transcode) — jank-free. HLS endpoints key videos by their
+	// library-relative path; library.Hash hashes that exact string, so the
+	// marker must use the same key.
+	if rel, err := filepath.Rel(root, mp4Path); err == nil {
+		if err := SetMediaCodec(rel, CodecAV1); err != nil {
+			log.Printf("[convert] codec mark failed for %s: %v", name, err)
+		}
+	}
 	return nil
 }
 
@@ -229,6 +241,49 @@ func mp4AudioOK(codecs []string) bool {
 	return len(codecs) > 0
 }
 
+// audioDispositionArgs marks the English audio track as the container default
+// (every other audio track's default flag cleared), so direct-MP4 playback
+// picks English. Order follows `-map 0:a` (output audio i == source audio i).
+// No-op when there's a single audio track, or no English-tagged track — then
+// ffmpeg's "first track is default" is left untouched.
+func audioDispositionArgs(srcPath string) []string {
+	streams, err := library.Prober.Streams(context.Background(), srcPath)
+	if err != nil {
+		return nil
+	}
+
+	var langs []string
+	for _, s := range streams {
+		if s.CodecType == "audio" {
+			langs = append(langs, strings.ToLower(s.Tags["language"]))
+		}
+	}
+	if len(langs) < 2 {
+		return nil
+	}
+
+	eng := -1
+	for i, l := range langs {
+		if l == "eng" || l == "en" || l == "english" {
+			eng = i
+			break
+		}
+	}
+	if eng < 0 {
+		return nil
+	}
+
+	args := make([]string, 0, len(langs)*2)
+	for i := range langs {
+		flag := "0"
+		if i == eng {
+			flag = "default"
+		}
+		args = append(args, fmt.Sprintf("-disposition:a:%d", i), flag)
+	}
+	return args
+}
+
 func audioNeedsTranscode(path string) bool {
 	streams, err := library.Prober.Streams(context.Background(), path)
 	if err != nil {
@@ -254,6 +309,11 @@ func remuxAudio(srcPath string) error {
 		return nil
 	}
 
+	// This remux maps only video+audio, so any embedded subtitle streams are
+	// dropped from the rebuilt MP4. Extract them to sidecars first or they're
+	// gone for good (toMP4 already does this; the audio-only path didn't).
+	extractAllSubs(srcPath, strings.TrimSuffix(srcPath, filepath.Ext(srcPath)))
+
 	tmp := srcPath + ".audio.tmp"
 
 	vc, _ := codecs(srcPath)
@@ -265,10 +325,12 @@ func remuxAudio(srcPath string) error {
 	if vc == "hevc" {
 		args = append(args, "-tag:v", "hvc1")
 	}
-	args = append(args,
-		"-c:a", "aac", "-b:a", "192k",
-		"-movflags", "+faststart", "-f", "mp4", tmp,
-	)
+	args = append(args, "-c:a", "aac", "-b:a", "192k")
+	if anyUnnamedMultichannel(getSrcInfo(srcPath)) {
+		args = append(args, "-ac", "2") // unnamed multichannel → AAC encoder fails; downmix
+	}
+	args = append(args, audioDispositionArgs(srcPath)...)
+	args = append(args, "-movflags", "+faststart", "-f", "mp4", tmp)
 
 	stderr, err := library.FFRun{
 		Args:     args,
@@ -293,21 +355,40 @@ func remux(src, dst string, durationSec float64, name string) error {
 	vc, ac := codecs(src)
 	args := []string{"-i", src, "-map", "0:v:0", "-map", "0:a"}
 
-	switch vc {
-	case "h264":
+	// New library is stored AV1: copy if the source is already AV1, otherwise
+	// a one-time re-encode (libsvtav1; HW AV1 if ever available). This is the
+	// slow part of conversion but it's a background job and pays for itself —
+	// the stored AV1 then streams by copy-passthrough with no live transcode.
+	if vc == "av1" {
 		args = append(args, "-c:v", "copy")
-	case "hevc":
-		args = append(args, "-c:v", "copy", "-tag:v", "hvc1")
-	default:
-		args = append(args, "-c:v", "libx264", "-preset", "fast", "-crf", "23")
+	} else {
+		// Preserve a 10-bit / HDR source as 10-bit AV1 rather than crushing it
+		// to 8-bit SDR (no zscale here for a correct tonemap anyway). Re-apply
+		// the source CICP so HDR metadata survives the re-encode on encoders
+		// that honor it (SVT-AV1 keeps the matrix; HW keeps all).
+		si := getSrcInfo(src)
+		args = append(args, av1File(32, si.vBitDepth >= 10)...)
+		for flag, val := range map[string]string{
+			"-color_primaries": si.vPrimaries,
+			"-color_trc":       si.vTransfer,
+			"-colorspace":      si.vColorspace,
+		} {
+			if val != "" && val != "unknown" {
+				args = append(args, flag, val)
+			}
+		}
 	}
 
 	if mp4AudioOK(ac) {
 		args = append(args, "-c:a", "copy")
 	} else {
 		args = append(args, "-c:a", "aac", "-b:a", "192k")
+		if anyUnnamedMultichannel(getSrcInfo(src)) {
+			args = append(args, "-ac", "2") // unnamed multichannel → AAC encoder fails; downmix
+		}
 	}
 
+	args = append(args, audioDispositionArgs(src)...)
 	args = append(args, "-movflags", "+faststart", "-f", "mp4", tmp)
 
 	stderr, err := library.FFRun{
@@ -333,7 +414,7 @@ func extractAllSubs(srcPath, base string) {
 		return
 	}
 
-	textCodecs := map[string]bool{"subrip": true, "ass": true, "webvtt": true, "mov_text": true}
+	textCodecs := map[string]bool{"subrip": true, "srt": true, "ass": true, "ssa": true, "webvtt": true, "mov_text": true, "text": true}
 	langCount := map[string]int{}
 
 	for _, s := range streams {

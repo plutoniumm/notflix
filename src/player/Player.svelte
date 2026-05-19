@@ -5,8 +5,8 @@
 
   const Vhs = (videojs as any).Vhs;
   if (Vhs) {
-    Vhs.GOAL_BUFFER_LENGTH = 60;
-    Vhs.MAX_GOAL_BUFFER_LENGTH = 600;
+    Vhs.GOAL_BUFFER_LENGTH = 30;
+    Vhs.MAX_GOAL_BUFFER_LENGTH = 90;
     Vhs.GOAL_BUFFER_LENGTH_RATE = 3;
     // Bias first-segment ABR to a high rung on a fat pipe. Without this VHS
     // starts at the lowest rendition and climbs only after measuring.
@@ -21,7 +21,7 @@
   import Whisper from "./whisper.svelte";
 
   import { clean, parseRaw, nextVid } from "../core/video";
-  import { api, HEAD, prefetchRange } from "../core/api";
+  import { api, HEAD } from "../core/api";
   import { toast } from "../core/toast.svelte";
   import Subs from "./subs";
   import WatchProgress from "./watch";
@@ -139,13 +139,15 @@
 
   function selectAudio(track: number) {
     const atl = player?.audioTracks();
+    const list = atl ? Array.from({ length: atl.length }, (_, i) => atl[i]) : [];
+    console.log("[selectAudio] track=", track, "atl.length=", atl?.length, "list=", list.map((t: any) => ({ label: t.label, lang: t.language, enabled: t.enabled })));
     if (!atl || atl.length === 0) {
-      toast.err("Audio tracks not available");
+      toast.err("Audio tracks not available (HLS not parsed yet?)");
       view.audio.close();
       return;
     }
     if (track < 0 || track >= atl.length) {
-      toast.err(`Audio track ${track} out of range`);
+      toast.err(`Audio track ${track} out of range (have ${atl.length})`);
       view.audio.close();
       return;
     }
@@ -186,14 +188,12 @@
     let initSrc = masterSrc;
     let initType = "application/vnd.apple.mpegurl";
     let isOffline = false;
-    if (videoParam.endsWith(".mp4")) {
-      // Direct MP4 range-serve preserves source quality and skips HLS
-      // repackaging. Works for both streaming and SW-cached offline copies.
-      initSrc = `/video/${videoParam}`;
-      initType = "video/mp4";
-      if (isSupported()) {
-        const record = await Down.get(videoParam);
-        isOffline = record?.status === "done";
+    if (videoParam.endsWith(".mp4") && isSupported()) {
+      const record = await Down.get(videoParam);
+      isOffline = record?.status === "done";
+      if (isOffline) {
+        initSrc = `/video/${videoParam}`;
+        initType = "video/mp4";
       }
     }
 
@@ -215,7 +215,13 @@
       if (err) playerError = err.message || "Playback error";
     });
 
+    console.log("[Player] src=", initSrc, "type=", initType, "isOffline=", isOffline);
     player.src({ src: initSrc, type: initType });
+
+    player.on("loadedmetadata", () => {
+      const atl = player.audioTracks();
+      console.log("[Player] loadedmetadata audioTracks.length=", atl?.length ?? 0);
+    });
 
     ps.bind(player);
 
@@ -231,14 +237,26 @@
 
     player.ready(() => {
       if (autoplay) safePlay();
+
+      // Resume guard: only seek to a saved position once duration is known
+      // and the position lands sanely inside the media. An earlier broken
+      // playback timeline could have persisted a drifted/huge currentTime;
+      // without this, the player yanks a fresh start to a bogus timestamp
+      // ("just started but shows ~2h, jumped back"). Out-of-range → start at 0.
+      const applyResume = (t: number) => {
+        if (!Number.isFinite(t) || t <= 0) return;
+        const trySeek = () => {
+          const d = player.duration();
+          if (!Number.isFinite(d) || d <= 0) return false;
+          if (t < d - 2) player.currentTime(t);
+          return true;
+        };
+        if (!trySeek()) player.one("loadedmetadata", trySeek);
+      };
+
       const saved = watch.localResume(videoParam);
-      if (saved > 0) {
-        player.currentTime(saved);
-      } else {
-        watch.serverResume(videoParam).then((t) => {
-          if (t > 0) player.currentTime(t);
-        });
-      }
+      if (saved > 0) applyResume(saved);
+      else watch.serverResume(videoParam).then(applyResume);
 
       cleanups.push(Touch(player, pageEl!, toggleFullscreen));
       cleanups.push(
@@ -396,13 +414,15 @@
     api
       .videoList()
       .then((data: any) => {
-        if (!data) return;
-        ps.rows = Object.entries(data).filter(([, files]) => files?.length) as [
-          string,
-          any[],
-        ][];
+        if (!Array.isArray(data)) return;
+        ps.rows = data
+          .filter((g: any) => g.files?.length)
+          .map((g: any) => [g.dir, g.files]) as [string, any[]][];
         ps.nextURL = nextVid(data, dir, name, autoplay);
-        ps.videoKey = data[dir]?.find((f: any) => f.name === name)?.key ?? "";
+        ps.videoKey =
+          data.find((g: any) => g.dir === dir)?.files?.find(
+            (f: any) => f.name === name,
+          )?.key ?? "";
         if (ps.videoKey && "mediaSession" in navigator) {
           navigator.mediaSession.metadata = new MediaMetadata({
             title,
@@ -413,12 +433,6 @@
           });
         }
 
-        if (ps.nextURL) {
-          const nextParam = new URLSearchParams(
-            ps.nextURL.slice(ps.nextURL.indexOf("?")),
-          ).get("video");
-          if (nextParam) prefetchRange(`/video/${encodeURIComponent(nextParam)}`);
-        }
       })
       .catch((err: any) => console.warn("[videoList]", err));
 

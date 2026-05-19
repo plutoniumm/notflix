@@ -12,6 +12,7 @@
   import Magnet from "./Magnet.svelte";
   import Downloads from "./Downloads.svelte";
   import FolderRow from "./FolderRow.svelte";
+  import ProgressBar from "../components/ProgressBar.svelte";
 
   declare const __BUILD_TIME__: string;
   const frontendBuild = __BUILD_TIME__;
@@ -309,11 +310,8 @@
               <span class="d-b fs-sm tx-4 trunc"
                 >{clean(dl.title || dl.videoParam)}</span
               >
-              <div class="f al-ct g10">
-                <div class="bar-track pwa-bar">
-                  <div class="bar-fill pwa-fill" style="width:{dl.progress}%"></div>
-                </div>
-                <span class="fs-xs tx-1">{dl.progress}%</span>
+              <div class="pwa-bar">
+                <ProgressBar value={dl.progress} variant="success" label />
               </div>
             </div>
           </div>
@@ -386,13 +384,7 @@
   }
   .pwa-info { flex: 1; min-width: 0; }
   .pwa-bar {
-    flex: 1;
-    height: 6px;
     margin-top: 6px;
-  }
-  .pwa-fill {
-    background: linear-gradient(90deg, var(--grn) 0%, var(--cyan) 100%);
-    box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
   }
 
   .build-info {
