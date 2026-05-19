@@ -12,7 +12,14 @@ export default class WatchProgress {
   private tracker = new Tracker();
 
   // Save current position to both stores. Async (KV roundtrip).
+  // Reject insane positions so a momentary broken timeline can't poison
+  // resume (a persisted t past the media end made fresh starts jump to ~2h).
+  private sane(t: number, d: number): boolean {
+    return Number.isFinite(t) && t >= 0 && (!(d > 0) || t <= d + 1);
+  }
+
   save(videoParam: string, t: number, d: number) {
+    if (!this.sane(t, d)) return;
     this.tracker.set(videoParam, t);
 
     if (d > 0 && d - t < END_CUTOFF_S) {
@@ -25,6 +32,10 @@ export default class WatchProgress {
 
   // Same as save but synchronous over the wire (sendBeacon). For unload.
   flushOnLeave(videoParam: string, t: number, d: number) {
+    if (!this.sane(t, d)) {
+      this.tracker.flush();
+      return;
+    }
     if (d > 0 && d - t < END_CUTOFF_S) {
       this.tracker.del(videoParam);
       kv.beacon(`watched:${videoParam}`, null);

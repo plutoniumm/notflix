@@ -1,5 +1,6 @@
 <script lang="ts">
   import Dropdown from "./Dropdown.svelte";
+  import Badge from "../components/Badge.svelte";
   import { langLabel } from "./subs";
   import type { SubsInfo } from "./subs";
 
@@ -101,7 +102,7 @@
         {#if r.hash_match}<span class="check">✓</span>{/if}
         <span class="release trunc">{r.release || "Unknown"}</span>
         {#if r.provider === "subdl"}
-          <span class="badge">subdl</span>
+          <Badge variant="accent">subdl</Badge>
         {:else if r.download_count}
           <span class="dl-count">{r.download_count.toLocaleString()}</span>
         {/if}
@@ -126,17 +127,6 @@
     flex-shrink: 0;
   }
 
-  .badge {
-    font-size: 10px;
-    color: var(--cyan);
-    background: rgba(94, 234, 212, 0.12);
-    border: 1px solid rgba(94, 234, 212, 0.3);
-    padding: 1px 7px;
-    border-radius: 999px;
-    flex-shrink: 0;
-    letter-spacing: 0.04em;
-    font-weight: 600;
-  }
 
   .empty {
     padding: 8px 12px;

@@ -77,7 +77,7 @@ export function nextVid(
   name: string,
   autoplay: boolean,
 ): string | null {
-  const files = data[dir] ?? [];
+  const files = data.find((g) => g.dir === dir)?.files ?? [];
   const idx = files.findIndex((f) => f.name === name);
   if (idx === -1 || idx === files.length - 1) return null;
 

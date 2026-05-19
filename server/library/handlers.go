@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -27,6 +28,14 @@ type DirSize struct {
 	Dir   string `json:"dir"`
 	Bytes int64  `json:"bytes"`
 	Root  string `json:"root"`
+}
+
+// DirGroup is one Home row. The list is emitted as an ordered array (not a
+// map) so the server controls row order — JSON object key order is lost
+// across Go marshal + JS parse, and numeric dir names would reorder.
+type DirGroup struct {
+	Dir   string              `json:"dir"`
+	Files []map[string]string `json:"files"`
 }
 
 func buildList(dir string) map[string][]map[string]string {
@@ -71,7 +80,27 @@ func VideoList(c *gin.Context, lib *Library) {
 		}
 	}
 
-	c.JSON(http.StatusOK, out)
+	rec := DirRecency()
+	dirs := make([]string, 0, len(out))
+	for k, files := range out {
+		if len(files) == 0 {
+			continue
+		}
+		dirs = append(dirs, k)
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		if ri, rj := rec[dirs[i]], rec[dirs[j]]; ri != rj {
+			return ri > rj // most-recently-watched first
+		}
+		return dirs[i] < dirs[j] // unwatched / ties: alphabetical
+	})
+
+	groups := make([]DirGroup, 0, len(dirs))
+	for _, d := range dirs {
+		groups = append(groups, DirGroup{Dir: d, Files: out[d]})
+	}
+
+	c.JSON(http.StatusOK, groups)
 }
 
 func ManageList(c *gin.Context, lib *Library) {

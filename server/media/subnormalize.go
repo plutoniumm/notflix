@@ -2,6 +2,7 @@ package media
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -13,6 +14,37 @@ import (
 
 	"notflix/server/library"
 )
+
+// parseSRT / parseVTT strip the UTF-8 BOM (U+FEFF) before delegating — many
+// SRTs (esp. Windows-saved YIFY/EVO rips) start with EF BB BF, which makes
+// martinlindhe/subtitles fail with `strconv.Atoi: parsing "<BOM>1"` on the
+// header line. Cheap defensive strip applied at every parse site.
+func parseSRT(s string) (subtitles.Subtitle, error) {
+	s = strings.TrimPrefix(s, "\ufeff")
+	s = strings.TrimLeft(s, " \t\r\n\x00")
+	if s == "" {
+		return subtitles.Subtitle{}, fmt.Errorf("not an SRT: empty after trim")
+	}
+	if c := s[0]; c < '0' || c > '9' {
+		return subtitles.Subtitle{}, fmt.Errorf(
+			"not an SRT: leading byte 0x%02x (likely binary, wrong encoding, or corrupt)", c)
+	}
+	return subtitles.NewFromSRT(s)
+}
+func parseVTT(s string) (subtitles.Subtitle, error) {
+	s = strings.TrimPrefix(s, "\ufeff")
+	s = strings.TrimLeft(s, " \t\r\n\x00")
+	if s == "" {
+		return subtitles.Subtitle{}, fmt.Errorf("not a VTT: empty after trim")
+	}
+	if !strings.HasPrefix(s, "WEBVTT") {
+		if c := s[0]; c < ' ' && c != '\t' {
+			return subtitles.Subtitle{}, fmt.Errorf(
+				"not a VTT: leading byte 0x%02x (likely binary or corrupt)", c)
+		}
+	}
+	return subtitles.NewFromVTT(s)
+}
 
 // NormalizeSubs walks every root and ensures all .srt and .vtt files are
 // served as WebVTT:
@@ -98,7 +130,7 @@ func normalizeSRT(path string) bool {
 		log.Printf("[subs] read failed %s: %v", filepath.Base(path), err)
 		return false
 	}
-	parsed, err := subtitles.NewFromSRT(string(data))
+	parsed, err := parseSRT(string(data))
 	if err != nil {
 		log.Printf("[subs] srt parse failed %s: %v", filepath.Base(path), err)
 		return false
@@ -118,7 +150,7 @@ func normalizeVTT(path string) bool {
 		log.Printf("[subs] read failed %s: %v", filepath.Base(path), err)
 		return false
 	}
-	parsed, err := subtitles.NewFromSRT(string(data))
+	parsed, err := parseSRT(string(data))
 	if err != nil {
 		log.Printf("[subs] vtt-as-srt parse failed %s: %v", filepath.Base(path), err)
 		return false

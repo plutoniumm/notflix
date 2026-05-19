@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { isSupported, Down } from "../library/dl";
+  import ProgressBar from "../components/ProgressBar.svelte";
+  import Icon from "../components/Icon.svelte";
 
   let {
     videoParam,
@@ -98,20 +100,7 @@
     {#if !bgfetch}
       <!-- svelte-ignore a11y_consider_explicit_label -->
       <a class="ibtn cc ptr rx5 p5" href="/video/{videoParam}" download={title}>
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-        >
-          <path d="M12 3v13M5 12l7 7 7-7" /><line
-            x1="4"
-            y1="21"
-            x2="20"
-            y2="21"
-          />
-        </svg>
+        <Icon name="download" />
       </a>
     {:else if state === "idle" || state === "error"}
       <button
@@ -121,28 +110,14 @@
           ? `Retry — ${storageHint}`
           : storageHint || "Download"}
       >
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke={state === "error" ? "var(--red)" : "currentColor"}
-        >
-          <path d="M12 3v13M5 12l7 7 7-7" /><line
-            x1="4"
-            y1="21"
-            x2="20"
-            y2="21"
-          />
-        </svg>
+        <Icon
+          name="download"
+          color={state === "error" ? "var(--red)" : undefined}
+        />
       </button>
     {:else if state === "downloading"}
       <div class="f al-ct g5">
-        <div class="bar rx2">
-          <div class="fill" style="width:{progress}%"></div>
-        </div>
-
-        <span class="pct fs-xs">{progress}%</span>
+        <ProgressBar value={progress} label width="120px" height="4px" />
         <button
           class="btn-ghost fs-xs"
           onclick={remove}
@@ -173,24 +148,6 @@
     background: #fff2;
   }
 
-  .bar {
-    width: 80px;
-    height: 4px;
-    background: var(--bg-5);
-    overflow: hidden;
-  }
-
-  .fill {
-    height: 100%;
-    background: var(--red);
-    transition: width 0.3s;
-    min-width: 2px;
-  }
-
-  .pct {
-    color: var(--tx-2);
-    min-width: 28px;
-  }
 
   .offline {
     color: var(--grn);

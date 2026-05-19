@@ -1,4 +1,6 @@
 <script lang="ts">
+  import BackLink from "../components/BackLink.svelte";
+
   let {
     rows,
     total,
@@ -17,7 +19,7 @@
 </script>
 
 <header class="glass-header f fw al-ct g10">
-  <a href="/" class="back fs tx-3">←</a>
+  <BackLink />
   <h1 class="m0 fw6">Manage Library</h1>
   <span class="fs tx-1">{rows.length} folders · {total} files</span>
 
@@ -51,15 +53,6 @@
   }
   header h1 {
     font-size: 22px;
-  }
-  .back {
-    padding: 4px 10px;
-    border-radius: var(--r-md);
-    transition: color 0.18s var(--ease-out), background 0.18s var(--ease-out);
-  }
-  .back:hover {
-    color: var(--tx-5);
-    background: var(--glass);
   }
   .disk-bar {
     width: 88px;

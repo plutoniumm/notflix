@@ -24,6 +24,18 @@ import (
 const (
 	hlsSegDur   = 4.0
 	hlsCacheDir = "./cache"
+	// qSrc is the pseudo-quality for AV1 source-passthrough: the on-disk AV1
+	// stream copied (remuxed) into fMP4 at its native resolution. It is not in
+	// any profile map — there is no scaling or bitrate target, just a copy.
+	qSrc = "src"
+	// hlsURLVer cache-busts segment & init URLs. They're served immutable
+	// (Cache-Control: max-age=1yr) for bandwidth, but the BYTES at a given
+	// seg/init URL change whenever the encoding pipeline changes — browsers
+	// and proxies (Caddy/CDN) would then replay a stale, now-invalid segment
+	// forever. Playlists are no-cache, so bumping this constant on any change
+	// to segment/init production instantly invalidates every cached fragment
+	// for every client. Bump it whenever AV1/h264 segment output changes.
+	hlsURLVer = "6"
 )
 
 var hlsInFlight sync.Map
@@ -55,9 +67,49 @@ func doubleKRate(s string) string {
 
 var hlsQualityOrder = []string{"144p", "240p", "360p", "480p", "720p", "1080p", "2160p"}
 
+// ladderFor returns the rung keys to emit for a source whose display grid is
+// srcW×srcH. Rungs are clamped to the SHORTER side (= height for landscape,
+// width for portrait) so a tall phone video doesn't get over-tall, massively
+// over-provisioned rungs (the rung scales by height; bitrates are tuned for
+// landscape). No upscaling, in hlsQualityOrder. Never empty — a source
+// shorter than the smallest rung still gets that one rung (an empty master is
+// unplayable). srcW/srcH ≤ 0 (unprobed) keeps the full ladder.
+func ladderFor(profiles map[string]hlsProfile, srcW, srcH int) []string {
+	lim := srcH
+	if srcW > 0 && (lim <= 0 || srcW < lim) {
+		lim = srcW
+	}
+	var qs []string
+	for _, q := range hlsQualityOrder {
+		p, ok := profiles[q]
+		if !ok || (lim > 0 && p.h > lim) {
+			continue
+		}
+		qs = append(qs, q)
+	}
+	if len(qs) == 0 {
+		for _, q := range hlsQualityOrder {
+			if _, ok := profiles[q]; ok {
+				return []string{q}
+			}
+		}
+	}
+	return qs
+}
+
 type srcInfo struct {
 	vCodec      string
-	vHeight     int
+	vHeight     int     // display height (rotation-corrected)
+	vWidth      int     // display width (rotation-corrected)
+	vDAR        float64 // display aspect ratio, 0 if unknown
+	vBitDepth   int     // 8 / 10 / 12, 0 if unknown
+	vTransfer   string  // color_transfer (smpte2084 / arib-std-b67 = HDR)
+	vPrimaries  string  // color_primaries (bt2020 = wide gamut)
+	vColorspace string  // color_space/matrix (bt2020nc — survives SVT-AV1)
+	vRotation   int     // normalized 0/90/180/270 display rotation
+	aChannels   []int   // channel count per audio stream, in stream order
+	aLayouts    []string // channel_layout per audio stream (empty/unknown → unnamed)
+	vPixFmt     string
 	kfTimes     []float64
 	bounds      []float64 // segment boundaries, keyframe-aligned
 	segBitrates []int     // bps per segment, aligned with bounds
@@ -66,6 +118,123 @@ type srcInfo struct {
 }
 
 var srcInfoMap sync.Map // path -> *srcInfo
+
+// pixBitDepth extracts the luma bit depth from an ffmpeg pix_fmt name
+// ("yuv420p10le" → 10, "p010le" → 10, "yuv420p" → 8). Defaults to 8.
+func pixBitDepth(pf string) int {
+	pf = strings.ToLower(pf)
+	switch {
+	case strings.Contains(pf, "p016") || strings.Contains(pf, "16le") || strings.Contains(pf, "16be"):
+		return 12
+	case strings.Contains(pf, "p012") || strings.Contains(pf, "12le") || strings.Contains(pf, "12be"):
+		return 12
+	case strings.Contains(pf, "p010") || strings.Contains(pf, "10le") || strings.Contains(pf, "10be"):
+		return 10
+	case pf == "":
+		return 0
+	default:
+		return 8
+	}
+}
+
+// normRotation returns the display rotation normalized to 0/90/180/270. The
+// astiffprobe Stream struct doesn't surface side_data, so the modern
+// displaymatrix is read with a dedicated ffprobe; the legacy tags.rotate
+// (passed in) is the fallback. Only the 90/270 parity matters downstream
+// (dimension swap); ffmpeg autorotates the actual pixels itself.
+func normRotation(path, tagRotate string) int {
+	norm := func(v int) int { return ((v % 360) + 360) % 360 }
+
+	raw, _ := exec.Command("ffprobe", "-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream_side_data=rotation",
+		"-of", "default=noprint_wrappers=1:nokey=1", path,
+	).Output()
+	for _, line := range strings.Split(string(raw), "\n") {
+		if v, err := strconv.Atoi(strings.TrimSpace(line)); err == nil {
+			return norm(v)
+		}
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(tagRotate)); err == nil {
+		return norm(v)
+	}
+	return 0
+}
+
+// AAC encoder accepts these layouts; anything else (incl. the common
+// container-level "unknown" / "6 channels" generic) makes it fail with
+// "Unsupported channel layout". Lower-cased to match ffprobe output.
+var namedLayouts = map[string]bool{
+	"mono": true, "stereo": true, "2.1": true,
+	"3.0": true, "3.0(back)": true,
+	"4.0": true, "quad": true, "quad(side)": true,
+	"5.0": true, "5.0(side)": true,
+	"5.1": true, "5.1(side)": true,
+	"6.0": true, "6.0(front)": true, "hexagonal": true,
+	"6.1": true, "6.1(back)": true, "6.1(front)": true,
+	"7.0": true, "7.0(front)": true,
+	"7.1": true, "7.1(wide)": true, "7.1(wide-side)": true,
+	"octagonal": true, "downmix": true,
+}
+
+// aacArgs builds the AAC encode for an audio rendition. Upgrade-if-available:
+// a multichannel source keeps its layout (surround preserved) at a
+// layout-appropriate bitrate — but ONLY when the source declares a named
+// layout the AAC encoder accepts. Unnamed multichannel ("6 channels" /
+// "unknown" — common in scene rips like the Drive 2011 regression) downmixes
+// to stereo, because the encoder otherwise fails the segment outright.
+func aacArgs(si *srcInfo, audioIdx int, stereoBitrate string) []string {
+	ch, layout := 0, ""
+	if si != nil && audioIdx >= 0 && audioIdx < len(si.aChannels) {
+		ch = si.aChannels[audioIdx]
+		if audioIdx < len(si.aLayouts) {
+			layout = si.aLayouts[audioIdx]
+		}
+	}
+	if ch > 2 && namedLayouts[layout] {
+		br := "256k"
+		if ch >= 8 {
+			br = "384k"
+		}
+		return []string{"-c:a", "aac", "-b:a", br}
+	}
+	return []string{"-c:a", "aac", "-b:a", stereoBitrate, "-ac", "2"}
+}
+
+// anyUnnamedMultichannel reports whether any audio stream is multichannel
+// with an unnamed/unknown layout — the AAC encoder will reject it. Used by
+// the convert pipeline to decide whether to force `-ac 2` on its whole-file
+// re-encode (which maps all audio streams uniformly, so per-stream layout
+// args don't apply).
+func anyUnnamedMultichannel(si *srcInfo) bool {
+	if si == nil {
+		return false
+	}
+	for i, ch := range si.aChannels {
+		layout := ""
+		if i < len(si.aLayouts) {
+			layout = si.aLayouts[i]
+		}
+		if ch > 2 && !namedLayouts[layout] {
+			return true
+		}
+	}
+	return false
+}
+
+// isHDR reports whether the source carries an HDR transfer or wide-gamut
+// primaries (PQ / HLG / BT.2020). Used to decide preserve-vs-tonemap.
+func isHDR(si *srcInfo) bool {
+	switch si.vTransfer {
+	case "smpte2084", "arib-std-b67":
+		return true
+	}
+	// SVT-AV1 (this ffmpeg) drops transfer/primaries but keeps the matrix, so
+	// bt2020 in any of the three color fields is the reliable wide-gamut/HDR
+	// signal across both source codecs and re-encoded AV1.
+	return strings.HasPrefix(si.vPrimaries, "bt2020") ||
+		strings.HasPrefix(si.vColorspace, "bt2020")
+}
 
 func getSrcInfo(path string) *srcInfo {
 	v, _ := srcInfoMap.LoadOrStore(path, &srcInfo{})
@@ -78,10 +247,43 @@ func getSrcInfo(path string) *srcInfo {
 		for _, s := range streams {
 			if s.CodecType == "video" && si.vCodec == "" {
 				si.vCodec = s.CodecName
-				si.vHeight = s.Height
+				si.vPixFmt = s.PixFmt
+				si.vBitDepth = pixBitDepth(s.PixFmt)
+				si.vTransfer = strings.ToLower(s.ColorTransfer)
+				si.vPrimaries = strings.ToLower(s.ColorPrimaries)
+				si.vColorspace = strings.ToLower(s.ColorSpace)
+				si.vRotation = normRotation(path, s.Tags["rotate"])
+
+				w, h := s.Width, s.Height
+				sn, sd := s.SampleAspectRatio.Num(), s.SampleAspectRatio.Den()
+				if sn <= 0 || sd <= 0 {
+					sn, sd = 1, 1
+				}
+				// Display aspect = coded W:H corrected by the pixel (sample)
+				// aspect. Anamorphic sources (SAR ≠ 1:1) MUST be deanamorphized
+				// for HLS or players render the coded grid square (stretched).
+				dar := 0.0
+				if w > 0 && h > 0 {
+					dar = float64(w) * float64(sn) / (float64(h) * float64(sd))
+				}
+				// ffmpeg autorotates pixels for ±90/270; coded dims are
+				// pre-rotation, so the *display* grid is swapped. Everything
+				// downstream (ladder, RESOLUTION, deanamorphize) must use the
+				// rotated dims or rotated phone video comes out sideways.
+				if si.vRotation == 90 || si.vRotation == 270 {
+					w, h = h, w
+					if dar > 0 {
+						dar = 1 / dar
+					}
+				}
+				si.vWidth, si.vHeight, si.vDAR = w, h, dar
+			}
+			if s.CodecType == "audio" {
+				si.aChannels = append(si.aChannels, s.Channels)
+				si.aLayouts = append(si.aLayouts, strings.ToLower(s.ChannelLayout))
 			}
 		}
-		if si.vCodec != "h264" {
+		if si.vCodec != "h264" && si.vCodec != "av1" {
 			return
 		}
 		pkts, err := probePackets(path)
@@ -131,11 +333,11 @@ func probePackets(path string) ([]vpkt, error) {
 		if err != nil {
 			continue
 		}
-		size, err := strconv.Atoi(parts[2])
+		size, err := strconv.Atoi(parts[1])
 		if err != nil {
 			continue
 		}
-		pkts = append(pkts, vpkt{pts: pts, size: size, key: strings.HasPrefix(parts[1], "K")})
+		pkts = append(pkts, vpkt{pts: pts, size: size, key: strings.HasPrefix(parts[2], "K")})
 	}
 	return pkts, nil
 }
@@ -195,13 +397,21 @@ func segmentBitrates(pkts []vpkt, bounds []float64) ([]int, int) {
 	return perSeg, peak
 }
 
+// canCopyVideo: h264 source-passthrough copy is DISABLED. `generateSegment`'s
+// copy mode (-ss start -i src -t segDur -c:v copy -f mpegts) can't trim
+// mid-GOP, so each segment overshoots its bounds while the playlist EXTINF
+// states the nominal duration. Over a feature-length film that mismatch
+// accumulates into MINUTES of timeline drift → scenes jump back-and-forth,
+// playback hangs, sidecar subtitles end up minutes off the drifted playhead
+// (observed: How.To.Lose.A.Guy on the copy/1080p rung). The transcode path
+// re-encodes to an exact -t segDur (zero drift) and is hardware-fast
+// (h264_videotoolbox), so route ALL h264 through it. AV1 copy-passthrough is a
+// separate, correct path (canCopyAV1) and is unaffected. Params kept so the
+// rung-bandwidth/playlist callers compile unchanged.
 func canCopyVideo(si *srcInfo, profile hlsProfile) bool {
-	if si.vCodec != "h264" || profile.h != si.vHeight || len(si.kfTimes) == 0 {
-		return false
-	}
-	// First keyframe must be near t=0 — otherwise the HLS timeline won't align
-	// with the source's playback time, breaking duration/seek bookkeeping.
-	return si.kfTimes[0] < 0.5
+	_ = si
+	_ = profile
+	return false
 }
 
 // BANDWIDTH for the master playlist. Copy-eligible rung uses the probed peak
@@ -243,35 +453,70 @@ func avcCodec(h int) string {
 	}
 }
 
-// Rung width derived from source aspect. Scale filter is "-2:H", so output
-// width matches the source's pixel aspect and rounds to an even number.
-func rungWidth(srcW, srcH, rungH int) int {
-	if srcW <= 0 || srcH <= 0 {
-		// Fall back to 16:9 when probing failed.
-		w := rungH * 16 / 9
-		if w%2 != 0 {
-			w++
-		}
-		return w
+func evenWidth(w int) int {
+	if w < 2 {
+		w = 2
 	}
-	w := srcW * rungH / srcH
 	if w%2 != 0 {
 		w++
 	}
 	return w
 }
 
+// rungWidth is the square-pixel width for a rung at rungH that preserves the
+// source's *display* aspect (i.e. deanamorphized: storage W:H corrected by
+// SAR). Falls back to the storage ratio, then 16:9, when aspect is unknown.
+func rungWidth(si *srcInfo, srcW, srcH, rungH int) int {
+	dar := 0.0
+	if si != nil {
+		dar = si.vDAR
+	}
+	if dar <= 0 && srcW > 0 && srcH > 0 {
+		dar = float64(srcW) / float64(srcH)
+	}
+	if dar <= 0 {
+		dar = 16.0 / 9.0
+	}
+	return evenWidth(int(math.Round(float64(rungH) * dar)))
+}
+
+// scaleFilter builds the -vf scale for a transcoded rung. It deanamorphizes —
+// explicit display width + setsar=1 — so every HLS player renders correctly
+// regardless of whether it honors in-stream SAR (hls.js transmuxed MPEG-TS
+// does not, which stretched anamorphic films). For square-pixel sources this
+// is equivalent to the old "scale=-2:H". Falls back to that when the source
+// aspect couldn't be probed, so behavior is unchanged for those.
+func scaleFilter(si *srcInfo, rungH int) string {
+	if si == nil || si.vDAR <= 0 {
+		return fmt.Sprintf("scale=-2:%d", rungH)
+	}
+	return fmt.Sprintf("scale=%d:%d:flags=lanczos,setsar=1",
+		evenWidth(int(math.Round(float64(rungH)*si.vDAR))), rungH)
+}
+
 // Build a full #EXT-X-STREAM-INF attribute list with BANDWIDTH,
 // AVERAGE-BANDWIDTH, RESOLUTION, CODECS, and any caller-supplied extras
-// (e.g. AUDIO="audio" for multi-audio masters).
-func streamInfLine(si *srcInfo, q string, p hlsProfile, srcW, srcH int, extra string) string {
-	peak := rungBandwidth(si, q, p)
-	avg := rungAvgBandwidth(si, q, p)
-	if avg > peak {
-		avg = peak
+// (e.g. AUDIO="audio" for multi-audio masters). codec selects the CODECS
+// attribute (avc1.* vs av01.*) and the bandwidth source (probed copy-eligible
+// peak for h264, VBV cap for AV1).
+func streamInfLine(si *srcInfo, q string, p hlsProfile, codec string, srcW, srcH int, extra string) string {
+	var peak, avg int
+	var codecs string
+	if codec == CodecAV1 {
+		if n, err := strconv.Atoi(strings.TrimSuffix(p.vbr, "k")); err == nil {
+			avg = n * 1000
+		}
+		peak = avg + avg/5
+		codecs = av1Codec(p.h, 8) + ",mp4a.40.2"
+	} else {
+		peak = rungBandwidth(si, q, p)
+		avg = rungAvgBandwidth(si, q, p)
+		if avg > peak {
+			avg = peak
+		}
+		codecs = avcCodec(p.h) + ",mp4a.40.2"
 	}
-	w := rungWidth(srcW, srcH, p.h)
-	codecs := avcCodec(p.h) + ",mp4a.40.2"
+	w := rungWidth(si, srcW, srcH, p.h)
 	attrs := fmt.Sprintf("BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s\"", peak, avg, w, p.h, codecs)
 	if extra != "" {
 		attrs += "," + extra
@@ -338,27 +583,44 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 
 	srcHeight := 0
 	srcWidth := 0
-	type aTrack struct {
-		language string
-		codec    string
-		channels int
-	}
-	var aTracks []aTrack
+	var aTracks []audioMeta
 
 	if streams, err := library.Prober.Streams(context.Background(), path); err == nil {
 		for _, s := range streams {
-			if s.CodecType == "video" && srcHeight == 0 {
-				srcHeight = s.Height
-				srcWidth = s.Width
-			}
 			if s.CodecType == "audio" {
-				lang := s.Tags["language"]
-				aTracks = append(aTracks, aTrack{language: lang, codec: s.CodecName, channels: s.Channels})
+				aTracks = append(aTracks, audioMeta{language: s.Tags["language"], codec: s.CodecName, channels: s.Channels})
 			}
 		}
 	}
+	// Single source of truth for dimensions: rotation- and SAR-corrected
+	// display grid. Drives the ladder height and advertised RESOLUTION so
+	// rotated/anamorphic sources aren't sideways or stretched.
+	srcInfoP := getSrcInfo(path)
+	srcWidth, srcHeight = srcInfoP.vWidth, srcInfoP.vHeight
 
 	multiAudio := len(aTracks) > 1
+
+	codec := MediaCodec(file)
+	// Multi-audio AV1 not supported in this round (would need fMP4 audio
+	// renditions to keep the master's segment-type uniform). Fall back.
+	if codec == CodecAV1 && multiAudio {
+		codec = CodecH264
+	}
+	// Zero-audio AV1 demux would emit an audio rendition whose non-optional
+	// `0:a:0` mapping fails (no audio stream) → hls.js stalls on the broken
+	// AUDIO group. h264's optional `0:a:?` mapping plays video-only cleanly.
+	if codec == CodecAV1 && len(aTracks) == 0 {
+		codec = CodecH264
+	}
+	// AV1 is served only via copy-passthrough. If the marked file isn't
+	// actually a copy-eligible AV1 stream on disk (wrong codec, 10-bit, no
+	// leading keyframe), fall back to the safe h264 ladder rather than emit a
+	// rung whose segments can't be produced without a janky live transcode.
+	if codec == CodecAV1 && !canCopyAV1(getSrcInfo(path)) {
+		codec = CodecH264
+	}
+	profiles := hlsProfiles
+	codecParam := ""
 
 	defIdx := 0
 	for i, t := range aTracks {
@@ -373,7 +635,34 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 	var sb strings.Builder
 	sb.WriteString("#EXTM3U\n")
 
-	if multiAudio {
+	if codec == CodecAV1 {
+		// Demuxed CMAF. hls.js cannot demux fMP4, so video and audio ship as
+		// separate single-track renditions: one source-passthrough video rung
+		// (on-disk AV1 -c:v copy'd into fMP4 at native resolution — no ladder,
+		// no live re-encode) plus a separate AAC-fMP4 audio rendition cut on
+		// the SAME keyframe boundaries so the two stay segment-aligned.
+		si := getSrcInfo(path)
+		avg := si.peakBitrate
+		if avg <= 0 {
+			avg = 6_000_000
+		}
+		peak := avg + avg/5
+		codecs := av1Codec(srcHeight, si.vBitDepth) + ",mp4a.40.2"
+
+		lang := "und"
+		if defIdx < len(aTracks) && aTracks[defIdx].language != "" {
+			lang = aTracks[defIdx].language
+		}
+		sb.WriteString("#EXT-X-VERSION:6\n\n")
+		sb.WriteString(fmt.Sprintf(
+			"#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"aud\",NAME=\"%s\",LANGUAGE=\"%s\",DEFAULT=YES,AUTOSELECT=YES,URI=\"/api/hls/playlist?file=%s&q=audio&audio=%d&codec=av1\"\n",
+			strings.ToUpper(lang), lang, encFile, defIdx))
+		sb.WriteString(fmt.Sprintf(
+			"#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s\",AUDIO=\"aud\"\n",
+			peak, avg, rungWidth(si, srcWidth, srcHeight, srcHeight), srcHeight, codecs))
+		sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s&codec=av1\n",
+			encFile, qSrc))
+	} else if multiAudio {
 		sb.WriteString("#EXT-X-VERSION:4\n\n")
 
 		for i, t := range aTracks {
@@ -403,40 +692,49 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 		sb.WriteString("\n")
 
 		si := getSrcInfo(path)
-		for _, q := range hlsQualityOrder {
-			p := hlsProfiles[q]
-			if srcHeight > 0 && p.h > srcHeight {
-				continue
-			}
-			sb.WriteString(streamInfLine(si, q, p, srcWidth, srcHeight, "AUDIO=\"audio\""))
-			sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s\n", encFile, q))
+		for _, q := range ladderFor(profiles, srcWidth, srcHeight) {
+			p := profiles[q]
+			sb.WriteString(streamInfLine(si, q, p, codec, srcWidth, srcHeight, "AUDIO=\"audio\""))
+			sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s%s\n", encFile, q, codecParam))
 		}
 	} else {
 		sb.WriteString("#EXT-X-VERSION:3\n\n")
 		audio := fmt.Sprintf("%d", defIdx)
 		si := getSrcInfo(path)
-		for _, q := range hlsQualityOrder {
-			p := hlsProfiles[q]
-			if srcHeight > 0 && p.h > srcHeight {
-				continue
-			}
-			sb.WriteString(streamInfLine(si, q, p, srcWidth, srcHeight, ""))
-			sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s&audio=%s\n", encFile, q, audio))
+		for _, q := range ladderFor(profiles, srcWidth, srcHeight) {
+			p := profiles[q]
+			sb.WriteString(streamInfLine(si, q, p, codec, srcWidth, srcHeight, ""))
+			sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s&audio=%s%s\n", encFile, q, audio, codecParam))
 		}
 	}
 
 	c.Header("Cache-Control", "no-cache")
 	c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(sb.String()))
+
+	go Prewarm(file, path, srcHeight, aTracks, defIdx)
 }
 
 func HLSPlaylist(c *gin.Context, lib *library.Library) {
 	file := c.Query("file")
 	q := c.Query("q")
 	audioStr, hasAudio := c.GetQuery("audio")
+	codec := c.DefaultQuery("codec", CodecH264)
+	if codec != CodecAV1 {
+		codec = CodecH264
+	}
 
 	audioOnly := q == "audio"
+	// h264 audio renditions ride MPEG-TS (hls.js demuxes TS itself). AV1 video
+	// is fMP4, and hls.js cannot demux fMP4 — so an AV1 title's audio must also
+	// be its own fMP4 rendition. Only force h264 for the non-AV1 audio playlist.
+	if audioOnly && codec != CodecAV1 {
+		codec = CodecH264
+	}
+
+	// AV1 is copy-passthrough only (q=qSrc, no profile/scaling). Profiles are
+	// needed solely for the h264 transcode ladder.
 	var profile hlsProfile
-	if !audioOnly {
+	if !audioOnly && codec == CodecH264 {
 		var ok bool
 		profile, ok = hlsProfiles[q]
 		if !ok {
@@ -460,17 +758,28 @@ func HLSPlaylist(c *gin.Context, lib *library.Library) {
 	var segDurs []float64
 	var segBitrates []int
 	copyMode := false
-	if !audioOnly {
-		si := getSrcInfo(path)
-		if canCopyVideo(si, profile) && len(si.bounds) >= 2 {
-			copyMode = true
-			for i := 0; i < len(si.bounds)-1; i++ {
-				segDurs = append(segDurs, si.bounds[i+1]-si.bounds[i])
-			}
-			segBitrates = si.segBitrates
+	si := getSrcInfo(path)
+	if codec == CodecAV1 {
+		// Both the AV1 video rung (q=src) and its AAC audio rendition
+		// (q=audio) are cut on the SAME keyframe-aligned boundaries, so
+		// demuxed fMP4 segment i covers the same presentation interval in
+		// each — a hard CMAF requirement for hls.js to sync the two.
+		if !canCopyAV1(si) || len(si.bounds) < 2 {
+			c.String(http.StatusInternalServerError, "av1 source not copy-eligible")
+			return
 		}
+		copyMode = true
+	} else if !audioOnly && canCopyVideo(si, profile) && len(si.bounds) >= 2 {
+		copyMode = true
 	}
-	if !copyMode {
+	if copyMode {
+		for i := 0; i < len(si.bounds)-1; i++ {
+			segDurs = append(segDurs, si.bounds[i+1]-si.bounds[i])
+		}
+		if !audioOnly {
+			segBitrates = si.segBitrates // bitrate hint is video-only
+		}
+	} else {
 		numSegs := int(math.Ceil(dur / hlsSegDur))
 		for i := 0; i < numSegs; i++ {
 			d := hlsSegDur
@@ -491,15 +800,37 @@ func HLSPlaylist(c *gin.Context, lib *library.Library) {
 	encFile := url.QueryEscape(file)
 	var sb strings.Builder
 	sb.WriteString("#EXTM3U\n")
-	sb.WriteString("#EXT-X-VERSION:3\n")
+	if codec == CodecAV1 {
+		// fMP4 segments require HLS protocol v6+.
+		sb.WriteString("#EXT-X-VERSION:6\n")
+	} else {
+		sb.WriteString("#EXT-X-VERSION:3\n")
+	}
 	sb.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", target))
 	sb.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
 	sb.WriteString("#EXT-X-PLAYLIST-TYPE:VOD\n")
+
+	if codec == CodecAV1 {
+		// Each rendition gets its own single-track init: the audio rendition's
+		// init carries only the AAC moov, the video rung's only the av01 moov.
+		if audioOnly {
+			sb.WriteString(fmt.Sprintf("#EXT-X-MAP:URI=\"/api/hls/init?file=%s&q=audio&audio=%s&codec=av1&m=copy&cv=%s\"\n",
+				encFile, audioStr, hlsURLVer))
+		} else {
+			sb.WriteString(fmt.Sprintf("#EXT-X-MAP:URI=\"/api/hls/init?file=%s&q=%s&codec=av1&m=copy&cv=%s\"\n",
+				encFile, q, hlsURLVer))
+		}
+	}
 
 	modeParam := ""
 	if copyMode {
 		modeParam = "&m=copy"
 	}
+	codecParam := ""
+	if codec == CodecAV1 {
+		codecParam = "&codec=av1"
+	}
+	cv := "&cv=" + hlsURLVer // cache-bust immutable segment URLs across pipeline changes
 
 	for i, segDur := range segDurs {
 		if i < len(segBitrates) && segBitrates[i] > 0 {
@@ -508,11 +839,13 @@ func HLSPlaylist(c *gin.Context, lib *library.Library) {
 		sb.WriteString(fmt.Sprintf("#EXTINF:%.3f,\n", segDur))
 
 		if audioOnly {
-			sb.WriteString(fmt.Sprintf("/api/hls/segment?file=%s&q=audio&seg=%d&audio=%s\n", encFile, i, audioStr))
+			// h264: bare TS audio segment (modeParam/codecParam empty).
+			// AV1: &m=copy&codec=av1 → fMP4 AAC segment, same boundaries as video.
+			sb.WriteString(fmt.Sprintf("/api/hls/segment?file=%s&q=audio&seg=%d&audio=%s%s%s%s\n", encFile, i, audioStr, modeParam, codecParam, cv))
 		} else if !hasAudio {
-			sb.WriteString(fmt.Sprintf("/api/hls/segment?file=%s&q=%s&seg=%d%s\n", encFile, q, i, modeParam))
+			sb.WriteString(fmt.Sprintf("/api/hls/segment?file=%s&q=%s&seg=%d%s%s%s\n", encFile, q, i, modeParam, codecParam, cv))
 		} else {
-			sb.WriteString(fmt.Sprintf("/api/hls/segment?file=%s&q=%s&seg=%d&audio=%s%s\n", encFile, q, i, audioStr, modeParam))
+			sb.WriteString(fmt.Sprintf("/api/hls/segment?file=%s&q=%s&seg=%d&audio=%s%s%s%s\n", encFile, q, i, audioStr, modeParam, codecParam, cv))
 		}
 	}
 
@@ -527,12 +860,151 @@ const (
 	segAudioOnly = 2
 )
 
+// segPaths returns (segPath, cacheKey). Stamping segDur into the path means a
+// future tweak to hlsSegDur silently invalidates the old layout instead of
+// serving 4s segments to a player expecting 10s ones. The codec dimension
+// keeps h264 (.ts) and AV1 (.m4s) caches segregated.
+func segPaths(hash, codec, q string, segNum, audioIdx, mode int, useCopy bool) (string, string) {
+	dKey := fmt.Sprintf("d%d", int(hlsSegDur))
+	cacheRoot := filepath.Join(hash, dKey)
+	switch {
+	case useCopy && codec == CodecAV1:
+		cacheRoot = filepath.Join(hash, dKey+"-av1-copy")
+	case useCopy:
+		cacheRoot = filepath.Join(hash, dKey+"-copy")
+	case codec == CodecAV1:
+		cacheRoot = filepath.Join(hash, dKey+"-av1")
+	}
+	// AV1 ships demuxed fMP4 (.m4s) for BOTH its video rung and its AAC audio
+	// rendition — hls.js can't demux fMP4, so the two are separate single-track
+	// files. h264 stays muxed MPEG-TS (.ts), audio rendition included.
+	ext := ".ts"
+	if codec == CodecAV1 {
+		ext = ".m4s"
+	}
+	switch mode {
+	case segAudioOnly:
+		return filepath.Join(hlsCacheDir, cacheRoot, "audio", fmt.Sprintf("a%d", audioIdx), fmt.Sprintf("%06d%s", segNum, ext)),
+			fmt.Sprintf("%s/audio/a%d/%06d", cacheRoot, audioIdx, segNum)
+	case segVideoOnly:
+		return filepath.Join(hlsCacheDir, cacheRoot, q, "v", fmt.Sprintf("%06d%s", segNum, ext)),
+			fmt.Sprintf("%s/%s/v/%06d", cacheRoot, q, segNum)
+	default: // segMuxed
+		return filepath.Join(hlsCacheDir, cacheRoot, q, fmt.Sprintf("a%d", audioIdx), fmt.Sprintf("%06d%s", segNum, ext)),
+			fmt.Sprintf("%s/%s/a%d/%06d", cacheRoot, q, audioIdx, segNum)
+	}
+}
+
+// initPath is the on-disk location of the AV1 init segment for (hash, q,
+// audioIdx). Lives alongside the media segments so cache-cleanup eviction
+// removes them together when the rung ages out.
+func initPath(hash, q string, audioIdx int, useCopy bool) string {
+	dKey := fmt.Sprintf("d%d", int(hlsSegDur))
+	sub := dKey + "-av1"
+	if useCopy {
+		sub = dKey + "-av1-copy"
+	}
+	return filepath.Join(hlsCacheDir, filepath.Join(hash, sub), q, fmt.Sprintf("a%d", audioIdx), "init.m4s")
+}
+
+// ensureSegment guarantees a segment exists on disk at segPath. Cache hits
+// return immediately; in-flight requests for the same segment wait on a shared
+// channel so we never run two ffmpegs for the same key.
+func ensureSegment(srcPath, hash, codec, q string, segNum, audioIdx, mode int, useCopy bool) (string, error) {
+	segPath, cacheKey := segPaths(hash, codec, q, segNum, audioIdx, mode, useCopy)
+
+	if _, err := os.Stat(segPath); err == nil {
+		return segPath, nil
+	}
+
+	ch := make(chan struct{})
+	if actual, loaded := hlsInFlight.LoadOrStore(cacheKey, ch); loaded {
+		select {
+		case <-actual.(chan struct{}):
+			return segPath, nil
+		case <-time.After(90 * time.Second):
+			return segPath, fmt.Errorf("segment generation timed out")
+		}
+	}
+
+	defer func() {
+		hlsInFlight.Delete(cacheKey)
+		close(ch)
+	}()
+
+	// AV1 copy-passthrough (q=qSrc) needs no profile — it's a remux, no encode.
+	// Profiles drive the h264 ladder and the dormant AV1 transcode fallback.
+	avCopy := codec == CodecAV1 && useCopy
+	var p hlsProfile
+	if mode != segAudioOnly && !avCopy {
+		var ok bool
+		if codec == CodecAV1 {
+			p, ok = av1Profiles[q]
+		} else {
+			p, ok = hlsProfiles[q]
+		}
+		if !ok {
+			return segPath, fmt.Errorf("invalid quality %q for codec %q", q, codec)
+		}
+	}
+
+	start := float64(segNum) * hlsSegDur
+	segDur := hlsSegDur
+	// Copy-passthrough segments ride keyframe-aligned bounds. The AV1 audio
+	// rendition (avCopy + segAudioOnly) MUST use the same bounds as the video
+	// rung so the demuxed renditions stay segment-aligned; h264's TS audio
+	// stays on the uniform grid.
+	if useCopy && (mode != segAudioOnly || avCopy) {
+		si := getSrcInfo(srcPath)
+		if segNum >= len(si.bounds)-1 {
+			return segPath, fmt.Errorf("segment %d out of range", segNum)
+		}
+		start = si.bounds[segNum]
+		segDur = si.bounds[segNum+1] - si.bounds[segNum]
+	}
+
+	var err error
+	if avCopy && mode == segAudioOnly {
+		// Audio: one continuous pass for the whole track (gapless, no
+		// per-segment AAC priming/overlap, no mid-file decode failures —
+		// per-segment audio reproducibly died ~seg 367). ffmpeg writes
+		// segments progressively (~100× realtime) so it always outruns
+		// playback; we just wait for this segment's file to land.
+		err = ensureAV1Audio(srcPath, hash, audioIdx, segDur)
+		if err == nil {
+			err = waitForFile(segPath, 120*time.Second)
+		}
+	} else if avCopy {
+		// Video rung: ONE continuous -c:v copy pass (same gapless contract as
+		// audio). Per-segment -ss+copy snapped every segment to the previous
+		// keyframe; the single muxer writes correct native tfdt and cuts on
+		// real keyframes. Pass outruns playback, so just wait for this seg.
+		err = ensureAV1Video(srcPath, hash, hlsSegDur)
+		if err == nil {
+			err = waitForFile(segPath, 120*time.Second)
+		}
+	} else if codec == CodecAV1 && mode != segAudioOnly {
+		err = generateAV1Segment(srcPath, segPath, start, segDur, p, audioIdx, mode)
+	} else {
+		err = generateSegment(srcPath, segPath, start, segDur, p, audioIdx, mode, useCopy)
+	}
+	if err != nil {
+		log.Printf("HLS segment error [%s codec=%s q=%s seg=%d audio=%d mode=%d copy=%v]: %v", filepath.Base(srcPath), codec, q, segNum, audioIdx, mode, useCopy, err)
+		return segPath, err
+	}
+	return segPath, nil
+}
+
 func HLSSegment(c *gin.Context, lib *library.Library) {
 	file := c.Query("file")
 	q := c.Query("q")
 	segStr := c.Query("seg")
 	audioStr, hasAudio := c.GetQuery("audio")
 	useCopy := c.Query("m") == "copy"
+	codec := c.DefaultQuery("codec", CodecH264)
+	if codec != CodecAV1 {
+		codec = CodecH264
+	}
 
 	audioOnly := q == "audio"
 
@@ -555,81 +1027,97 @@ func HLSSegment(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	hash := library.Hash(file)
-	cacheRoot := hash
-	if useCopy {
-		cacheRoot = filepath.Join(hash, "copy")
-	}
-
-	var segPath, cacheKey string
-	var mode int
-
+	mode := segMuxed
 	if audioOnly {
 		mode = segAudioOnly
-		cacheKey = fmt.Sprintf("%s/audio/a%d/%06d", cacheRoot, audioIdx, segNum)
-		segPath = filepath.Join(hlsCacheDir, cacheRoot, "audio", fmt.Sprintf("a%d", audioIdx), fmt.Sprintf("%06d.ts", segNum))
 	} else if !hasAudio {
 		mode = segVideoOnly
-		cacheKey = fmt.Sprintf("%s/%s/v/%06d", cacheRoot, q, segNum)
-		segPath = filepath.Join(hlsCacheDir, cacheRoot, q, "v", fmt.Sprintf("%06d.ts", segNum))
-	} else {
-		mode = segMuxed
-		cacheKey = fmt.Sprintf("%s/%s/a%d/%06d", cacheRoot, q, audioIdx, segNum)
-		segPath = filepath.Join(hlsCacheDir, cacheRoot, q, fmt.Sprintf("a%d", audioIdx), fmt.Sprintf("%06d.ts", segNum))
 	}
 
-	if _, err := os.Stat(segPath); err == nil {
-		serveSegment(c, segPath)
-		return
-	}
-
-	// In-flight dedup: if another goroutine is generating this segment, wait for it
-	ch := make(chan struct{})
-	if actual, loaded := hlsInFlight.LoadOrStore(cacheKey, ch); loaded {
-		select {
-		case <-actual.(chan struct{}):
-			serveSegment(c, segPath)
-		case <-time.After(90 * time.Second):
-			c.String(http.StatusGatewayTimeout, "segment generation timed out")
-		}
-		return
-	}
-
-	defer func() {
-		hlsInFlight.Delete(cacheKey)
-		close(ch)
-	}()
-
-	var p hlsProfile
-	if !audioOnly {
-		var ok bool
-		p, ok = hlsProfiles[q]
-		if !ok {
-			c.String(http.StatusBadRequest, "invalid quality")
-			return
-		}
-	}
-
-	// Compute start/duration: keyframe-aligned for copy mode, fixed-grid otherwise
-	start := float64(segNum) * hlsSegDur
-	segDur := hlsSegDur
-	if useCopy && !audioOnly {
-		si := getSrcInfo(path)
-		if segNum >= len(si.bounds)-1 {
-			c.String(http.StatusBadRequest, "segment out of range")
-			return
-		}
-		start = si.bounds[segNum]
-		segDur = si.bounds[segNum+1] - si.bounds[segNum]
-	}
-
-	if err := generateSegment(path, segPath, start, segDur, p, audioIdx, mode, useCopy); err != nil {
-		log.Printf("HLS segment error [%s q=%s seg=%d audio=%d mode=%d copy=%v]: %v", filepath.Base(path), q, segNum, audioIdx, mode, useCopy, err)
+	segPath, err := ensureSegment(path, library.Hash(file), codec, q, segNum, audioIdx, mode, useCopy)
+	if err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf("transcode failed: %v", err))
 		return
 	}
+	serveSegment(c, segPath, codec)
+}
 
-	serveSegment(c, segPath)
+// Prewarm fires off ffmpeg jobs for the first N segments of the source-height
+// rung (copy mode if eligible) plus a few audio segments, so VHS's initial
+// fetches hit a populated cache instead of waiting on cold ffmpegs.
+func Prewarm(file, path string, srcHeight int, aTracks []audioMeta, defAudio int) {
+	const N = 10
+	codec := MediaCodec(file)
+	multiAudio := len(aTracks) > 1
+	// AV1 multi-audio isn't supported in this round; fall back to h264 prewarm.
+	if codec == CodecAV1 && multiAudio {
+		codec = CodecH264
+	}
+	// Mirror the master's zero-audio fallback (silent AV1 → h264).
+	if codec == CodecAV1 && len(aTracks) == 0 {
+		codec = CodecH264
+	}
+	// AV1 serves only via copy-passthrough; if not eligible the master falls
+	// back to h264, so prewarm must mirror that or it warms the wrong cache.
+	if codec == CodecAV1 && !canCopyAV1(getSrcInfo(path)) {
+		codec = CodecH264
+	}
+	hash := library.Hash(file)
+
+	if codec == CodecAV1 {
+		// Demuxed CMAF: kick BOTH continuous passes (audio re-encode, video
+		// -c:v copy) now. Each flushes init + segments far ahead of playback,
+		// so by the time hls.js asks the cache is already populated. The video
+		// rung is audio-independent (the player's video MAP has no audio).
+		segDur := hlsSegDur
+		if si := getSrcInfo(path); len(si.bounds) >= 2 {
+			segDur = si.bounds[1] - si.bounds[0]
+		}
+		go ensureAV1Audio(path, hash, defAudio, segDur)
+		go ensureAV1Video(path, hash, hlsSegDur)
+		return
+	}
+
+	q := pickPrewarmRung(srcHeight, codec)
+	if q == "" {
+		return
+	}
+
+	si := getSrcInfo(path)
+	useCopy := canCopyVideo(si, hlsProfiles[q])
+
+	for seg := 0; seg < N; seg++ {
+		s := seg
+		if multiAudio {
+			go ensureSegment(path, hash, codec, q, s, 0, segVideoOnly, useCopy)
+			go ensureSegment(path, hash, codec, "", s, defAudio, segAudioOnly, false)
+		} else {
+			go ensureSegment(path, hash, codec, q, s, defAudio, segMuxed, useCopy)
+		}
+	}
+}
+
+func pickPrewarmRung(srcHeight int, codec string) string {
+	if srcHeight == 0 {
+		return "1080p"
+	}
+	profiles := hlsProfiles
+	if codec == CodecAV1 {
+		profiles = av1Profiles
+	}
+	best := ""
+	for _, q := range hlsQualityOrder {
+		if p, ok := profiles[q]; ok && p.h <= srcHeight {
+			best = q
+		}
+	}
+	return best
+}
+
+type audioMeta struct {
+	language string
+	codec    string
+	channels int
 }
 
 func generateSegment(srcPath, segPath string, start, segDur float64, p hlsProfile, audioIdx int, mode int, useCopy bool) error {
@@ -646,12 +1134,8 @@ func generateSegment(srcPath, segPath string, start, segDur float64, p hlsProfil
 		"-t", fmt.Sprintf("%.3f", segDur),
 	}
 
-	encodeArgs := []string{
-		"-c:v", "libx264", "-preset", "medium",
-		"-crf", strconv.Itoa(p.crf),
-		"-maxrate", p.vbr, "-bufsize", doubleKRate(p.vbr),
-		"-vf", p.scale,
-	}
+	p.scale = scaleFilter(getSrcInfo(srcPath), p.h)
+	encodeArgs := h264HLS(p)
 
 	switch mode {
 	case segMuxed:
@@ -661,10 +1145,8 @@ func generateSegment(srcPath, segPath string, start, segDur float64, p hlsProfil
 		} else {
 			args = append(args, encodeArgs...)
 		}
-		args = append(args,
-			"-c:a", "aac", "-b:a", p.ab, "-ac", "2",
-			"-af", "aresample=async=1",
-		)
+		args = append(args, aacArgs(getSrcInfo(srcPath), audioIdx, p.ab)...)
+		args = append(args, "-af", "aresample=async=1")
 	case segVideoOnly:
 		args = append(args, "-map", "0:v:0", "-an")
 		if useCopy {
@@ -673,11 +1155,9 @@ func generateSegment(srcPath, segPath string, start, segDur float64, p hlsProfil
 			args = append(args, encodeArgs...)
 		}
 	case segAudioOnly:
-		args = append(args,
-			"-map", fmt.Sprintf("0:a:%d", audioIdx), "-vn",
-			"-c:a", "aac", "-b:a", "128k", "-ac", "2",
-			"-af", "aresample=async=1", // compensate A/V drift from AAC encoder priming
-		)
+		args = append(args, "-map", fmt.Sprintf("0:a:%d", audioIdx), "-vn")
+		args = append(args, aacArgs(getSrcInfo(srcPath), audioIdx, "128k")...)
+		args = append(args, "-af", "aresample=async=1") // A/V drift from AAC priming
 	}
 
 	args = append(args,
@@ -694,7 +1174,7 @@ func generateSegment(srcPath, segPath string, start, segDur float64, p hlsProfil
 	return os.Rename(tmp, segPath)
 }
 
-func serveSegment(c *gin.Context, segPath string) {
+func serveSegment(c *gin.Context, segPath, codec string) {
 	f, err := os.Open(segPath)
 	if err != nil {
 		log.Printf("serveSegment open: %v", err)
@@ -709,8 +1189,363 @@ func serveSegment(c *gin.Context, segPath string) {
 		return
 	}
 
-	c.Header("Content-Type", "video/mp2t")
+	c.Header("Content-Type", segMime(codec))
 	c.Header("Content-Length", fmt.Sprintf("%d", info.Size()))
 	c.Header("Cache-Control", "public, max-age=31536000")
 	io.Copy(c.Writer, f) // don't call c.Status() — first Write flushes headers with 200
+}
+
+// generateAV1Segment writes a fragment-only .m4s for the [start, start+segDur)
+// slice. Uses ffmpeg's HLS-fmp4 muxer in a scratch dir; the muxer writes
+// init+seg+playlist, we keep only the seg.
+//
+// Mode: segMuxed (V+A) or segVideoOnly. segAudioOnly stays in MPEG-TS land —
+// a multi-audio AV1 master playlist would need a fully fMP4 audio rendition,
+// which this round doesn't support.
+func generateAV1Segment(srcPath, segPath string, start, segDur float64, p hlsProfile, audioIdx int, mode int) error {
+	if err := os.MkdirAll(filepath.Dir(segPath), 0755); err != nil {
+		return err
+	}
+
+	work := segPath + ".work"
+	if err := os.MkdirAll(work, 0755); err != nil {
+		return err
+	}
+	defer os.RemoveAll(work)
+
+	args := []string{
+		"-y",
+		"-ss", fmt.Sprintf("%.3f", start),
+		"-i", srcPath,
+		"-t", fmt.Sprintf("%.3f", segDur),
+	}
+
+	p.scale = scaleFilter(getSrcInfo(srcPath), p.h)
+	encArgs := av1HLS(p)
+	if encArgs == nil {
+		return fmt.Errorf("no AV1 encoder available")
+	}
+
+	switch mode {
+	case segMuxed:
+		args = append(args, "-map", "0:v:0", "-map", fmt.Sprintf("0:a:%d?", audioIdx))
+		args = append(args, encArgs...)
+		args = append(args, aacArgs(getSrcInfo(srcPath), audioIdx, p.ab)...)
+		args = append(args, "-af", "aresample=async=1")
+	case segVideoOnly:
+		args = append(args, "-map", "0:v:0", "-an")
+		args = append(args, encArgs...)
+	default:
+		return fmt.Errorf("av1 path does not support mode %d", mode)
+	}
+
+	args = append(args,
+		"-output_ts_offset", fmt.Sprintf("%.3f", start),
+		"-f", "hls",
+		"-hls_segment_type", "fmp4",
+		"-hls_fmp4_init_filename", "init.m4s",
+		"-hls_segment_filename", filepath.Join(work, "seg%d.m4s"),
+		"-hls_time", "9999",
+		filepath.Join(work, "playlist.m3u8"),
+	)
+
+	stderr, err := library.FFRun{Args: args, Timeout: codecTimeout("libsvtav1")}.Run()
+	if err != nil {
+		return library.FFErr(stderr, err)
+	}
+
+	src := filepath.Join(work, "seg0.m4s")
+	if _, statErr := os.Stat(src); statErr != nil {
+		return fmt.Errorf("av1 segment not produced: %w", statErr)
+	}
+	return os.Rename(src, segPath)
+}
+
+// generateAV1Init writes the moov-only init segment for the given rung+audio.
+// One ffmpeg run per (file, q, audioIdx) — cached forever after.
+func generateAV1Init(srcPath, initFile string, p hlsProfile, audioIdx int, mode int) error {
+	if err := os.MkdirAll(filepath.Dir(initFile), 0755); err != nil {
+		return err
+	}
+
+	work := initFile + ".work"
+	if err := os.MkdirAll(work, 0755); err != nil {
+		return err
+	}
+	defer os.RemoveAll(work)
+
+	// 1s of source is enough for the muxer to emit a complete moov box with
+	// codec config; we throw the media away.
+	args := []string{"-y", "-i", srcPath, "-t", "1.0"}
+
+	p.scale = scaleFilter(getSrcInfo(srcPath), p.h)
+	encArgs := av1HLS(p)
+	if encArgs == nil {
+		return fmt.Errorf("no AV1 encoder available")
+	}
+
+	switch mode {
+	case segMuxed:
+		args = append(args, "-map", "0:v:0", "-map", fmt.Sprintf("0:a:%d?", audioIdx))
+		args = append(args, encArgs...)
+		args = append(args, aacArgs(getSrcInfo(srcPath), audioIdx, p.ab)...)
+	case segVideoOnly:
+		args = append(args, "-map", "0:v:0", "-an")
+		args = append(args, encArgs...)
+	default:
+		return fmt.Errorf("av1 init does not support mode %d", mode)
+	}
+
+	args = append(args,
+		"-f", "hls",
+		"-hls_segment_type", "fmp4",
+		"-hls_fmp4_init_filename", "init.m4s",
+		"-hls_segment_filename", filepath.Join(work, "seg%d.m4s"),
+		"-hls_time", "0.5",
+		filepath.Join(work, "playlist.m3u8"),
+	)
+
+	stderr, err := library.FFRun{Args: args, Timeout: codecTimeout("libsvtav1")}.Run()
+	if err != nil {
+		return library.FFErr(stderr, err)
+	}
+
+	src := filepath.Join(work, "init.m4s")
+	if _, statErr := os.Stat(src); statErr != nil {
+		return fmt.Errorf("av1 init not produced: %w", statErr)
+	}
+	return os.Rename(src, initFile)
+}
+
+var av1AudioInFlight sync.Map // audio dir -> chan struct{}
+
+// ensureAV1Audio renders the ENTIRE audio track in ONE continuous ffmpeg pass
+// (gapless, single encoder-prime, zero accumulating drift — per-segment audio
+// reproducibly MEDIA_ERR_DECODE'd ~seg 367). ffmpeg's hls/fmp4 muxer flushes
+// init.m4s + %06d.m4s progressively (~100× realtime, far outrunning playback)
+// so callers don't block on the whole pass — they waitForFile the one segment
+// they need. Idempotent: a `.done` marker means fully rendered; a restart
+// mid-pass (no marker) re-renders from scratch. Returns immediately; the pass
+// runs in a background goroutine guarded by an in-flight gate.
+func ensureAV1Audio(srcPath, hash string, audioIdx int, segDur float64) error {
+	dir := filepath.Dir(initPath(hash, "audio", audioIdx, true))
+	if _, err := os.Stat(filepath.Join(dir, ".done")); err == nil {
+		return nil
+	}
+	gate := make(chan struct{})
+	if _, loaded := av1AudioInFlight.LoadOrStore(dir, gate); loaded {
+		return nil // a pass is already running; waitForFile tracks progress
+	}
+
+	if segDur <= 0 {
+		segDur = hlsSegDur
+	}
+	go func() {
+		defer func() {
+			av1AudioInFlight.Delete(dir)
+			close(gate)
+		}()
+		// No .done → any prior content is a partial from an interrupted pass.
+		os.RemoveAll(dir)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("[av1audio] mkdir %s: %v", dir, err)
+			return
+		}
+		args := []string{
+			"-y", "-i", srcPath,
+			"-map", fmt.Sprintf("0:a:%d", audioIdx), "-vn",
+		}
+		args = append(args, aacArgs(getSrcInfo(srcPath), audioIdx, "192k")...)
+		args = append(args,
+			"-f", "hls",
+			"-hls_segment_type", "fmp4",
+			"-hls_fmp4_init_filename", "init.m4s",
+			"-hls_flags", "independent_segments+temp_file",
+			"-hls_segment_filename", filepath.Join(dir, "%06d.m4s"),
+			"-hls_time", fmt.Sprintf("%.3f", segDur),
+			"-hls_list_size", "0",
+			filepath.Join(dir, "audio.m3u8"),
+		)
+		stderr, err := library.FFRun{Args: args, Timeout: 30 * time.Minute}.Run()
+		if err != nil {
+			log.Printf("[av1audio] pass failed [%s a%d]: %v\n%s", filepath.Base(srcPath), audioIdx, err, stderr)
+			return
+		}
+		os.WriteFile(filepath.Join(dir, ".done"), nil, 0644)
+	}()
+	return nil
+}
+
+var av1VideoInFlight sync.Map // video dir -> chan struct{}
+
+// ensureAV1Video remuxes the ENTIRE AV1 video stream in ONE continuous
+// `-c:v copy` pass into keyframe-aligned fMP4 fragments, exactly mirroring
+// ensureAV1Audio. The old per-segment `-ss <bounds[N]> -c:v copy` path was
+// fatally wrong: ffmpeg snaps -ss to the keyframe at-or-BEFORE the timestamp,
+// and bounds[N] formatted "%.3f" rounds just under the real keyframe pts, so
+// every segment carried the PREVIOUS GOP while av1PatchFragment stamped it
+// with the current segment's tfdt — video ran exactly one segment (~one GOP,
+// ~6.7s) behind audio, perceived as audio drift plus scenes replaying at
+// every seam (Superbad: seg N decoded to source bounds[N-1]). A single muxer
+// instance keeps a running decode clock, so the hls/fmp4 muxer writes correct
+// cumulative tfdt natively and cuts only at real source keyframes — no -ss,
+// no tfdt patch, no off-by-one. `-hls_time hlsSegDur` reproduces
+// segmentBoundaries' rule exactly, so the on-disk segments line up with the
+// playlist's si.bounds EXTINFs. Copy is a pure remux so it outruns playback
+// just like the audio pass. Same idempotent .done / in-flight contract.
+func ensureAV1Video(srcPath, hash string, segDur float64) error {
+	seg0, _ := segPaths(hash, CodecAV1, qSrc, 0, 0, segVideoOnly, true)
+	dir := filepath.Dir(seg0)
+	if _, err := os.Stat(filepath.Join(dir, ".done")); err == nil {
+		return nil
+	}
+	gate := make(chan struct{})
+	if _, loaded := av1VideoInFlight.LoadOrStore(dir, gate); loaded {
+		return nil // a pass is already running; waitForFile tracks progress
+	}
+
+	if segDur <= 0 {
+		segDur = hlsSegDur
+	}
+	go func() {
+		defer func() {
+			av1VideoInFlight.Delete(dir)
+			close(gate)
+		}()
+		// No .done → any prior content is a partial (or the broken off-by-one
+		// generation); start clean.
+		os.RemoveAll(dir)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("[av1video] mkdir %s: %v", dir, err)
+			return
+		}
+		args := []string{
+			"-y", "-i", srcPath,
+			"-map", "0:v:0", "-an",
+			"-c:v", "copy",
+			"-f", "hls",
+			"-hls_segment_type", "fmp4",
+			"-hls_fmp4_init_filename", "init.m4s",
+			"-hls_flags", "independent_segments+temp_file",
+			"-hls_segment_filename", filepath.Join(dir, "%06d.m4s"),
+			"-hls_time", fmt.Sprintf("%.3f", segDur),
+			"-hls_list_size", "0",
+			filepath.Join(dir, "video.m3u8"),
+		}
+		stderr, err := library.FFRun{Args: args, Timeout: 30 * time.Minute}.Run()
+		if err != nil {
+			log.Printf("[av1video] pass failed [%s]: %v\n%s", filepath.Base(srcPath), err, stderr)
+			return
+		}
+		os.WriteFile(filepath.Join(dir, ".done"), nil, 0644)
+	}()
+	return nil
+}
+
+// waitForFile blocks until path exists or timeout. The AV1 audio pass writes
+// segments far faster than realtime, so a needed segment lands quickly.
+func waitForFile(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for %s", filepath.Base(path))
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+}
+
+var initInFlight sync.Map
+
+func ensureInit(srcPath, hash, q string, audioIdx int, useCopy bool) (string, error) {
+	out := initPath(hash, q, audioIdx, useCopy)
+	if _, err := os.Stat(out); err == nil {
+		return out, nil
+	}
+
+	cacheKey := fmt.Sprintf("init:%s:%s:%d:%v", hash, q, audioIdx, useCopy)
+	ch := make(chan struct{})
+	if actual, loaded := initInFlight.LoadOrStore(cacheKey, ch); loaded {
+		select {
+		case <-actual.(chan struct{}):
+			return out, nil
+		case <-time.After(2 * time.Minute):
+			return out, fmt.Errorf("init generation timed out")
+		}
+	}
+	defer func() {
+		initInFlight.Delete(cacheKey)
+		close(ch)
+	}()
+
+	if useCopy {
+		// Demuxed CMAF: the audio rendition (q=audio) gets an AAC-only init,
+		// the video rung an av01-only init — single track each, the shape
+		// hls.js requires for fMP4.
+		if q == "audio" {
+			// The audio init.m4s is emitted by the single continuous pass
+			// (same encoder that writes the segments → matching esds).
+			segDur := hlsSegDur
+			if si := getSrcInfo(srcPath); len(si.bounds) >= 2 {
+				segDur = si.bounds[1] - si.bounds[0]
+			}
+			if err := ensureAV1Audio(srcPath, hash, audioIdx, segDur); err != nil {
+				return out, err
+			}
+			if err := waitForFile(out, 120*time.Second); err != nil {
+				return out, err
+			}
+			return out, nil
+		}
+		// The video init is emitted by the single continuous copy pass (same
+		// muxer instance that writes the segments → its av01 config matches the
+		// -c:v copy bytes exactly), co-located with the segments.
+		if err := ensureAV1Video(srcPath, hash, hlsSegDur); err != nil {
+			return out, err
+		}
+		seg0, _ := segPaths(hash, CodecAV1, qSrc, 0, 0, segVideoOnly, true)
+		vInit := filepath.Join(filepath.Dir(seg0), "init.m4s")
+		if err := waitForFile(vInit, 120*time.Second); err != nil {
+			return out, err
+		}
+		return vInit, nil
+	}
+
+	p, ok := av1Profiles[q]
+	if !ok {
+		return out, fmt.Errorf("invalid quality %q", q)
+	}
+	if err := generateAV1Init(srcPath, out, p, audioIdx, segMuxed); err != nil {
+		log.Printf("AV1 init error [%s q=%s audio=%d]: %v", filepath.Base(srcPath), q, audioIdx, err)
+		return out, err
+	}
+	return out, nil
+}
+
+func HLSInit(c *gin.Context, lib *library.Library) {
+	file := c.Query("file")
+	q := c.Query("q")
+	audioStr := c.DefaultQuery("audio", "0")
+	useCopy := c.Query("m") == "copy"
+
+	var audioIdx int
+	fmt.Sscanf(audioStr, "%d", &audioIdx)
+
+	path := lib.FindFile(file)
+	if path == "" {
+		c.String(http.StatusNotFound, "not found")
+		return
+	}
+
+	out, err := ensureInit(path, library.Hash(file), q, audioIdx, useCopy)
+	if err != nil {
+		c.String(http.StatusInternalServerError, fmt.Sprintf("init failed: %v", err))
+		return
+	}
+
+	c.Header("Content-Type", "video/mp4")
+	c.Header("Cache-Control", "public, max-age=31536000")
+	c.File(out)
 }

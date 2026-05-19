@@ -168,8 +168,12 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
+	// Bounded + NUL-stripped tail so a misbehaving Python subprocess can't
+	// flood the log with thousands of `\x00…` rows (the post-fix flood
+	// observed 2026-05-20). 8 KB of the most-recent stderr is plenty for the
+	// actual error to surface.
+	stderrBuf := &library.TailWriter{Max: 8 << 10}
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		log.Printf("[whisper] python start error: %v", err)

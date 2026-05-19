@@ -52,8 +52,7 @@ func main() {
 
 	jobs.OnDownloads = media.ProcessAll
 
-	go media.ProcessAll(lib)
-	go library.ScanCorrupt(lib)
+	go media.ProcessAll(lib) // runs ScanCorrupt internally after Convert+Clean
 	go media.NormalizeSubs(lib)
 	go jobs.Aria2Init(lib)
 	media.StartCacheCleanLoop(lib, time.Hour)
@@ -69,6 +68,7 @@ func main() {
 
 	router.GET("/", func(c *gin.Context) { pulse(); c.File("index.html") })
 	router.GET("/manage", func(c *gin.Context) { c.File("index.html") })
+	router.GET("/search", func(c *gin.Context) { c.File("index.html") })
 	router.StaticFile("/manifest.json", "./public/manifest.json")
 	router.StaticFile("/sw.js", "./public/sw.js")
 	router.Static("/assets", assDir)
@@ -94,6 +94,7 @@ func main() {
 
 	router.POST("/api/aria2/add", func(c *gin.Context) { jobs.Aria2Add(c, lib) })
 	router.POST("/api/aria2/add-torrent", func(c *gin.Context) { jobs.Aria2AddTorrent(c, lib) })
+	router.GET("/api/search", jobs.TPBSearch)
 	router.GET("/api/aria2/list", jobs.Aria2List)
 	router.POST("/api/aria2/pause", jobs.Aria2Pause)
 	router.POST("/api/aria2/resume", jobs.Aria2Resume)
@@ -109,9 +110,9 @@ func main() {
 	router.GET("/api/hls/master", func(c *gin.Context) { media.HLSMaster(c, lib) })
 	router.GET("/api/hls/playlist", func(c *gin.Context) { media.HLSPlaylist(c, lib) })
 	router.GET("/api/hls/segment", func(c *gin.Context) { media.HLSSegment(c, lib) })
+	router.GET("/api/hls/init", func(c *gin.Context) { media.HLSInit(c, lib) })
 	router.GET("/api/hls/avoffset", func(c *gin.Context) { media.HLSAVOffset(c, lib) })
 
-	router.GET("/api/video/info", func(c *gin.Context) { media.VideoInfo(c, lib) })
 	router.GET("/api/audio/info", func(c *gin.Context) { media.AudioInfo(c, lib) })
 	router.GET("/api/subs/info", func(c *gin.Context) { media.Subctx(c, lib) })
 	router.GET("/api/subs/search", func(c *gin.Context) { media.SubsSearch(c, lib) })

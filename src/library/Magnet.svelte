@@ -41,7 +41,7 @@
   <input
     class="field"
     style="flex:1; min-width:0"
-    placeholder="magnet:?xt=… or click Add to upload .torrent"
+    placeholder="magnet:?xt=…, https://…, or YouTube URL — click Add to upload .torrent"
     bind:value={magnet}
     onkeydown={(e) => e.key === "Enter" && submit()}
   />

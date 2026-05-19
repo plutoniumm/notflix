@@ -70,21 +70,12 @@ export async function HEAD(url: string): Promise<boolean> {
   }
 }
 
-export function prefetchRange(url: string, bytes = 1_048_575): void {
-  fetch(url, {
-    headers: { Range: `bytes=0-${bytes}` },
-    priority: "low" as any,
-  }).catch((err) => console.warn("[prefetch]", err));
-}
-
 const E = encodeURIComponent;
 
 export const api = {
   videoList: (opts?: ReqOpts) => GET("/list/video", opts),
 
-  video: {
-    info: (file: string, opts?: ReqOpts) => GET(`/api/video/info?file=${E(file)}`, opts),
-  },
+  search: (q: string, opts?: ReqOpts) => GET(`/api/search?q=${E(q)}`, opts),
 
   audio: {
     info: (file: string, opts?: ReqOpts) => GET(`/api/audio/info?file=${E(file)}`, opts),

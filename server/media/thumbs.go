@@ -36,6 +36,7 @@ func makeThumb(src, dst string) error {
 func GenerateThumbnails(dir string) {
 	tdir := "images"
 	os.MkdirAll(tdir, 0755)
+	var skipped int
 
 	walk := func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") {
@@ -44,6 +45,10 @@ func GenerateThumbnails(dir string) {
 
 		ext := strings.ToLower(filepath.Ext(d.Name()))
 		if ext == ".mp4" {
+			if library.IsCorrupt(path) {
+				skipped++
+				return nil
+			}
 			name := library.Hash(d.Name()) + ".jpg"
 			dst := filepath.Join(tdir, name)
 			if _, err := os.Stat(dst); err != nil {
@@ -57,6 +62,9 @@ func GenerateThumbnails(dir string) {
 	}
 
 	filepath.WalkDir(dir, walk)
+	if skipped > 0 {
+		log.Printf("[thumbs] skipped %d corrupt file(s) in %s", skipped, dir)
+	}
 }
 
 var (
@@ -81,7 +89,7 @@ func RegenerateThumbnails(lib *library.Library, minInterval time.Duration) {
 		thumbRegen.Store(false)
 	}()
 
-	count := 0
+	count, skipped := 0, 0
 	tdir := "images"
 	os.MkdirAll(tdir, 0755)
 
@@ -101,6 +109,14 @@ func RegenerateThumbnails(lib *library.Library, minInterval time.Duration) {
 				return nil
 			}
 
+			// ScanCorrupt runs ahead of RegenerateThumbnails in ProcessAll
+			// (convert.go) — skipping here silences the per-file `moov atom
+			// not found` log dumps that otherwise repeat on every pass.
+			if library.IsCorrupt(path) {
+				skipped++
+				return nil
+			}
+
 			name := library.Hash(d.Name()) + ".jpg"
 			dst := filepath.Join(tdir, name)
 			if _, err := os.Stat(dst); err != nil {
@@ -117,5 +133,8 @@ func RegenerateThumbnails(lib *library.Library, minInterval time.Duration) {
 
 	if count > 0 {
 		log.Printf("[thumbs] regenerated %d missing thumbnails", count)
+	}
+	if skipped > 0 {
+		log.Printf("[thumbs] skipped %d known-corrupt file(s)", skipped)
 	}
 }
