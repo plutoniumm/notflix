@@ -14,7 +14,7 @@
   }
 
   import Bar from "./bar.svelte";
-  import Progress from "./progress.svelte";
+  import Dock from "./dock.svelte";
   import Volume from "./volume.svelte";
   import Sync from "./sync.svelte";
   import Related from "./related.svelte";
@@ -30,6 +30,7 @@
   import { SAVE_INTERVAL_MS } from "../core/events.svelte";
   import { AVSync } from "./avsync";
   import { PlayerView } from "./view.svelte";
+  import { Sprite } from "./sprite.svelte";
   import type { WhisperCue } from "./subs";
 
   let { videoParam }: any = $props();
@@ -48,6 +49,7 @@
   const watch = new WatchProgress();
   const view = new PlayerView();
   const ps = view.state;
+  const sprite = new Sprite();
 
   let videoEl: HTMLVideoElement | undefined;
   let pageEl: HTMLElement | undefined;
@@ -254,9 +256,7 @@
         if (!trySeek()) player.one("loadedmetadata", trySeek);
       };
 
-      const saved = watch.localResume(videoParam);
-      if (saved > 0) applyResume(saved);
-      else watch.serverResume(videoParam).then(applyResume);
+      watch.resume(videoParam).then(applyResume);
 
       cleanups.push(Touch(player, pageEl!, toggleFullscreen));
       cleanups.push(
@@ -423,14 +423,17 @@
           data.find((g: any) => g.dir === dir)?.files?.find(
             (f: any) => f.name === name,
           )?.key ?? "";
-        if (ps.videoKey && "mediaSession" in navigator) {
-          navigator.mediaSession.metadata = new MediaMetadata({
-            title,
-            artist: dir === "." ? "Notflix" : dir,
-            artwork: [
-              { src: `/images/${ps.videoKey}.jpg`, type: "image/jpeg" },
-            ],
-          });
+        if (ps.videoKey) {
+          sprite.load(ps.videoKey);
+          if ("mediaSession" in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+              title,
+              artist: dir === "." ? "Notflix" : dir,
+              artwork: [
+                { src: `/images/${ps.videoKey}.jpg`, type: "image/jpeg" },
+              ],
+            });
+          }
         }
 
       })
@@ -491,13 +494,12 @@
 
   <Whisper msg={ps.wMsg} cues={whisperCues} currentTime={ps.currentTime} />
 
-  <Progress
-    pct={ps.pct}
-    currentTime={ps.currentTime}
-    duration={ps.duration}
-    hidden={ps.hideUI}
+  <Dock
+    {ps}
+    {title}
     speed={ps.speed}
-    paused={ps.paused}
+    onSeek={(t) => player?.currentTime(t)}
+    onPlayPause={() => (player?.paused() ? safePlay() : player.pause())}
     onSpeedDown={() =>
       player?.playbackRate(
         Math.max(0.25, Math.round((player.playbackRate() - 0.25) * 4) / 4),
@@ -506,8 +508,9 @@
       player?.playbackRate(
         Math.min(4, Math.round((player.playbackRate() + 0.25) * 4) / 4),
       )}
-    onPlayPause={() => (player?.paused() ? safePlay() : player.pause())}
     onNext={ps.nextURL ? goNext : undefined}
+    onFullscreen={toggleFullscreen}
+    trickplay={(sec) => sprite.tile(sec)}
   />
   <Volume level={ps.volLevel} visible={ps.volVisible} />
   <Sync ms={ps.syncMs} visible={ps.syncVisible} />

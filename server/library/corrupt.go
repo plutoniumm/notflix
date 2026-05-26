@@ -19,6 +19,20 @@ func IsCorrupt(absPath string) bool {
 	return corruptSet[absPath]
 }
 
+// inProgress reports whether path is an incomplete download or an in-flight
+// conversion target rather than genuine corruption. ffprobe can't open either,
+// but flagging them as corrupt is wrong — they're just not finished. aria2
+// leaves a `<file>.aria2` control file beside partial downloads; the converter
+// writes to `<file>.tmp` / `<file>.audio.tmp` siblings before its atomic rename.
+func inProgress(path string) bool {
+	for _, suf := range []string{".aria2", ".tmp", ".audio.tmp"} {
+		if _, err := os.Stat(path + suf); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // ScanCorrupt probes every video file in lib.Roots; any path that ffprobe
 // can't open (truncated download, missing moov atom, etc.) is added to the
 // in-memory set. Replaces the previous set atomically when done.
@@ -39,6 +53,11 @@ func ScanCorrupt(lib *Library) {
 			}
 			ext := strings.ToLower(filepath.Ext(d.Name()))
 			if ext != ".mp4" && ext != ".mkv" && ext != ".mov" {
+				return nil
+			}
+			// Skip files that are still downloading or mid-conversion — they
+			// fail to probe but aren't corrupt; they re-scan clean once done.
+			if inProgress(path) {
 				return nil
 			}
 

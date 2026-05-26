@@ -1,17 +1,26 @@
-import Tracker from "./tracker";
 import { kv } from "../core/kv";
 import { RESUME_THRESHOLD_S, END_CUTOFF_S } from "../core/events.svelte";
 
-// WatchProgress unifies the two stores that track playback position:
-// - Tracker (localStorage) for instant resume on the same device
-// - KV (server) for cross-device "Continue Watching" rows
+// WatchProgress persists playback position to the server KV store as
+// `watched:<videoParam> = { t, at }`. `t` is the seek-back point, `at` is
+// the wall-clock timestamp (ms) of the last save — surfaced as "x mins ago"
+// on the Continue Watching row.
 //
-// Rule: if we're within END_CUTOFF_S of the end, treat as finished and clear
-// both stores. Below RESUME_THRESHOLD_S, ignore (not worth saving early).
+// Rule: within END_CUTOFF_S of the end → clear (finished). Below
+// RESUME_THRESHOLD_S → ignore (not worth saving early).
+//
+// Earlier revisions mirrored every save into a `lastPlayed` localStorage
+// blob and preferred it on resume; the local copy was per-device, so cross-
+// device resume silently used a stale position. The KV write happens every
+// SAVE_INTERVAL_MS, which is enough.
 export default class WatchProgress {
-  private tracker = new Tracker();
+  constructor() {
+    // One-shot cleanup of the abandoned local store from older clients.
+    try {
+      localStorage.removeItem("lastPlayed");
+    } catch {}
+  }
 
-  // Save current position to both stores. Async (KV roundtrip).
   // Reject insane positions so a momentary broken timeline can't poison
   // resume (a persisted t past the media end made fresh starts jump to ~2h).
   private sane(t: number, d: number): boolean {
@@ -20,40 +29,28 @@ export default class WatchProgress {
 
   save(videoParam: string, t: number, d: number) {
     if (!this.sane(t, d)) return;
-    this.tracker.set(videoParam, t);
-
     if (d > 0 && d - t < END_CUTOFF_S) {
-      this.tracker.del(videoParam);
       kv.set(`watched:${videoParam}`, null);
     } else if (t > RESUME_THRESHOLD_S) {
-      kv.set(`watched:${videoParam}`, { t, at: Date.now() });
+      // dur is carried so the server-side stats tee can compute completion
+      // ratio later without re-probing the file.
+      kv.set(`watched:${videoParam}`, { t, dur: d, at: Date.now() });
     }
   }
 
   // Same as save but synchronous over the wire (sendBeacon). For unload.
   flushOnLeave(videoParam: string, t: number, d: number) {
-    if (!this.sane(t, d)) {
-      this.tracker.flush();
-      return;
-    }
+    if (!this.sane(t, d)) return;
     if (d > 0 && d - t < END_CUTOFF_S) {
-      this.tracker.del(videoParam);
       kv.beacon(`watched:${videoParam}`, null);
     } else if (t > RESUME_THRESHOLD_S) {
-      this.tracker.set(videoParam, t);
-      kv.beacon(`watched:${videoParam}`, { t, at: Date.now() });
+      kv.beacon(`watched:${videoParam}`, { t, dur: d, at: Date.now() });
     }
-    this.tracker.flush();
   }
 
-  // Local-only resume position (synchronous read).
-  localResume(videoParam: string): number {
-    return this.tracker.get(videoParam);
-  }
-
-  // Server-side resume time, if any (async). Returns 0 if not present or
-  // below the threshold.
-  async serverResume(videoParam: string): Promise<number> {
+  // Server-side resume time, if any. Returns 0 if not present or below the
+  // threshold. Caller seeks back RESUME_THRESHOLD_S for context.
+  async resume(videoParam: string): Promise<number> {
     try {
       const res: any = await kv.get("watched:" + videoParam);
       const t = res?.value?.t;
@@ -66,7 +63,6 @@ export default class WatchProgress {
 
   // Mark a video as fully watched (e.g. when user advances to next).
   clear(videoParam: string) {
-    this.tracker.del(videoParam);
     kv.beacon(`watched:${videoParam}`, null);
   }
 }

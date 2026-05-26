@@ -7,9 +7,9 @@
 
   let {
     view,
-    title,
     embed,
     videoParam,
+    title,
     runWhisper,
     onToggleSubs,
     onSelectLocal,
@@ -19,9 +19,9 @@
     onSelectAudio,
   }: {
     view: PlayerView;
-    title: string;
     embed: boolean;
     videoParam: string;
+    title: string;
     runWhisper: () => void;
     onToggleSubs: () => void;
     onSelectLocal: (file: string, label: string) => void;
@@ -33,11 +33,16 @@
 </script>
 
 {#if !embed}
-  <div class="bar p-fix p20 f al-ct g10" class:hidden={view.state.hideUI}>
-    <a href="/" class="back fs sh-0">←</a>
-    <div class="title fw5 trunc">{title}</div>
+  <div class="bar p-fix f al-ct g10" class:hidden={view.state.hideUI}>
+    <a href="/" class="back cc rx5 sh-0" aria-label="Back">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M15 6l-6 6 6 6" />
+      </svg>
+    </a>
 
-    <div class="f g5 sh-0 al-ct">
+    <div class="spacer"></div>
+
+    <div class="chips f g5 sh-0 al-ct">
       {#if view.audio.tracks.length > 1}
         <div class="btn-wrap p-rel">
           <!-- svelte-ignore a11y_consider_explicit_label -->
@@ -106,51 +111,33 @@
     left: 0;
     right: 0;
     z-index: 10;
+    padding: 12px 16px;
     background: linear-gradient(
       to bottom,
-      rgba(7, 6, 10, 0.78) 0%,
-      rgba(7, 6, 10, 0.4) 50%,
+      rgba(7, 6, 10, 0.7) 0%,
+      rgba(7, 6, 10, 0.3) 60%,
       transparent 100%
     );
-    backdrop-filter: blur(14px) saturate(140%);
-    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
     transition: opacity 0.3s var(--ease-out);
     animation: slide-down 0.34s var(--ease-out);
   }
-  .bar.hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
+  .bar.hidden { opacity: 0; pointer-events: none; }
+
+  .spacer { flex: 1; }
 
   .back {
     color: var(--tx-4);
-    white-space: nowrap;
-    font-size: 22px;
-    padding: 4px 10px;
-    border-radius: var(--r-md);
+    min-width: 36px;
+    min-height: 36px;
     transition: color 0.18s var(--ease-out), background 0.18s var(--ease-out),
       transform 0.16s var(--ease-snap);
   }
-  .back:hover {
-    color: var(--tx-5);
-    background: var(--glass);
-  }
-  .back:active {
-    transform: scale(0.92);
-  }
+  .back:hover { color: var(--tx-5); background: var(--glass); }
+  .back:active { transform: scale(0.92); }
 
-  .title {
-    flex: 1;
-    font-family: var(--font-display);
-    font-weight: 500;
-    font-size: 16px;
-    letter-spacing: -0.012em;
-  }
-
-  .btn-wrap {
-    display: flex;
-    align-items: center;
-  }
+  .btn-wrap { display: flex; align-items: center; }
 
   .ibtn {
     color: var(--tx-3);
@@ -172,12 +159,7 @@
       border-color: var(--glass-bd);
     }
   }
-  @media (hover: none) {
-    .ibtn {
-      min-width: 44px;
-      min-height: 44px;
-    }
-  }
+  @media (hover: none) { .ibtn { min-width: 44px; min-height: 44px; } }
   .ibtn:active {
     color: var(--tx-5);
     background: var(--glass-2);
@@ -189,19 +171,14 @@
     border-color: var(--glass-bd);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
   }
-
-  .ibtn.pulse {
-    animation: pulse 1.5s ease infinite;
-  }
+  .ibtn.pulse { animation: pulse 1.5s ease infinite; }
 
   @keyframes pulse {
-    0%,
-    100% {
-      color: var(--tx-3);
-    }
-    50% {
-      color: var(--red);
-      filter: drop-shadow(0 0 6px var(--red-glow));
-    }
+    0%, 100% { color: var(--tx-3); }
+    50% { color: var(--red); filter: drop-shadow(0 0 6px var(--red-glow)); }
+  }
+  @keyframes slide-down {
+    from { opacity: 0; transform: translateY(-20%); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 </style>

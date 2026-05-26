@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -516,7 +517,21 @@ func Aria2Resume(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 		return
 	}
-	if _, err := a2call("aria2.unpause", gid); err != nil {
+	// aria2 rejects unpause with "cannot be unpaused now" if the preceding
+	// pause hasn't fully transitioned the download to PAUSED yet (the UI fires
+	// pause→resume back-to-back). Retry the transient a few times before giving
+	// up; a genuinely-active download unpauses on the first try.
+	var err error
+	for range 5 {
+		if _, err = a2call("aria2.unpause", gid); err == nil {
+			break
+		}
+		if !strings.Contains(err.Error(), "cannot be unpaused") {
+			break
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if err != nil {
 		log.Printf("[aria2] resume gid=%s: %v", gid, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -539,9 +554,100 @@ func Aria2Remove(c *gin.Context) {
 		return
 	}
 
+	// Capture the on-disk footprint BEFORE removing — once the download result
+	// is gone, aria2 can no longer tell us what it left behind.
+	cleanup := aria2OrphanFiles(gid)
+
 	a2call("aria2.forceRemove", gid)          //nolint
 	a2call("aria2.removeDownloadResult", gid) //nolint
 
+	// forceRemove stops the transfer but leaves the partial payload + .aria2
+	// control file on disk. A user-initiated remove means "make it go away",
+	// so delete that orphaned data. (Skipped for completed downloads — those
+	// files are real library videos.)
+	cleanup()
+
 	log.Printf("[aria2] remove: done")
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// aria2OrphanFiles snapshots the files/dir/status of gid and returns a closure
+// that deletes the orphaned partial data. The snapshot must happen before
+// removeDownloadResult; the deletion after, so a half-removed tornet can't be
+// re-touched by aria2 mid-delete.
+//
+// Safety: only deletes when the download is NOT complete, and only removes the
+// torrent's own top-level entry under the download dir (never the root itself
+// or a sibling download).
+func aria2OrphanFiles(gid string) func() {
+	noop := func() {}
+
+	raw, err := a2call("aria2.tellStatus", gid, []string{"dir", "status", "files"})
+	if err != nil {
+		return noop
+	}
+	var st struct {
+		Dir    string `json:"dir"`
+		Status string `json:"status"`
+		Files  []struct {
+			Path string `json:"path"`
+		} `json:"files"`
+	}
+	if json.Unmarshal(raw, &st) != nil || st.Dir == "" || st.Status == "complete" {
+		return noop
+	}
+
+	paths := make([]string, 0, len(st.Files))
+	for _, f := range st.Files {
+		if f.Path != "" {
+			paths = append(paths, f.Path)
+		}
+	}
+
+	files, tops := aria2CleanupTargets(st.Dir, paths)
+	return func() {
+		for _, p := range files {
+			os.Remove(p)
+			os.Remove(p + ".aria2")
+		}
+		// Sweep the torrent's top-level folder (empty subdirs + leftover
+		// control file). Bounded to entries strictly under root.
+		for _, t := range tops {
+			os.Remove(t + ".aria2")
+			if fi, err := os.Stat(t); err == nil && fi.IsDir() {
+				os.RemoveAll(t)
+			}
+		}
+	}
+}
+
+// aria2CleanupTargets resolves what to delete for a removed download: the file
+// paths themselves, plus each torrent's top-level folder under the download
+// dir. A "top" is the first path component below root — so we sweep the whole
+// torrent folder but never the root itself or anything outside it. Pure (no
+// disk/network) so it's unit-testable.
+func aria2CleanupTargets(dir string, paths []string) (files, tops []string) {
+	root := filepath.Clean(dir)
+	seen := map[string]struct{}{}
+	for _, p := range paths {
+		files = append(files, p)
+
+		rel, err := filepath.Rel(root, filepath.Clean(p))
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		top := rel
+		if i := strings.IndexRune(rel, filepath.Separator); i >= 0 {
+			top = rel[:i]
+		}
+		if top == "" || top == "." || top == ".." {
+			continue
+		}
+		full := filepath.Join(root, top)
+		if _, ok := seen[full]; !ok {
+			seen[full] = struct{}{}
+			tops = append(tops, full)
+		}
+	}
+	return files, tops
 }

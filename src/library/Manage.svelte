@@ -40,6 +40,7 @@
 
   let pollers: (() => void)[] = [];
   let pwaUnsub: (() => void) | null = null;
+  let wasProcessing = false;
 
   onDestroy(() => {
     pollers.forEach((stop) => stop());
@@ -98,7 +99,14 @@
     pollers.push(
       usePoll(async () => {
         jobs = (await api.conversions({ silent: true })) ?? [];
-        if (processingLib && jobs.length === 0) processingLib = false;
+        const proc = await api.processing({ silent: true });
+        const isProc = !!proc?.processing;
+        // ScanCorrupt rebuilds the corrupt set on every process run; refetch
+        // the list when a run finishes so files that completed (and are no
+        // longer corrupt) drop off the top section.
+        if (wasProcessing && !isProc) await reloadData();
+        wasProcessing = isProc;
+        processingLib = isProc;
       }, JOBS_POLL_MS),
     );
 
@@ -272,6 +280,14 @@
   );
 
   let total = $derived(rows.reduce((n, [, files]) => n + files.length, 0));
+
+  let corruptFiles = $derived(
+    Object.entries(data).flatMap(([dir, files]) =>
+      (files ?? [])
+        .filter((f) => f.corrupt)
+        .map((f) => ({ dir, name: f.name, root: f.root })),
+    ),
+  );
 </script>
 
 <div style="min-height:100vh">
@@ -291,6 +307,34 @@
   />
 
   <main>
+    {#if corruptFiles.length > 0}
+      <section class="corrupt surface flow-h">
+        <h3 class="m0 p10 fs-sm fw6 f al-ct g10">
+          <span>⚠️ Corrupt / unplayable ({corruptFiles.length})</span>
+          <span class="fs-xs tx-1" style="margin-left:auto">
+            re-scanned on every library process
+          </span>
+        </h3>
+        {#each corruptFiles as cf (cf.dir + "/" + cf.name)}
+          <div class="corrupt-item f al-ct g10">
+            <div class="corrupt-info">
+              <span class="d-b fs-sm tx-4 trunc">{clean(cf.name)}</span>
+              <span class="d-b fs-xs tx-1 trunc">
+                {cf.dir === "." ? "Root" : cf.dir} · {cf.root}
+              </span>
+            </div>
+            <button
+              class="btn-icon danger sh-0"
+              title="Delete file"
+              onclick={() => delFile(cf.dir, cf.name)}
+            >
+              🗑
+            </button>
+          </div>
+        {/each}
+      </section>
+    {/if}
+
     <Downloads
       jobs={dlJobs}
       {fmtBytes}
@@ -368,6 +412,25 @@
     --i: 0;
     position: relative;
     z-index: 1;
+  }
+
+  .corrupt {
+    margin-bottom: 24px;
+    border: 1px solid var(--red);
+    box-shadow: 0 0 0 1px var(--red-soft);
+  }
+  .corrupt h3 {
+    background: var(--red-soft);
+    color: var(--red);
+    border-bottom: 1px solid var(--red-soft);
+  }
+  .corrupt-item {
+    padding: 10px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+  }
+  .corrupt-info {
+    flex: 1;
+    min-width: 0;
   }
 
   .pwa-dl {

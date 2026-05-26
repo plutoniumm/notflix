@@ -1,7 +1,8 @@
 <script lang="ts">
   import { clean, vidURL } from "../core/video";
+  import { fmtAgo } from "../core/events.svelte";
 
-  type Item = { dir: string; name: string; key: string; t: number };
+  type Item = { dir: string; name: string; key: string; t: number; at: number };
 
   let {
     items,
@@ -65,7 +66,10 @@
               <div class="cw-bar p-abs"></div>
             </div>
             <div class="card-name">{clean(item.name)}</div>
-            <div class="cw-time fs-xs">{fmt(item.t)}</div>
+            <div class="cw-time fs-xs f al-ct j-bw g5">
+              <span>{fmt(item.t)}</span>
+              <span class="cw-ago">{fmtAgo(item.at)}</span>
+            </div>
           </a>
         {/each}
       </div>
@@ -144,5 +148,8 @@
     padding: 0 10px 8px;
     background: var(--bg-3);
     border-radius: 0 0 var(--r-lg) var(--r-lg);
+  }
+  .cw-ago {
+    color: var(--tx-1);
   }
 </style>

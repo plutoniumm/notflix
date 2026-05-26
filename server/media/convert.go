@@ -33,9 +33,21 @@ func ProcessAll(lib *library.Library) {
 
 	jobs.WaitAria2()
 	ConvertAll(lib)
+	// Tree-mutating steps run first and in order — CleanAll renames/moves
+	// files, so the backfills below must walk a settled tree.
 	library.CleanAll(lib.Roots, jobs.Aria2ActivePaths())
 	library.ScanCorrupt(lib)
-	RegenerateThumbnails(lib, 0)
+
+	// Thumbnails, sprites and whisper are independent generation passes with
+	// their own pools (thumbs, sprite=2, whisper=1). Run them concurrently so
+	// whisper doesn't sit idle waiting for the sprite sweep to drain — each
+	// pool keeps its own slice of CPU bounded.
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { defer wg.Done(); RegenerateThumbnails(lib, 0) }()
+	go func() { defer wg.Done(); BackfillSprites(lib) }()
+	go func() { defer wg.Done(); jobs.BackfillWhisper(lib) }()
+	wg.Wait()
 	log.Println("[ProcessAll] done")
 }
 
@@ -194,6 +206,15 @@ func toMP4(srcPath, root string) error {
 			log.Printf("[convert] codec mark failed for %s: %v", name, err)
 		}
 	}
+
+	// Trickplay sprite — run in parallel on the sprite pool. Doesn't block
+	// conversion completion; the player gracefully degrades when missing.
+	GenerateSpriteAsync(mp4Path, library.Hash(filepath.Base(mp4Path)))
+
+	// Auto-whisper — fires only if no English vtt sidecar exists. Pool
+	// throttled to 1 so it doesn't fight conversion for CPU.
+	jobs.AutoWhisper(mp4Path)
+
 	return nil
 }
 

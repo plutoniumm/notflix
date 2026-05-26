@@ -140,9 +140,11 @@ func KVSet(c *gin.Context) {
 		Key   string `json:"key"`
 		Value any    `json:"value"`
 	}
+	ip := c.ClientIP()
 	if json.Unmarshal(raw, &bulk) == nil && len(bulk) > 0 {
 		for _, item := range bulk {
 			store[item.Key] = item.Value
+			statsTee(item.Key, item.Value, ip)
 		}
 		if err := kvWrite(store); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -162,6 +164,7 @@ func KVSet(c *gin.Context) {
 	}
 
 	store[single.Key] = single.Value
+	statsTee(single.Key, single.Value, ip)
 	if err := kvWrite(store); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

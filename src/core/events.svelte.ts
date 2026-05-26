@@ -17,6 +17,17 @@ export function fmtTime(s: number): string {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
+// Relative time from a past wall-clock ms to "now": "just now", "Xm ago",
+// "Xh ago", "Xd ago", "Xmo ago". Clamps negatives (clock skew) to "just now".
+export function fmtAgo(atMs: number): string {
+  const s = Math.max(0, (Date.now() - atMs) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 86400 * 30) return `${Math.floor(s / 86400)}d ago`;
+  return `${Math.floor(s / (86400 * 30))}mo ago`;
+}
+
 export class PlayerState {
   paused = $state(true);
   hideUI = $state(false);

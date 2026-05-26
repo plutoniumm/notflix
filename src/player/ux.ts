@@ -22,7 +22,9 @@ export function Touch(
   let tapTimer: ReturnType<typeof setTimeout> | null = null;
 
   const handler = (e: TouchEvent) => {
-    if ((e.target as HTMLElement).closest(".vjs-control-bar, .bar, .pill"))
+    if (
+      (e.target as HTMLElement).closest(".vjs-control-bar, .bar, .dock, .rail")
+    )
       return;
 
     const now = Date.now();

@@ -3,152 +3,138 @@
 
   let { rows, dir, name, paused, embed }: any = $props();
 
-  let contentEl: HTMLDivElement | undefined = $state();
-  let isOpen = $state(false);
-  let closing = $state(false);
+  let open = $state(false);
 
-  function toggle(e: MouseEvent) {
-    e.preventDefault();
-    if (isOpen) {
-      close();
-    } else {
-      open();
-    }
-  }
-
-  function open() {
-    isOpen = true;
-    requestAnimationFrame(() => {
-      if (!contentEl) return;
-      const height = contentEl.scrollHeight;
-      contentEl.animate(
-        [
-          { height: "0px", opacity: 0 },
-          { height: height + "px", opacity: 1 },
-        ],
-        { duration: 250, easing: "ease", fill: "forwards" },
-      );
-    });
-  }
-
-  function close() {
-    if (!contentEl) {
-      isOpen = false;
-      return;
-    }
-
-    closing = true;
-    const height = contentEl.scrollHeight;
-    const anim = contentEl.animate(
-      [
-        { height: height + "px", opacity: 1 },
-        { height: "0px", opacity: 0 },
-      ],
-      { duration: 200, easing: "ease", fill: "forwards" },
-    );
-
-    anim.onfinish = () => {
-      isOpen = false;
-      closing = false;
-    };
-  }
+  // Show only when paused and the current dir actually has siblings.
+  const files = $derived(
+    (rows as [string, any[]][])?.find(([d]) => d === dir)?.[1] ?? [],
+  );
+  const visible = $derived(!embed && paused && files.length > 1);
+  const activeIdx = $derived(files.findIndex((f: any) => f.name === name));
 </script>
 
-{#if !embed && rows.length > 0 && paused}
-  {#each rows as [rowDir, files]}
-    {#if rowDir === dir && files.length > 1}
-      <details class="p-fix" open={isOpen || closing}>
-        <summary class="fs-sm tx-3 m0 fw4 f al-ct g5 ptr p20" onclick={toggle}>
-          <span class="chevron d-ib" class:open={isOpen && !closing}></span>
-        </summary>
+{#if visible}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <aside
+    class="rail p-fix flow-h"
+    class:open
+    onmouseenter={() => (open = true)}
+    onmouseleave={() => (open = false)}
+  >
+    <div class="tab cc fw5 fs-xs">
+      <span class="chev d-ib" class:rot={open}></span>
+      <span class="label">UP NEXT</span>
+    </div>
 
-        <div class="content" bind:this={contentEl}>
-          <div class="list f flow-x-s g10">
-            {#each files as f (f.key)}
-              <a
-                href={vidURL(rowDir, f.name)}
-                class="serie sh-0 rx2 flow-h"
-                class:active={f.name === name}
-              >
-                <img
-                  src="/images/{f.key}.jpg"
-                  alt=""
-                  loading="lazy"
-                  class="w-100"
-                />
-                <span class="d-b fs-xs p5 tx-3 trunc">{clean(f.name)}</span>
-              </a>
-            {/each}
+    <div class="list flow-y-s f-col g10 p10">
+      {#each files as f, i (f.key)}
+        <a
+          href={vidURL(dir, f.name)}
+          class="card flow-h rx5"
+          class:active={i === activeIdx}
+        >
+          <div class="thumb-wrap p-rel">
+            <img src="/images/{f.key}.jpg" alt="" loading="lazy" class="w-100" />
+            {#if i === activeIdx}<span class="now-pill">NOW</span>{/if}
           </div>
-        </div>
-      </details>
-    {/if}
-  {/each}
+          <span class="title d-b fs-xs p5 trunc">{clean(f.name)}</span>
+        </a>
+      {/each}
+    </div>
+  </aside>
 {/if}
 
 <style>
-  details {
-    bottom: 0;
+  .rail {
+    top: 64px;
+    bottom: 96px;
     left: 0;
-    right: 0;
-    z-index: 10;
+    z-index: 9;
+    width: 36px;
     display: flex;
-    flex-direction: column-reverse;
-    background: linear-gradient(to top, #000c 0%, transparent 100%);
-    animation: slide-up 0.25s ease;
+    flex-direction: row;
+    background: linear-gradient(
+      to right,
+      rgba(7, 6, 10, 0.85) 0%,
+      rgba(7, 6, 10, 0.55) 80%,
+      transparent 100%
+    );
+    border-right: 1px solid var(--glass-bd);
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    transition: width 0.24s var(--ease-out), background 0.24s var(--ease-out);
+    animation: slide-r 0.3s var(--ease-out);
   }
+  .rail.open { width: 220px; }
 
-  summary {
+  .tab {
+    flex-direction: column;
+    gap: 10px;
+    width: 36px;
+    color: var(--tx-3);
+    padding: 14px 0;
+    border-right: 1px solid var(--glass-bd);
     user-select: none;
   }
-  summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .chevron {
-    width: 8px;
-    height: 8px;
+  .chev {
+    width: 6px;
+    height: 6px;
     border: 2px solid currentColor;
-    transform: rotate(135deg);
-    transition: transform 0.25s ease;
+    border-left: 0;
+    border-bottom: 0;
+    transform: rotate(45deg);
+    transition: transform 0.24s var(--ease-out);
   }
-  .chevron.open {
-    transform: rotate(-45deg);
-  }
-
-  .content {
-    overflow: hidden;
+  .chev.rot { transform: rotate(225deg); }
+  .label {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    letter-spacing: 0.12em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--tx-2);
   }
 
   .list {
-    padding-bottom: 4px;
+    flex: 1;
+    opacity: 0;
+    transition: opacity 0.18s var(--ease-out) 0.06s;
     scrollbar-width: none;
   }
-  .list::-webkit-scrollbar {
-    display: none;
-  }
+  .rail.open .list { opacity: 1; }
+  .list::-webkit-scrollbar { display: none; }
 
-  .serie {
-    width: 140px;
-    border: 2px solid transparent;
-    transition:
-      border-color 0.15s,
-      transform 0.15s;
-  }
-  .serie:hover {
-    transform: scale(1.04);
-  }
-  .serie.active {
-    border-color: var(--red);
-  }
-  .serie.active span {
-    color: var(--tx-5);
-  }
-  .serie img {
-    aspect-ratio: 16/9;
-    background: var(--bg-3);
-  }
-  .serie span {
+  .card {
     background: var(--bg-2);
+    border: 1px solid transparent;
+    transition: border-color 0.15s var(--ease-out), transform 0.15s var(--ease-out);
+    flex-shrink: 0;
+  }
+  .card:hover { transform: translateX(2px); }
+  .card.active { border-color: var(--red); }
+  .card.active .title { color: var(--tx-5); }
+
+  .thumb-wrap { background: var(--bg-3); }
+  .card img {
+    aspect-ratio: 16/9;
+    display: block;
+  }
+  .now-pill {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    padding: 1px 6px;
+    border-radius: 99px;
+    background: var(--red);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+  }
+  .title { color: var(--tx-3); }
+
+  @keyframes slide-r {
+    from { opacity: 0; transform: translateX(-12px); }
+    to   { opacity: 1; transform: translateX(0); }
   }
 </style>

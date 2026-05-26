@@ -107,7 +107,19 @@ export const api = {
     hidden: (opts?: ReqOpts) => GET("/api/manage/hidden", opts),
   },
 
+  stats: {
+    summary: (
+      range: "week" | "month" | "year" | "all" = "year",
+      ip?: string,
+      opts?: ReqOpts,
+    ) => {
+      const qs = `range=${range}${ip ? `&ip=${E(ip)}` : ""}`;
+      return GET(`/api/stats/summary?${qs}`, opts);
+    },
+  },
+
   conversions: (opts?: ReqOpts) => GET("/api/conversions", opts),
+  processing: (opts?: ReqOpts) => GET("/api/processing", opts),
   process: (opts?: ReqOpts) => POST("/api/process", {}, opts),
   build: (opts?: ReqOpts) => GET("/api/build", opts),
   rename: (path: string, name: string, opts?: ReqOpts) =>

@@ -79,6 +79,9 @@
       <a href="/search" class="icon-btn glass glass-hover" aria-label="Explore" title="Explore">
         <Icon name="search" />
       </a>
+      <a href="/stats" class="icon-btn glass glass-hover" aria-label="Stats" title="Your stats">
+        📊
+      </a>
       <a href="/manage" class="icon-btn glass glass-hover" aria-label="Settings" title="Settings">
         <Icon name="settings" />
       </a>

@@ -51,6 +51,16 @@ func main() {
 	library.EnsureDir("./cache")
 
 	jobs.OnDownloads = media.ProcessAll
+	// Adapter: jobs.Identity → library.Device. Library can't import jobs
+	// (would cycle), so it declares its own struct with the same shape.
+	library.IdentityFromIP = func(ip string) library.Device {
+		i := jobs.TailscaleIdentity(ip)
+		return library.Device{
+			User: i.User, Device: i.Device, Host: i.Host,
+			OS: i.OS, Login: i.Login, Tags: i.Tags, Online: i.Online,
+		}
+	}
+	jobs.TailscaleInit() // warm the IP→identity cache + keep it warm in bg
 
 	go media.ProcessAll(lib) // runs ScanCorrupt internally after Convert+Clean
 	go media.NormalizeSubs(lib)
@@ -69,6 +79,7 @@ func main() {
 	router.GET("/", func(c *gin.Context) { pulse(); c.File("index.html") })
 	router.GET("/manage", func(c *gin.Context) { c.File("index.html") })
 	router.GET("/search", func(c *gin.Context) { c.File("index.html") })
+	router.GET("/stats", func(c *gin.Context) { c.File("index.html") })
 	router.StaticFile("/manifest.json", "./public/manifest.json")
 	router.StaticFile("/sw.js", "./public/sw.js")
 	router.Static("/assets", assDir)
@@ -81,6 +92,10 @@ func main() {
 
 	router.POST("/api/rename", func(c *gin.Context) { library.Rename(c, lib) })
 	router.GET("/api/conversions", media.Conversions)
+	router.GET("/api/processing", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"processing": media.IsProcessing()})
+	})
+	router.GET("/api/sprite/:key", media.SpriteManifestHandler)
 	router.POST("/api/process", func(c *gin.Context) { media.ProcessStart(c, lib) })
 
 	router.GET("/api/manage/list", func(c *gin.Context) { library.ManageList(c, lib) })
@@ -102,6 +117,7 @@ func main() {
 
 	router.GET("/kv/get", library.KVGet)
 	router.POST("/kv/set", library.KVSet)
+	router.GET("/api/stats/summary", library.StatsSummaryHandler)
 
 	router.DELETE("/api/dir", func(c *gin.Context) { library.DirDelete(c, lib) })
 

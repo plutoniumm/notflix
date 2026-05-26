@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -73,13 +74,23 @@ func fmtSecs(secs float64) string {
 	return fmtDur(time.Duration(secs * float64(time.Second)))
 }
 
+var fasterWhisperOK atomic.Bool
+
+// checkFasterWhisper forks `python -c "import faster_whisper"` (~500ms). Cached
+// once-positive so the backfill walker doesn't pay it per file. If the first
+// check fails, subsequent calls re-probe (so the user can install it without
+// restarting the server).
 func checkFasterWhisper() bool {
+	if fasterWhisperOK.Load() {
+		return true
+	}
 	cmd := exec.Command(pythonPath, "-c", "import faster_whisper")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("[whisper] faster-whisper check failed: %v — %s", err, string(out))
 		return false
 	}
+	fasterWhisperOK.Store(true)
 	return true
 }
 
@@ -138,6 +149,17 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 		b, _ := json.Marshal(v)
 		fmt.Fprintf(c.Writer, "data: %s\n\n", b)
 		flusher.Flush()
+	}
+
+	// Idempotency guard: if a non-trivial .whisper.vtt already exists, don't
+	// re-run. The frontend's /api/subs/info check covers the happy path; this
+	// catches the race where the user clicks whisper before info has loaded.
+	// 100B is comfortably above an empty `WEBVTT\n\n` header but well under
+	// the smallest real transcript.
+	if fi, err := os.Stat(whisperVTTOf(path)); err == nil && fi.Size() > 100 {
+		log.Printf("[whisper] reuse existing vtt for %q (%d bytes)", raw, fi.Size())
+		sendEvent(map[string]any{"done": true})
+		return
 	}
 
 	if old, ok := activeProcs.Load(raw); ok {
@@ -279,6 +301,12 @@ func SubsWhisper(c *gin.Context, lib *library.Library) {
 	path, ok := lib.FindVid(body.File)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		return
+	}
+
+	// Same idempotency guard as the SSE handler: existing vtt → done.
+	if fi, err := os.Stat(whisperVTTOf(path)); err == nil && fi.Size() > 100 {
+		c.JSON(http.StatusOK, gin.H{"status": "done"})
 		return
 	}
 

@@ -4,7 +4,7 @@ import { clean } from "../core/video";
 import { JOBS_POLL_MS } from "../core/events.svelte";
 import { Down } from "./dl";
 
-type ContinueItem = { dir: string; name: string; key: string; t: number };
+type ContinueItem = { dir: string; name: string; key: string; t: number; at: number };
 
 // Tolerate either the current ordered array OR a legacy {dir: files} object
 // map (a stale cached bundle ↔ new server, or vice-versa, during rollout) —
@@ -174,6 +174,7 @@ export class HomeData {
         name: v.name,
         key: v.key,
         t: store[`watched:${v.param}`]!.t,
+        at: store[`watched:${v.param}`]!.at,
       }));
   }
 

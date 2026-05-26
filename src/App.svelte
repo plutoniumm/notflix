@@ -3,6 +3,7 @@
   import Player from "./player/Player.svelte";
   import Manage from "./library/Manage.svelte";
   import Search from "./library/Search.svelte";
+  import Stats from "./library/Stats.svelte";
   import Toast from "./core/ToastHost.svelte";
 
   const loc = window.location;
@@ -15,6 +16,8 @@
   <Manage />
 {:else if path === "/search"}
   <Search />
+{:else if path === "/stats"}
+  <Stats />
 {:else if vidParam}
   <Player videoParam={vidParam} />
 {:else}
