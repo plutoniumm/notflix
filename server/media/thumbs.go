@@ -15,6 +15,39 @@ import (
 	"notflix/server/library"
 )
 
+// Small pool so per-file thumb calls from toMP4 don't blow up ffmpeg
+// concurrency when a batch of conversions all land at once. The bulk
+// RegenerateThumbnails path is separate and single-threaded.
+var thumbPool = jobs.NewPool(4)
+
+// GenerateThumbAsync queues thumbnail creation for src on the shared pool.
+// Skips silently if the destination already exists. Mirrors
+// GenerateSpriteAsync / jobs.AutoWhisper so toMP4 can fan out downstream
+// work per-file without blocking convert throughput.
+func GenerateThumbAsync(src string) {
+	go func() {
+		thumbPool.Acquire()
+		defer thumbPool.Release()
+
+		if library.IsBusy(src) {
+			return
+		}
+		tdir := "images"
+		os.MkdirAll(tdir, 0755)
+		dst := filepath.Join(tdir, library.Hash(filepath.Base(src))+".jpg")
+		if _, err := os.Stat(dst); err == nil {
+			return
+		}
+		library.PipelineMark(src, "thumb", library.StepRunning)
+		if err := makeThumb(src, dst); err != nil {
+			log.Printf("[thumbs] async failed %s: %v", filepath.Base(src), err)
+			library.PipelineMark(src, "thumb", library.StepFailed)
+			return
+		}
+		library.PipelineMark(src, "thumb", library.StepDone)
+	}()
+}
+
 func makeThumb(src, dst string) error {
 	f, err := library.Prober.Format(context.Background(), src)
 	if err != nil {
@@ -93,8 +126,6 @@ func RegenerateThumbnails(lib *library.Library, minInterval time.Duration) {
 	tdir := "images"
 	os.MkdirAll(tdir, 0755)
 
-	active := jobs.Aria2ActivePaths()
-
 	for _, root := range lib.Roots {
 		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") {
@@ -105,7 +136,7 @@ func RegenerateThumbnails(lib *library.Library, minInterval time.Duration) {
 				return nil
 			}
 
-			if active[path] {
+			if library.IsBusy(path) {
 				return nil
 			}
 

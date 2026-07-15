@@ -21,20 +21,26 @@ var keepExts = map[string]bool{
 	".torrent": true, ".aria2": true,
 }
 
-func CleanAll(roots []string, skip map[string]bool) {
+// keepSuffixes are compound suffixes (multi-dot) that keepExts can't match
+// against filepath.Ext (which only returns the trailing extension). Kept
+// literally in the tree so recovery paths — .corrupt.bak from repair — are
+// never nuked by the junk sweep.
+var keepSuffixes = []string{".corrupt.bak"}
+
+func CleanAll(roots []string) {
 	for _, root := range roots {
 		if _, err := os.Stat(root); err != nil {
 			continue
 		}
 
-		cleanRoot(root, skip)
+		cleanRoot(root)
 	}
 
 	log.Println("[CleanAll] finished")
 }
 
-func cleanRoot(root string, skip map[string]bool) {
-	active := activeDirs(root, skip)
+func cleanRoot(root string) {
+	active := activeDirs(root)
 
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") {
@@ -46,7 +52,15 @@ func cleanRoot(root string, skip map[string]bool) {
 		}
 
 		ext := strings.ToLower(filepath.Ext(d.Name()))
-		if !videoExts[ext] && !subExts[ext] && !keepExts[ext] {
+		lower := strings.ToLower(d.Name())
+		kept := false
+		for _, sfx := range keepSuffixes {
+			if strings.HasSuffix(lower, sfx) {
+				kept = true
+				break
+			}
+		}
+		if !kept && !videoExts[ext] && !subExts[ext] && !keepExts[ext] {
 			log.Printf("[CleanAll] junk: %s", path)
 			os.Remove(path)
 		}
@@ -74,20 +88,20 @@ func cleanRoot(root string, skip map[string]bool) {
 	}
 }
 
-func activeDirs(root string, skip map[string]bool) map[string]bool {
+// activeDirs walks root and marks every directory that contains a "busy"
+// file (torrent-owned / sidecar / freshly-written) — the single-source-of-
+// -truth IsBusy check. Those directories are exempt from clean/flatten.
+func activeDirs(root string) map[string]bool {
 	dirs := map[string]bool{}
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-
-		if strings.HasSuffix(d.Name(), ".aria2") || skip[path] {
+		if IsBusy(path) {
 			dirs[filepath.Dir(path)] = true
 		}
-
 		return nil
 	})
-
 	return dirs
 }
 

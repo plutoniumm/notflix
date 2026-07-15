@@ -45,6 +45,25 @@ interface Job {
   percent: number;
 }
 
+type PhaseState = "pending" | "running" | "done";
+
+interface PhaseInfo {
+  name: string;
+  state: PhaseState;
+  startedAt?: number;
+  endedAt?: number;
+  total?: number;
+  done: number;
+  note?: string;
+}
+
+interface ProcessStatus {
+  running: boolean;
+  startedAt?: number;
+  endedAt?: number;
+  phases: PhaseInfo[];
+}
+
 interface DownloadRecord {
   videoParam: string;
   title: string;

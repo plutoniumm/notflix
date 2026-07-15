@@ -158,15 +158,49 @@ func DiskInfo(c *gin.Context, lib *Library) {
 			continue
 		}
 
+		total := stat.Blocks * uint64(stat.Bsize)
+		free := stat.Bavail * uint64(stat.Bsize)
+
+		// Apply UI-only cap. For capped roots the "used" portion is the
+		// actual bytes living in that root (not "real total - real free"),
+		// since the underlying filesystem is shared with the rest of the
+		// boot disk.
+		if cap, ok := lib.Caps[root]; ok && cap > 0 {
+			used := dirBytes(root)
+			total = cap
+			if used >= cap {
+				free = 0
+			} else {
+				free = cap - used
+			}
+		}
+
 		out = append(out, DiskStat{
 			Root:  filepath.Base(root),
 			Path:  root,
-			Free:  stat.Bavail * uint64(stat.Bsize),
-			Total: stat.Blocks * uint64(stat.Bsize),
+			Free:  free,
+			Total: total,
 		})
 	}
 
 	c.JSON(http.StatusOK, out)
+}
+
+// dirBytes sums the size of every regular file under root (recursive).
+// Used by DiskInfo to compute the "used" portion for capped roots that
+// share their filesystem with other data.
+func dirBytes(root string) uint64 {
+	var total uint64
+	_ = filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
+		if err != nil || info == nil {
+			return nil
+		}
+		if !info.IsDir() {
+			total += uint64(info.Size())
+		}
+		return nil
+	})
+	return total
 }
 
 func DirSizes(c *gin.Context, lib *Library) {

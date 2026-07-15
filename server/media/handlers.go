@@ -64,6 +64,10 @@ func Conversions(c *gin.Context) {
 	c.JSON(http.StatusOK, GetProgress())
 }
 
+func ProcessStatusHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, GetStatus())
+}
+
 func ProcessStart(c *gin.Context, lib *library.Library) {
 	if IsProcessing() {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "status": "already running"})

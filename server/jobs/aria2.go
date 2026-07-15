@@ -78,126 +78,256 @@ func WaitAria2() {
 	}
 }
 
+var aria2StartedAt atomic.Int64
+
 func Aria2Init(lib *library.Library) {
-	args := []string{
-		"--enable-rpc", "--rpc-listen-all",
-		"--rpc-listen-port=6800",
-		"--seed-time=0",
-		"--quiet=true",
-		"--save-session=" + aria2Session,
-		"--save-session-interval=60",
-		"--continue=true",
-		"--max-connection-per-server=16",
-		"--split=16",
-		"--min-split-size=1M",
-		"--max-concurrent-downloads=5",
-		"--optimize-concurrent-downloads=true",
-		"--max-overall-download-limit=0",
-		"--file-allocation=falloc",
-		"--disk-cache=64M",
-		"--bt-max-peers=0",
-		"--bt-request-peer-speed-limit=50M",
-		"--bt-max-open-files=256",
-		"--enable-dht=true",
-		"--enable-peer-exchange=true",
-	}
-	if _, err := os.Stat(aria2Session); err == nil {
-		args = append(args, "--input-file="+aria2Session)
-	}
-	cmd := exec.Command("aria2c", args...)
+	go a2SpeedTracker()
+	go a2PurgeLoop(lib)
+	go a2WedgeWatchdog()
+	go torrentPathsRefresher()
 
-	if err := cmd.Start(); err != nil {
-		log.Printf("[aria2] failed to start aria2c: %v", err)
-		close(aria2Ready)
-		return
-	}
-	log.Printf("[aria2] started aria2c pid=%d", cmd.Process.Pid)
-
-	ready := false
-	for range 30 {
-		time.Sleep(300 * time.Millisecond)
-		if _, err := a2call("aria2.getVersion"); err == nil {
-			log.Println("[aria2] RPC ready")
-			ready = true
-			break
+	var readyOnce sync.Once
+	backoff := 2 * time.Second
+	for {
+		started := time.Now()
+		args := []string{
+			"--enable-rpc", "--rpc-listen-all",
+			"--rpc-listen-port=6800",
+			"--seed-time=0",
+			"--quiet=true",
+			"--save-session=" + aria2Session,
+			"--save-session-interval=60",
+			"--continue=true",
+			"--max-connection-per-server=16",
+			"--split=16",
+			"--min-split-size=1M",
+			"--max-concurrent-downloads=20",
+			"--optimize-concurrent-downloads=true",
+			"--max-overall-download-limit=0",
+			"--file-allocation=falloc",
+			"--disk-cache=64M",
+			"--bt-max-peers=0",
+			"--bt-request-peer-speed-limit=50M",
+			"--bt-max-open-files=1024",
+			// Fixed listen ports so a router (or future UPnP) can forward them,
+			// and so DHT NAT discovery sees the same address across restarts.
+			// Random per-run ports = never reachable from outside the LAN, which
+			// is why popular torrents would sit at 0 peers indefinitely.
+			"--listen-port=6881-6999",
+			"--dht-listen-port=6881-6999",
+			"--enable-dht=true",
+			"--enable-dht6=true",
+			"--enable-peer-exchange=true",
+			// LAN peer discovery — instantly finds any other client on the
+			// same network without going through DHT.
+			"--bt-enable-lpd=true",
+			// Persist DHT routing table so we don't re-bootstrap from zero on
+			// every restart. Kept inside ./cache (NOT ~/.aria2/dht.dat, which
+			// can be left root-owned by a past sudo run and silently unreadable).
+			"--dht-file-path=./cache/aria2.dht.dat",
+			"--dht-file-path6=./cache/aria2.dht6.dat",
+			// Survive a restart mid-magnet: the .torrent file aria2 writes after
+			// metadata fetch is reused so we don't redo the lookup.
+			"--bt-save-metadata=true",
+			"--bt-load-saved-metadata=true",
+			// Global tracker fallback. Magnets sourced outside our TPB search
+			// (or with all-dead trackers) still get a working announce list.
+			"--bt-tracker=" + strings.Join(tpbTrackers, ","),
 		}
-	}
-	close(aria2Ready)
-	if !ready {
-		log.Println("[aria2] RPC never became ready")
-	}
-
-	go func() {
-		for {
-			time.Sleep(2 * time.Second)
-			raw, err := a2call("aria2.tellActive")
-			if err != nil {
-				continue
-			}
-			var act []a2StatusRaw
-			if json.Unmarshal(raw, &act) != nil {
-				continue
-			}
-			live := make(map[string]bool, len(act))
-			for _, s := range act {
-				recordSpeed(s.GID, scanInt(s.CompletedLength))
-				live[s.GID] = true
-			}
-			pruneSpeed(live)
+		if _, err := os.Stat(aria2Session); err == nil {
+			args = append(args, "--input-file="+aria2Session)
 		}
-	}()
+		cmd := exec.Command("aria2c", args...)
+		if err := cmd.Start(); err != nil {
+			log.Printf("[aria2] failed to start aria2c: %v", err)
+			readyOnce.Do(func() { close(aria2Ready) })
+			time.Sleep(backoff)
+			backoff = min(backoff*2, 30*time.Second)
+			continue
+		}
+		log.Printf("[aria2] started aria2c pid=%d", cmd.Process.Pid)
+		aria2StartedAt.Store(time.Now().UnixNano())
 
-	go func() {
-		seenActive := make(map[string]bool)
-		for {
-			time.Sleep(5 * time.Second)
+		ready := false
+		for range 30 {
+			time.Sleep(300 * time.Millisecond)
+			if _, err := a2call("aria2.getVersion"); err == nil {
+				log.Println("[aria2] RPC ready")
+				ready = true
+				break
+			}
+		}
+		// Warm the torrent-paths cache BEFORE unblocking WaitAria2 callers.
+		// ConvertAll consults library.IsBusy on every candidate; if the cache
+		// is empty it happily grabs files aria2 is downloading. Refresh here,
+		// synchronously, so downstream ProcessAll sees a populated set.
+		if ready {
+			refreshTorrentPaths()
+		}
+		readyOnce.Do(func() { close(aria2Ready) })
+		if !ready {
+			log.Println("[aria2] RPC never became ready")
+		}
 
-			if raw, err := a2call("aria2.tellActive"); err == nil {
-				var act []struct {
-					GID string `json:"gid"`
+		// Sweep any errored/completed entries that the session reload dragged in
+		// (e.g. magnets whose target dir no longer exists after a location move).
+		if ready {
+			if raw, err := a2call("aria2.tellStopped", 0, 200); err == nil {
+				var items []struct {
+					GID    string `json:"gid"`
+					Status string `json:"status"`
 				}
-				if json.Unmarshal(raw, &act) == nil {
-					for _, a := range act {
-						seenActive[a.GID] = true
+				if json.Unmarshal(raw, &items) == nil && len(items) > 0 {
+					if _, err := a2call("aria2.purgeDownloadResult"); err == nil {
+						_, _ = a2call("aria2.saveSession")
+						log.Printf("[aria2] purged %d boot-time stopped entries", len(items))
 					}
 				}
 			}
+		}
 
-			raw, err := a2call("aria2.tellStopped", 0, 50)
-			if err != nil {
-				continue
-			}
+		cmd.Wait()
+		aria2StartedAt.Store(0)
+		log.Printf("[aria2] aria2c exited")
+		if time.Since(started) > 5*time.Minute {
+			backoff = 2 * time.Second
+		}
+		time.Sleep(backoff)
+		backoff = min(backoff*2, 30*time.Second)
+	}
+}
 
-			var items []struct {
-				GID    string `json:"gid"`
-				Status string `json:"status"`
-			}
-			if json.Unmarshal(raw, &items) != nil {
-				continue
-			}
+func a2SpeedTracker() {
+	for {
+		time.Sleep(2 * time.Second)
+		raw, err := a2call("aria2.tellActive")
+		if err != nil {
+			continue
+		}
+		var act []a2StatusRaw
+		if json.Unmarshal(raw, &act) != nil {
+			continue
+		}
+		live := make(map[string]bool, len(act))
+		for _, s := range act {
+			recordSpeed(s.GID, scanInt(s.CompletedLength))
+			live[s.GID] = true
+		}
+		pruneSpeed(live)
+	}
+}
 
-			realComplete := false
-			for _, it := range items {
-				if it.Status == "complete" {
-					wasActive := seenActive[it.GID]
-					log.Printf("[aria2] purging completed gid=%s observed-active=%v", it.GID, wasActive)
-					if _, err := a2call("aria2.removeDownloadResult", it.GID); err != nil {
-						log.Printf("[aria2] purge error: %v", err)
-					}
-					delete(seenActive, it.GID)
-					if wasActive {
-						realComplete = true
-					}
+func a2PurgeLoop(lib *library.Library) {
+	seenActive := make(map[string]bool)
+	for {
+		time.Sleep(5 * time.Second)
+
+		if raw, err := a2call("aria2.tellActive"); err == nil {
+			var act []struct {
+				GID string `json:"gid"`
+			}
+			if json.Unmarshal(raw, &act) == nil {
+				for _, a := range act {
+					seenActive[a.GID] = true
 				}
 			}
-			if realComplete && OnDownloads != nil {
-				go OnDownloads(lib)
+		}
+
+		raw, err := a2call("aria2.tellStopped", 0, 50)
+		if err != nil {
+			continue
+		}
+
+		var items []struct {
+			GID    string `json:"gid"`
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(raw, &items) != nil {
+			continue
+		}
+
+		realComplete := false
+		for _, it := range items {
+			if it.Status == "complete" || it.Status == "error" || it.Status == "removed" {
+				wasActive := seenActive[it.GID]
+				log.Printf("[aria2] purging gid=%s status=%s observed-active=%v", it.GID, it.Status, wasActive)
+				if _, err := a2call("aria2.removeDownloadResult", it.GID); err != nil {
+					log.Printf("[aria2] purge error: %v", err)
+				}
+				delete(seenActive, it.GID)
+				if wasActive && it.Status == "complete" {
+					realComplete = true
+				}
 			}
 		}
-	}()
+		if realComplete && OnDownloads != nil {
+			go OnDownloads(lib)
+		}
+	}
+}
 
-	cmd.Wait()
-	log.Printf("[aria2] aria2c exited")
+// a2WedgeWatchdog detects and heals the long-uptime wedge where every active
+// torrent sits at 0 peer connections indefinitely (NAT UDP mappings expired /
+// aria2 internal state drift). After a grace period, if every active torrent
+// has been at 0 conns for wedgeMax, shuts aria2c down; the supervisor loop
+// in Aria2Init respawns it with the persisted DHT + session intact.
+func a2WedgeWatchdog() {
+	const (
+		checkEvery = 60 * time.Second
+		graceMin   = 10 * time.Minute
+		wedgeMax   = 15 * time.Minute
+	)
+	var wedgeSince time.Time
+	for {
+		time.Sleep(checkEvery)
+		startedNs := aria2StartedAt.Load()
+		if startedNs == 0 {
+			wedgeSince = time.Time{}
+			continue
+		}
+		if time.Since(time.Unix(0, startedNs)) < graceMin {
+			wedgeSince = time.Time{}
+			continue
+		}
+		raw, err := a2call("aria2.tellActive")
+		if err != nil {
+			wedgeSince = time.Time{}
+			continue
+		}
+		var act []struct {
+			GID         string `json:"gid"`
+			Connections string `json:"connections"`
+		}
+		if json.Unmarshal(raw, &act) != nil {
+			continue
+		}
+		if len(act) == 0 {
+			wedgeSince = time.Time{}
+			continue
+		}
+		anyPeers := false
+		for _, a := range act {
+			if scanInt(a.Connections) > 0 {
+				anyPeers = true
+				break
+			}
+		}
+		if anyPeers {
+			wedgeSince = time.Time{}
+			continue
+		}
+		if wedgeSince.IsZero() {
+			wedgeSince = time.Now()
+			log.Printf("[aria2] watchdog: %d actives all at 0 peers, arming wedge timer", len(act))
+			continue
+		}
+		if time.Since(wedgeSince) < wedgeMax {
+			continue
+		}
+		log.Printf("[aria2] watchdog: wedged %v — shutting aria2c down to force respawn", time.Since(wedgeSince).Round(time.Second))
+		_, _ = a2call("aria2.shutdown")
+		wedgeSince = time.Time{}
+	}
 }
 
 type Downjob struct {
@@ -375,6 +505,7 @@ func Aria2Add(c *gin.Context, lib *library.Library) {
 		log.Printf("[aria2] add: unmarshal gid: %v", err)
 	}
 	log.Printf("[aria2] add: ok gid=%s", gid)
+	go refreshTorrentPaths()
 	c.JSON(http.StatusOK, gin.H{"ok": true, "gid": gid})
 }
 
@@ -432,30 +563,70 @@ func Aria2AddTorrent(c *gin.Context, lib *library.Library) {
 	var gid string
 	json.Unmarshal(raw, &gid)
 	log.Printf("[aria2] addTorrent: ok gid=%s", gid)
+	go refreshTorrentPaths()
 	c.JSON(http.StatusOK, gin.H{"ok": true, "gid": gid})
 }
 
-func Aria2ActivePaths() map[string]bool {
-	paths := map[string]bool{}
-	activeRaw, err1 := a2call("aria2.tellActive")
-	waitRaw, err2 := a2call("aria2.tellWaiting", 0, 100)
+// torrentPaths is the live set of every file path aria2 currently has in
+// session (active + waiting + stopped-but-not-yet-purged). Refreshed by a
+// background loop and eagerly after every Add — callers get a stable read
+// without paying the RPC round-trip.
+var (
+	torrentPathsMu sync.RWMutex
+	torrentPaths   = map[string]bool{}
+)
 
-	var active, waiting []a2StatusRaw
+func refreshTorrentPaths() {
+	next := map[string]bool{}
+	activeRaw, err1 := a2call("aria2.tellActive")
+	waitRaw, err2 := a2call("aria2.tellWaiting", 0, 200)
+	stopRaw, err3 := a2call("aria2.tellStopped", 0, 200)
+
+	var active, waiting, stopped []a2StatusRaw
 	if err1 == nil {
 		json.Unmarshal(activeRaw, &active)
 	}
 	if err2 == nil {
 		json.Unmarshal(waitRaw, &waiting)
 	}
+	if err3 == nil {
+		json.Unmarshal(stopRaw, &stopped)
+	}
 
-	for _, s := range append(active, waiting...) {
+	all := append(active, waiting...)
+	all = append(all, stopped...)
+	for _, s := range all {
 		for _, f := range s.Files {
 			if f.Path != "" {
-				paths[f.Path] = true
+				next[f.Path] = true
 			}
 		}
 	}
-	return paths
+
+	torrentPathsMu.Lock()
+	torrentPaths = next
+	torrentPathsMu.Unlock()
+}
+
+func torrentPathsRefresher() {
+	for {
+		time.Sleep(3 * time.Second)
+		refreshTorrentPaths()
+	}
+}
+
+// Aria2ActivePaths returns a snapshot of the maintained torrent-paths set.
+// Safe to hold and iterate; the caller doesn't need to lock. Includes
+// stopped-but-not-yet-purged paths, so a just-finished download stays exempt
+// from convert/thumbs/clean until the purge loop removes it (~5s).
+func Aria2ActivePaths() map[string]bool {
+	torrentPathsMu.RLock()
+	defer torrentPathsMu.RUnlock()
+	out := make(map[string]bool, len(torrentPaths))
+	for k := range torrentPaths {
+		out[k] = true
+	}
+	return out
 }
 
 func Aria2List(c *gin.Context) {

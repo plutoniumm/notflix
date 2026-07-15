@@ -59,13 +59,21 @@ func Hash(name string) string {
 	return fmt.Sprintf("%07d", h.Sum32()%1e7)
 }
 
-func EnsureDir(dir string) {
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		err := os.Mkdir(dir, 0755)
-		if err != nil {
-			log.Fatalf("Failed to create directory %s: %v", dir, err)
-		}
+// EnsureDir makes sure dir exists. Returns true when the directory is
+// available afterwards (whether pre-existing or freshly created), false
+// when it couldn't be created (e.g. parent is read-only, or a removable
+// volume's mountpoint isn't actually mounted). Non-fatal — boot must
+// survive missing drives so the server still answers requests against
+// whatever roots are reachable.
+func EnsureDir(dir string) bool {
+	if info, err := os.Stat(dir); err == nil {
+		return info.IsDir()
 	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("warn: cannot create directory %s: %v", dir, err)
+		return false
+	}
+	return true
 }
 
 func DelFile(path string) {

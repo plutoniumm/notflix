@@ -1,16 +1,33 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { api } from "../core/api";
   import { clean, vidURL } from "../core/video";
   import { toast } from "../core/toast.svelte";
   import { HomeData } from "./homeData.svelte";
+  import { parseName, epTag, type Parsed } from "./torrentName";
   import Continues from "./Continues.svelte";
   import ProgressBar from "../components/ProgressBar.svelte";
   import EmptyState from "../components/EmptyState.svelte";
   import Icon from "../components/Icon.svelte";
+  import Badge from "../components/Badge.svelte";
+
+  type Row = { t: Torrent; p: Parsed };
 
   const home = new HomeData();
   let search = $state("");
   let swUpdate = $state<ServiceWorkerRegistration | null>(null);
+
+  let torrentMode = $state(false);
+  let torrentLoading = $state(false);
+  let torrentQuery = $state("");
+  let torrentResults = $state<Torrent[]>([]);
+  let dlDir = $state("");
+  let added = $state(new Set<string>());
+  let resFilter = $state("all");
+  let sortKey = $state<
+    "seeders" | "size" | "leechers" | "files" | "added" | "title" | "res"
+  >("seeders");
+  let sortDir = $state<1 | -1>(-1);
 
   onMount(() => {
     const unsubSW = home.start();
@@ -26,6 +43,10 @@
     };
   });
 
+  $effect(() => {
+    if (!dlDir && home.disks.length > 0) dlDir = home.disks[0].path;
+  });
+
   let debouncedSearch = $state("");
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
@@ -36,7 +57,84 @@
     }, 150);
   });
 
-  let results = $derived(home.filter(debouncedSearch));
+  let localResults = $derived(torrentMode ? null : home.filter(debouncedSearch));
+
+  async function runTorrent() {
+    const term = search.trim();
+    if (!term) return;
+    torrentLoading = true;
+    torrentMode = true;
+    torrentQuery = term;
+    const r = await api.search(term);
+    torrentResults = Array.isArray(r) ? r : [];
+    torrentLoading = false;
+  }
+
+  async function addTorrent(t: Torrent) {
+    if (!dlDir) {
+      toast.err("No download disk available");
+      return;
+    }
+    if (added.has(t.infoHash)) return;
+    const res = await api.aria2.add(t.magnet, dlDir);
+    if (res === null) return;
+    added = new Set(added).add(t.infoHash);
+    toast.ok(`Added: ${parseName(t.name).title}`);
+  }
+
+  function sortBy(key: typeof sortKey) {
+    if (sortKey === key) sortDir = sortDir === 1 ? -1 : 1;
+    else {
+      sortKey = key;
+      sortDir = key === "title" ? 1 : -1;
+    }
+  }
+  const arrow = (key: typeof sortKey) =>
+    sortKey !== key ? "" : sortDir === 1 ? " ▲" : " ▼";
+
+  let torrentRows = $derived<Row[]>(
+    torrentResults.map((t) => ({ t, p: parseName(t.name) })),
+  );
+  let torrentView = $derived(
+    torrentRows
+      .filter(({ p }) => {
+        if (resFilter === "sd") return p.resRank > 0 && p.resRank <= 480;
+        if (resFilter !== "all") return p.res === resFilter;
+        return true;
+      })
+      .filter(({ t, p }) => {
+        const f = search.trim().toLowerCase();
+        return (
+          !f ||
+          p.title.toLowerCase().includes(f) ||
+          t.name.toLowerCase().includes(f)
+        );
+      })
+      .sort((a, b) => {
+        let d: number;
+        if (sortKey === "title") d = a.p.title.localeCompare(b.p.title);
+        else if (sortKey === "res") d = a.p.resRank - b.p.resRank;
+        else d = (a.t[sortKey] as number) - (b.t[sortKey] as number);
+        return d * sortDir;
+      }),
+  );
+
+  function clearSearch() {
+    search = "";
+    torrentMode = false;
+    torrentResults = [];
+    torrentQuery = "";
+  }
+
+  function onSearchKey(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      runTorrent();
+    } else if (e.key === "Escape" && torrentMode) {
+      e.preventDefault();
+      clearSearch();
+    }
+  }
 
   function removeContinue(e: Event, dir: string, name: string) {
     e.preventDefault();
@@ -56,6 +154,21 @@
   function scrollRow(el: HTMLElement, dir: number) {
     el.scrollBy({ left: dir * 400, behavior: "smooth" });
   }
+
+  function fmtBytes(b: number): string {
+    if (b >= 1e12) return (b / 1e12).toFixed(1) + " TB";
+    if (b >= 1e9) return (b / 1e9).toFixed(1) + " GB";
+    return (b / 1e6).toFixed(0) + " MB";
+  }
+
+  function ago(ts: number): string {
+    const s = Date.now() / 1000 - ts;
+    if (s < 3600) return Math.max(1, Math.floor(s / 60)) + "m";
+    if (s < 86400) return Math.floor(s / 3600) + "h";
+    if (s < 2592000) return Math.floor(s / 86400) + "d";
+    if (s < 31536000) return Math.floor(s / 2592000) + "mo";
+    return Math.floor(s / 31536000) + "y";
+  }
 </script>
 
 <div style="min-height: 100vh;">
@@ -68,21 +181,31 @@
       <input
         class="field w-100"
         type="search"
-        placeholder="Search…"
+        placeholder={torrentMode
+          ? "Filter results — Enter to re-search"
+          : "Search library — Enter to search torrents"}
         bind:value={search}
+        onkeydown={onSearchKey}
         autocomplete="off"
         spellcheck="false"
       />
     </div>
 
+    {#if torrentMode && home.disks.length > 0}
+      <select class="field sh-0" bind:value={dlDir} title="Download target disk">
+        {#each home.disks as d}
+          <option value={d.path}>{d.root} ({fmtBytes(d.free)} free)</option>
+        {/each}
+      </select>
+    {/if}
+
     <nav class="actions f al-ct g8">
-      <a href="/search" class="icon-btn glass glass-hover" aria-label="Explore" title="Explore">
-        <Icon name="search" />
-      </a>
-      <a href="/stats" class="icon-btn glass glass-hover" aria-label="Stats" title="Your stats">
-        📊
-      </a>
-      <a href="/manage" class="icon-btn glass glass-hover" aria-label="Settings" title="Settings">
+      <a
+        href="/manage"
+        class="icon-btn glass glass-hover"
+        aria-label="Settings"
+        title="Settings"
+      >
         <Icon name="settings" />
       </a>
     </nav>
@@ -95,25 +218,114 @@
   </header>
 
   <main>
-    {#if home.loading}
+    {#if torrentMode}
+      <div class="search-header f al-ct g20">
+        <span>
+          Torrents for "<strong>{torrentQuery}</strong>"
+          {#if !torrentLoading && torrentResults.length > 0}
+            · <span class="tx-1">{torrentView.length} / {torrentRows.length}</span>
+          {/if}
+        </span>
+
+        <select class="field" bind:value={resFilter}>
+          <option value="all">All resolutions</option>
+          <option value="2160p">2160p / 4K</option>
+          <option value="1080p">1080p</option>
+          <option value="720p">720p</option>
+          <option value="sd">≤ 480p</option>
+        </select>
+
+        <button class="clear fs-xs rx2" onclick={clearSearch}>✕ Back</button>
+      </div>
+
+      {#if torrentLoading}
+        <EmptyState>Searching The Pirate Bay…</EmptyState>
+      {:else if torrentResults.length === 0}
+        <EmptyState>No results for "{torrentQuery}".</EmptyState>
+      {:else}
+        <table class="res">
+          <thead>
+            <tr>
+              <th class="ptr" onclick={() => sortBy("title")}
+                >Title{arrow("title")}</th
+              >
+              <th class="ptr num" onclick={() => sortBy("res")}
+                >Quality{arrow("res")}</th
+              >
+              <th class="ptr num" onclick={() => sortBy("size")}
+                >Size{arrow("size")}</th
+              >
+              <th class="ptr num" onclick={() => sortBy("seeders")}
+                >Seed{arrow("seeders")}</th
+              >
+              <th class="ptr num" onclick={() => sortBy("leechers")}
+                >Leech{arrow("leechers")}</th
+              >
+              <th class="ptr num" onclick={() => sortBy("files")}
+                >Files{arrow("files")}</th
+              >
+              <th class="ptr num" onclick={() => sortBy("added")}
+                >Age{arrow("added")}</th
+              >
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each torrentView as { t, p } (t.infoHash)}
+              <tr>
+                <td title={t.name}>
+                  <span class="nm">{p.title || t.name}</span>
+                  <span class="meta fs-xs tx-1">
+                    {#if epTag(p)}<Badge variant="tag">{epTag(p)}</Badge>{/if}
+                    {#each p.langs as l}<Badge>{l}</Badge>{/each}
+                    {#if p.codec}<Badge>{p.codec}</Badge>{/if}
+                    {#if p.hdr}<Badge variant="hdr">{p.hdr}</Badge>{/if}
+                    {#if p.group}<Badge variant="dim">·{p.group}</Badge>{/if}
+                  </span>
+                </td>
+                <td class="num">
+                  {#if p.res}<Badge variant="quality">{p.res}</Badge
+                    >{:else}<span class="tx-1">—</span>{/if}
+                  {#if p.source}<span class="src fs-xs tx-1">{p.source}</span
+                    >{/if}
+                </td>
+                <td class="num">{fmtBytes(t.size)}</td>
+                <td class="num seed">{t.seeders}</td>
+                <td class="num tx-1">{t.leechers}</td>
+                <td class="num tx-1">{t.files || "—"}</td>
+                <td class="num tx-1">{ago(t.added)}</td>
+                <td class="num">
+                  <button
+                    class="add ptr fs-xs"
+                    class:done={added.has(t.infoHash)}
+                    disabled={added.has(t.infoHash)}
+                    onclick={() => addTorrent(t)}
+                  >
+                    {added.has(t.infoHash) ? "Added ✓" : "+ Add"}
+                  </button>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+    {:else if home.loading}
       <div class="skel-grid">
         {#each Array(14) as _, i}
           <div class="skel-card" style="--i:{i}"></div>
         {/each}
       </div>
-    {:else if results !== null}
+    {:else if localResults !== null}
       <div class="search-header f al-ct g20">
         <span>
           Results for "<strong>{search}</strong>"
         </span>
 
-        <button class="clear fs-xs rx2" onclick={() => (search = "")}>
-          ✕ Clear
-        </button>
+        <button class="clear fs-xs rx2" onclick={clearSearch}>✕ Clear</button>
       </div>
 
       <div class="grid">
-        {#each results as item, idx (item.dir + "/" + item.name)}
+        {#each localResults as item, idx (item.dir + "/" + item.name)}
           {@const vidParam =
             item.dir === "." ? item.name : `${item.dir}/${item.name}`}
           <a
@@ -150,8 +362,10 @@
           </a>
         {/each}
 
-        {#if results.length === 0}
-          <EmptyState variant="hero" gridSpan>Nothing found.</EmptyState>
+        {#if localResults.length === 0}
+          <EmptyState variant="hero" gridSpan>
+            Nothing in library. Press Enter to search torrents.
+          </EmptyState>
         {/if}
       </div>
     {:else}
@@ -160,6 +374,16 @@
           <span class="offline-dot"></span>
           Offline — showing downloaded videos
         </div>
+      {:else if home.rows.length === 0 && home.continues.length === 0}
+        <EmptyState variant="hero">
+          {#if home.disks.length === 0}
+            No roots reachable on the server. Mount a drive (or check ~/Videos exists).
+          {:else}
+            No videos yet. Reachable roots: {home.disks
+              .map((d) => d.root)
+              .join(", ")}.
+          {/if}
+        </EmptyState>
       {/if}
       <Continues
         items={home.continues}
@@ -182,7 +406,9 @@
                 }}>‹</button
               >
 
-              <div class="cards f flow-x-s g5">
+              <div
+                class="cards flow-x-s g5 {dir === '.' ? 'multi' : 'f'}"
+              >
                 {#each files as f, idx}
                   {@const vidParam = dir === "." ? f.name : `${dir}/${f.name}`}
                   <a
@@ -392,6 +618,16 @@
   :global(.media-card) {
     width: 220px;
   }
+  /* Movies (dir === ".") is non-hierarchical, so pack it into a 3-row
+     column-major grid: items flow top→bottom in each column, container
+     scrolls horizontally. ~3× density per viewport vs a single row. */
+  .cards.multi {
+    display: grid;
+    grid-template-rows: repeat(3, auto);
+    grid-auto-flow: column;
+    grid-auto-columns: 220px;
+    overflow-x: auto;
+  }
 
   .cancel-btn {
     background: var(--glass);
@@ -417,6 +653,75 @@
     overflow: hidden;
     text-overflow: ellipsis;
     border-radius: 0 0 var(--r-lg) var(--r-lg);
+  }
+
+  table.res {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .res th,
+  .res td {
+    padding: 9px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--glass-bd);
+    vertical-align: middle;
+  }
+  .res th {
+    position: sticky;
+    top: 0;
+    background: var(--bg, #0d0b12);
+    color: var(--tx-1);
+    font-weight: 500;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    user-select: none;
+  }
+  .res th.ptr:hover {
+    color: var(--tx-4);
+  }
+  .res td.num,
+  .res th.num {
+    text-align: right;
+    white-space: nowrap;
+  }
+  .res tbody tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .nm {
+    display: block;
+    font-weight: 500;
+    word-break: break-word;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    align-items: center;
+    margin-top: 3px;
+  }
+  .src {
+    display: block;
+    margin-top: 2px;
+  }
+  .seed {
+    color: #4ade80;
+    font-weight: 600;
+  }
+  .add {
+    padding: 5px 12px;
+    border-radius: var(--r-md);
+    background: var(--red);
+    color: #fff;
+    font-family: inherit;
+    border: none;
+    white-space: nowrap;
+  }
+  .add.done {
+    background: var(--glass);
+    color: var(--tx-3);
+    cursor: default;
   }
 
   .panel {
@@ -485,6 +790,9 @@
     }
     .cards {
       padding: 6px 16px 12px;
+    }
+    .cards.multi {
+      grid-template-rows: repeat(2, auto);
     }
     .search-header {
       padding: 16px 16px 12px;

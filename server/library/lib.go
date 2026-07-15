@@ -8,6 +8,12 @@ import (
 
 type Library struct {
 	Roots []string
+	// Caps holds a UI-only capacity cap (in bytes) keyed by absolute root
+	// path. DiskInfo reports min(actualTotal, cap) for the total and
+	// max(0, cap - used) for free. Writes aren't enforced — the underlying
+	// filesystem keeps whatever real capacity it has; this only shapes what
+	// the UI shows so the user can budget against a soft quota.
+	Caps map[string]uint64
 }
 
 type VideoRef struct {

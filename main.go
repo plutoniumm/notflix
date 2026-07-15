@@ -5,6 +5,9 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"notflix/server/jobs"
@@ -23,12 +26,48 @@ const (
 	port   = "4242"
 )
 
-var lib = &library.Library{
-	Roots: []string{
-		"/Volumes/Ravan",
-		"/Volumes/Oni",
-		"/Volumes/Kumbhakarn",
-	},
+// configuredRoots is the desired root set. Two flavours coexist:
+//   - "~/…" paths: expanded via $HOME, auto-created on boot. The home
+//     dir is presumed writable; if not, the root is skipped non-fatally.
+//   - "/Volumes/…" paths: aspirational mounts. Never created (creating
+//     a regular dir at a mountpoint would silently shadow the volume).
+//     Skipped non-fatally if the drive isn't mounted.
+// Any other absolute path is treated the same as a /Volumes path: must
+// pre-exist or it's dropped.
+var configuredRoots = []string{
+	"~/Videos",
+	"/Volumes/Aomine",
+}
+
+// rootCaps maps a (possibly-tilde'd) configured root to a UI-only soft
+// quota in bytes. Cosmetic only — writes aren't enforced; the user can
+// blow past the cap and the UI just stops budgeting. Use this for roots
+// that share a filesystem with the boot disk (~/Videos), so the disk
+// strip doesn't drown out the others by showing the full Mac SSD.
+var rootCaps = map[string]uint64{
+	"~/Videos": 64 << 30, // 64 GiB
+}
+
+var lib = &library.Library{}
+
+// resolveRoot expands a configured root entry to an absolute path.
+// "~/X" → "$HOME/X" (only if home was resolvable); other strings are
+// passed through. Returns ok=false when a "~" entry can't be expanded
+// because the home dir is unknown.
+func resolveRoot(raw, home string, homeOK bool) (string, bool) {
+	if strings.HasPrefix(raw, "~/") {
+		if !homeOK {
+			return "", false
+		}
+		return filepath.Join(home, raw[2:]), true
+	}
+	if raw == "~" {
+		if !homeOK {
+			return "", false
+		}
+		return home, true
+	}
+	return raw, true
 }
 
 func pulse() {
@@ -42,8 +81,52 @@ func pulse() {
 func main() {
 	_ = godotenv.Load()
 
-	for _, root := range lib.Roots {
-		library.EnsureDir(root)
+	// Build the active root set. Every step is non-fatal — boot must
+	// survive missing drives, unwritable home dirs, or any other per-root
+	// permission glitch so the server still answers requests against
+	// whatever roots are actually reachable.
+	lib.Caps = map[string]uint64{}
+
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		log.Printf("warn: cannot resolve home dir: %v — ~ roots will be skipped", homeErr)
+	}
+
+	for _, raw := range configuredRoots {
+		abs, ok := resolveRoot(raw, home, homeErr == nil)
+		if !ok {
+			continue
+		}
+
+		// Tilde'd entries are ours to create; bare absolute paths must
+		// pre-exist (creating them would shadow unmounted volumes or
+		// require root permission we don't have).
+		isManaged := strings.HasPrefix(raw, "~")
+		if isManaged {
+			if !library.EnsureDir(abs) {
+				log.Printf("skipping %s — cannot create or access (permission?)", abs)
+				continue
+			}
+		} else {
+			info, err := os.Stat(abs)
+			if err != nil {
+				log.Printf("skipping %s — %v", abs, err)
+				continue
+			}
+			if !info.IsDir() {
+				log.Printf("skipping %s — not a directory", abs)
+				continue
+			}
+		}
+
+		lib.Roots = append(lib.Roots, abs)
+		if cap, ok := rootCaps[raw]; ok {
+			lib.Caps[abs] = cap
+		}
+	}
+
+	if len(lib.Roots) == 0 {
+		log.Printf("warn: no library roots are reachable; server will still serve UI but library will be empty")
 	}
 
 	library.EnsureDir(pubDir)
@@ -62,6 +145,27 @@ func main() {
 	}
 	jobs.TailscaleInit() // warm the IP→identity cache + keep it warm in bg
 
+	library.IsTorrentBusy = func(p string) bool {
+		return jobs.Aria2ActivePaths()[p]
+	}
+
+	recovered := library.PipelineInit()
+	for _, r := range recovered {
+		// Convert writes to <dst>.tmp before an atomic rename. If it died
+		// mid-run, the .tmp is a truncated partial — delete so the redo
+		// starts clean. Sprite/thumb/whisper don't leak .tmp siblings; the
+		// ledger reset alone is enough to trigger a redo on next sweep.
+		if r.Step == "convert" {
+			base := strings.TrimSuffix(r.Path, filepath.Ext(r.Path))
+			for _, sfx := range []string{".mp4.tmp", ".audio.tmp", ".audio.tmp.mp4"} {
+				if err := os.Remove(base + sfx); err == nil {
+					log.Printf("[pipeline] cleaned stale %s%s", filepath.Base(base), sfx)
+				}
+			}
+		}
+	}
+
+	media.LogEncoders()
 	go media.ProcessAll(lib) // runs ScanCorrupt internally after Convert+Clean
 	go media.NormalizeSubs(lib)
 	go jobs.Aria2Init(lib)
@@ -78,8 +182,6 @@ func main() {
 
 	router.GET("/", func(c *gin.Context) { pulse(); c.File("index.html") })
 	router.GET("/manage", func(c *gin.Context) { c.File("index.html") })
-	router.GET("/search", func(c *gin.Context) { c.File("index.html") })
-	router.GET("/stats", func(c *gin.Context) { c.File("index.html") })
 	router.StaticFile("/manifest.json", "./public/manifest.json")
 	router.StaticFile("/sw.js", "./public/sw.js")
 	router.Static("/assets", assDir)
@@ -92,6 +194,7 @@ func main() {
 
 	router.POST("/api/rename", func(c *gin.Context) { library.Rename(c, lib) })
 	router.GET("/api/conversions", media.Conversions)
+	router.GET("/api/process/status", media.ProcessStatusHandler)
 	router.GET("/api/processing", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"processing": media.IsProcessing()})
 	})
@@ -117,7 +220,6 @@ func main() {
 
 	router.GET("/kv/get", library.KVGet)
 	router.POST("/kv/set", library.KVSet)
-	router.GET("/api/stats/summary", library.StatsSummaryHandler)
 
 	router.DELETE("/api/dir", func(c *gin.Context) { library.DirDelete(c, lib) })
 

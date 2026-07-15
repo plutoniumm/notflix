@@ -76,7 +76,7 @@ func AutoWhisper(srcMP4 string) {
 		if _, err := os.Stat(srcMP4); err != nil {
 			return
 		}
-		if library.IsCorrupt(srcMP4) {
+		if library.IsCorrupt(srcMP4) || library.IsBusy(srcMP4) {
 			return
 		}
 		// The python check is deferred to runJob — checking 270 times during
@@ -84,12 +84,15 @@ func AutoWhisper(srcMP4 string) {
 		dst := whisperVTTOf(srcMP4)
 		job := &WhisperJob{Status: "pending"}
 		log.Printf("[auto-whisper] start %s", filepath.Base(srcMP4))
+		library.PipelineMark(srcMP4, "whisper", library.StepRunning)
 		runJob(srcMP4, dst, srcMP4, job)
 		status, msg := job.read()
 		if status == "done" {
 			log.Printf("[auto-whisper] done %s", filepath.Base(srcMP4))
+			library.PipelineMark(srcMP4, "whisper", library.StepDone)
 		} else {
 			log.Printf("[auto-whisper] failed %s: %s", filepath.Base(srcMP4), msg)
+			library.PipelineMark(srcMP4, "whisper", library.StepFailed)
 		}
 	})
 }
@@ -115,7 +118,7 @@ func BackfillWhisper(lib *library.Library) {
 			if hasEnglishSub(path) {
 				return nil
 			}
-			if library.IsCorrupt(path) {
+			if library.IsCorrupt(path) || library.IsBusy(path) {
 				return nil
 			}
 			AutoWhisper(path)

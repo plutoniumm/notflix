@@ -68,9 +68,22 @@ func GenerateSprite(srcMP4, key string) error {
 	}
 	defer generateInflight.Delete(key)
 
+	// The source may have been moved/renamed/deleted between the walk that
+	// queued us and now (CleanAll flattens, convert renames). Silently skip
+	// so we don't log a scary "duration unknown" and pollute the ledger with
+	// StepFailed for a file that's actually fine at a new path.
+	if _, err := os.Stat(srcMP4); err != nil {
+		return nil
+	}
+
+	// duration<=0 means the source isn't currently probeable — usually because
+	// convert is mid-remux, ScanCorrupt is about to flag it, or the file was
+	// renamed after our stat. Any of those either resolves itself (next sweep
+	// retries) or gets caught by the corrupt path elsewhere. Skip silently so
+	// we don't spam the log or mark StepFailed for a transient state.
 	dur := duration(srcMP4)
 	if dur <= 0 {
-		return fmt.Errorf("sprite: duration unknown for %s", filepath.Base(srcMP4))
+		return nil
 	}
 
 	count := max(int(dur)/SpriteIntervalSec+1, 1)
@@ -142,12 +155,21 @@ func GenerateSprite(srcMP4, key string) error {
 }
 
 // GenerateSpriteAsync queues sprite generation on the shared pool. Safe to
-// fire-and-forget from conversion completion or thumbnail walks.
+// fire-and-forget from conversion completion or thumbnail walks. Worker-time
+// IsBusy check defers files that convert grabbed after we queued — silent,
+// not recorded as failed, retries on the next sweep.
 func GenerateSpriteAsync(srcMP4, key string) {
 	spritePool.Go(func() {
+		if library.IsBusy(srcMP4) {
+			return
+		}
+		library.PipelineMark(srcMP4, "sprite", library.StepRunning)
 		if err := GenerateSprite(srcMP4, key); err != nil {
 			log.Printf("[sprite] failed %s: %v", filepath.Base(srcMP4), err)
+			library.PipelineMark(srcMP4, "sprite", library.StepFailed)
+			return
 		}
+		library.PipelineMark(srcMP4, "sprite", library.StepDone)
 	})
 }
 
@@ -173,7 +195,7 @@ func BackfillSprites(lib *library.Library) {
 			if strings.ToLower(filepath.Ext(d.Name())) != ".mp4" {
 				return nil
 			}
-			if library.IsCorrupt(path) {
+			if library.IsCorrupt(path) || library.IsBusy(path) {
 				return nil
 			}
 			key := library.Hash(d.Name())

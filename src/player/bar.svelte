@@ -98,9 +98,8 @@
         <Icon name="whisper" />
       </button>
 
-      {#if view.state.videoKey}
-        <Down {videoParam} {title} key={view.state.videoKey} />
-      {/if}
+      <Down {videoParam} {title} />
+
     </div>
   </div>
 {/if}

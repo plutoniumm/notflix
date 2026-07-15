@@ -10,7 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"notflix/server/jobs"
 	"notflix/server/library"
@@ -32,21 +31,59 @@ func ProcessAll(lib *library.Library) {
 	defer processing.Store(false)
 
 	jobs.WaitAria2()
-	ConvertAll(lib)
-	// Tree-mutating steps run first and in order — CleanAll renames/moves
-	// files, so the backfills below must walk a settled tree.
-	library.CleanAll(lib.Roots, jobs.Aria2ActivePaths())
-	library.ScanCorrupt(lib)
+	StatusReset()
+	defer StatusFinish()
 
-	// Thumbnails, sprites and whisper are independent generation passes with
-	// their own pools (thumbs, sprite=2, whisper=1). Run them concurrently so
-	// whisper doesn't sit idle waiting for the sprite sweep to drain — each
-	// pool keeps its own slice of CPU bounded.
+	// Clean is a tree-mutating pass (rename/move/flatten). Run alone before
+	// fan-out so the concurrent phases below walk a settled tree. Cheap:
+	// metadata-only, seconds not minutes. Every phase gates on IsBusy, so
+	// clean itself is safe with respect to in-flight aria2 downloads.
+	PhaseStart("clean")
+	library.CleanAll(lib.Roots)
+	PhaseEnd("clean")
+
+	// Convert, scan+repair, thumbs, sprites, and whisper all fan out
+	// concurrently. Each has its own worker pool and each skips busy files
+	// (IsBusy = torrent-owned, sidecar-present, or freshly-written), so the
+	// stages don't step on each other. toMP4 also dispatches downstream work
+	// (sprite/thumb/whisper) per-file as each conversion completes — so a
+	// file can gain its thumbnail while the next file is still transcoding.
 	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() { defer wg.Done(); RegenerateThumbnails(lib, 0) }()
-	go func() { defer wg.Done(); BackfillSprites(lib) }()
-	go func() { defer wg.Done(); jobs.BackfillWhisper(lib) }()
+	wg.Add(5)
+	go func() {
+		defer wg.Done()
+		PhaseStart("convert")
+		ConvertAll(lib)
+		PhaseEnd("convert")
+	}()
+	go func() {
+		defer wg.Done()
+		PhaseStart("scan")
+		library.ScanCorrupt(lib)
+		PhaseSet("scan", 0, len(library.CorruptPaths()))
+		PhaseEnd("scan")
+		PhaseStart("repair")
+		RepairAll(lib)
+		PhaseEnd("repair")
+	}()
+	go func() {
+		defer wg.Done()
+		PhaseStart("thumbs")
+		RegenerateThumbnails(lib, 0)
+		PhaseEnd("thumbs")
+	}()
+	go func() {
+		defer wg.Done()
+		PhaseStart("sprites")
+		BackfillSprites(lib)
+		PhaseEnd("sprites")
+	}()
+	go func() {
+		defer wg.Done()
+		PhaseStart("whisper")
+		jobs.BackfillWhisper(lib)
+		PhaseEnd("whisper")
+	}()
 	wg.Wait()
 	log.Println("[ProcessAll] done")
 }
@@ -65,7 +102,7 @@ func ConvertAll(lib *library.Library) {
 		wg.Add(1)
 		go func(root string) {
 			defer wg.Done()
-			convertRoot(root, jobs.NewPool(3))
+			convertRoot(root, jobs.NewPool(5))
 		}(root)
 	}
 
@@ -83,7 +120,6 @@ func freeBytes(dir string) int64 {
 
 func convertRoot(root string, pool *jobs.Pool) {
 	var wg sync.WaitGroup
-	downloading := jobs.Aria2ActivePaths()
 	var diskFull atomic.Bool
 
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -117,17 +153,11 @@ func convertRoot(root string, pool *jobs.Pool) {
 			return nil
 		}
 
-		if downloading[path] {
-			log.Printf("[convert] skipping (aria2 active): %s", d.Name())
+		if library.IsBusy(path) {
+			log.Printf("[convert] busy, skipping: %s", d.Name())
 			return nil
 		}
-		if _, err := os.Stat(path + ".aria2"); err == nil {
-			return nil
-		}
-		info, err := d.Info()
-		if err == nil && time.Since(info.ModTime()) < 30*time.Second {
-			return nil
-		}
+		info, _ := d.Info()
 
 		if info != nil {
 			free := freeBytes(filepath.Dir(path))
@@ -140,10 +170,12 @@ func convertRoot(root string, pool *jobs.Pool) {
 
 		pool.Acquire()
 		wg.Add(1)
+		PhaseInc("convert", 1, 0)
 
 		go func(p string, audioOnly bool) {
 			defer wg.Done()
 			defer pool.Release()
+			defer PhaseInc("convert", 0, 1)
 
 			var err error
 			if audioOnly {
@@ -172,8 +204,23 @@ func toMP4(srcPath, root string) error {
 	mp4Path := filepath.Join(dir, cleanedBase+".mp4")
 	name := srcName
 
+	// Both a source and a same-basename .mp4 exist. Historically we assumed
+	// the .mp4 was a partial-write from a previous killed run and deleted it
+	// to restart convert — but that destroys a good .mp4 whenever the prior
+	// run finished the convert but was killed before removing the source
+	// (data-loss root cause of the Modern Family Joy corruption, 2026-07-14).
+	// Probe the .mp4 first: if it's readable, the previous convert really did
+	// finish, so drop the source and be done. Only when the .mp4 is itself
+	// unreadable is it safe to blow away and re-convert.
 	if _, err := os.Stat(mp4Path); err == nil {
-		log.Printf("Incomplete conversion detected, restarting: %s", name)
+		if duration(mp4Path) > 0 {
+			log.Printf("[convert] %s: existing .mp4 is valid, dropping source", name)
+			os.Remove(srcPath)
+			library.PipelineForget(srcPath)
+			library.PipelineMark(mp4Path, "convert", library.StepDone)
+			return nil
+		}
+		log.Printf("[convert] %s: existing .mp4 is broken, restarting", name)
 		os.Remove(mp4Path)
 	}
 
@@ -186,14 +233,19 @@ func toMP4(srcPath, root string) error {
 		return nil
 	}
 
+	library.PipelineMark(srcPath, "convert", library.StepRunning)
+
 	extractAllSubs(srcPath, filepath.Join(dir, cleanedBase))
 
 	if err := remux(srcPath, mp4Path, dur, name); err != nil {
 		log.Printf("Conversion failed %s: %v", name, err)
+		library.PipelineMark(srcPath, "convert", library.StepFailed)
 		return err
 	}
 
 	os.Remove(srcPath)
+	library.PipelineForget(srcPath) // source is gone; ledger key is now mp4Path
+	library.PipelineMark(mp4Path, "convert", library.StepDone)
 
 	// remux() now stores AV1 on disk (copy if the source was already AV1, else
 	// a one-time libsvtav1 re-encode). The mark is honest: the bytes really are
@@ -207,12 +259,11 @@ func toMP4(srcPath, root string) error {
 		}
 	}
 
-	// Trickplay sprite — run in parallel on the sprite pool. Doesn't block
-	// conversion completion; the player gracefully degrades when missing.
+	// Downstream per-file dispatch: each stage has its own pool and skips if
+	// its output already exists, so fan-out is safe and non-blocking. The
+	// bulk backfill loops in ProcessAll still pick up anything convert misses.
 	GenerateSpriteAsync(mp4Path, library.Hash(filepath.Base(mp4Path)))
-
-	// Auto-whisper — fires only if no English vtt sidecar exists. Pool
-	// throttled to 1 so it doesn't fight conversion for CPU.
+	GenerateThumbAsync(mp4Path)
 	jobs.AutoWhisper(mp4Path)
 
 	return nil
@@ -403,7 +454,7 @@ func remux(src, dst string, durationSec float64, name string) error {
 	if mp4AudioOK(ac) {
 		args = append(args, "-c:a", "copy")
 	} else {
-		args = append(args, "-c:a", "aac", "-b:a", "192k")
+		args = append(args, "-c:a", pickAAC(), "-b:a", "192k")
 		if anyUnnamedMultichannel(getSrcInfo(src)) {
 			args = append(args, "-ac", "2") // unnamed multichannel → AAC encoder fails; downmix
 		}

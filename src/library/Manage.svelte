@@ -13,6 +13,7 @@
   import Downloads from "./Downloads.svelte";
   import FolderRow from "./FolderRow.svelte";
   import ProgressBar from "../components/ProgressBar.svelte";
+  import ProcessStatus from "./ProcessStatus.svelte";
 
   declare const __BUILD_TIME__: string;
   const frontendBuild = __BUILD_TIME__;
@@ -28,6 +29,7 @@
   let jobs: Job[] = $state([]);
   let dlJobs: Downjob[] = $state([]);
   let processingLib = $state(false);
+  let procStatus: ProcessStatus | null = $state(null);
   let pwaDownloads = $state<
     {
       videoParam: string;
@@ -99,8 +101,8 @@
     pollers.push(
       usePoll(async () => {
         jobs = (await api.conversions({ silent: true })) ?? [];
-        const proc = await api.processing({ silent: true });
-        const isProc = !!proc?.processing;
+        procStatus = (await api.processStatus({ silent: true })) ?? null;
+        const isProc = !!procStatus?.running;
         // ScanCorrupt rebuilds the corrupt set on every process run; refetch
         // the list when a run finishes so files that completed (and are no
         // longer corrupt) drop off the top section.
@@ -307,6 +309,8 @@
   />
 
   <main>
+    <ProcessStatus status={procStatus} {jobs} />
+
     {#if corruptFiles.length > 0}
       <section class="corrupt surface flow-h">
         <h3 class="m0 p10 fs-sm fw6 f al-ct g10">

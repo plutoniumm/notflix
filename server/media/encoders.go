@@ -415,12 +415,21 @@ func segMime(codec string) string {
 	}
 }
 
+// pickAAC prefers Apple AudioToolbox AAC when present, else falls to the
+// software encoder. Both accept the same -b:a bitrate spec.
+func pickAAC() string {
+	if hasEncoder("aac_at") {
+		return "aac_at"
+	}
+	return "aac"
+}
+
 // LogEncoders prints which encoders were selected for each codec at startup.
 // Not auto-wired — call from main.go after lib init when desired. Useful when
 // debugging "why is my AV1 path slow" (answer: probably libsvtav1 software).
 func LogEncoders() {
-	log.Printf("[media] encoders picked: h264=%s hevc=%s av1=%s",
-		emptyNone(pickH264()), emptyNone(pickHEVC()), emptyNone(pickAV1()))
+	log.Printf("[media] encoders picked: h264=%s hevc=%s av1=%s aac=%s",
+		emptyNone(pickH264()), emptyNone(pickHEVC()), emptyNone(pickAV1()), emptyNone(pickAAC()))
 }
 
 func emptyNone(s string) string {

@@ -7,74 +7,52 @@
   let {
     videoParam,
     title,
-    key,
   }: {
     videoParam: string;
     title: string;
-    key: string;
+    key?: string;
   } = $props();
 
   type State = "idle" | "downloading" | "done" | "error";
 
+  // BackgroundFetch is a secure-context API. Over Tailscale HTTP (the
+  // typical access pattern here) the API surface is missing, and Safari
+  // doesn't ship it at all. We use it ONLY to surface "already saved as
+  // PWA" badges when applicable; the actual download path is a plain
+  // <a download> link that works everywhere.
   const bgfetch = isSupported();
   const show = $derived(videoParam.endsWith(".mp4"));
+  // ?dl=1 makes the server send Content-Disposition: attachment so Safari
+  // saves instead of opening its inline player.
+  const fileURL = $derived(`/video/${videoParam}?dl=1`);
 
   let state = $state<State>("idle");
   let progress = $state(0);
-  let storageHint = $state("");
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let unsub: (() => void) | null = null;
 
   async function init() {
     if (!bgfetch) return;
-
     const record = await Down.get(videoParam);
-    if (record) {
-      state =
-        record.status === "done"
-          ? "done"
-          : record.status === "error"
-            ? "error"
-            : "downloading";
-      if (state === "downloading") startPolling(record.bgFetchId!);
-    }
-
-    const est = await Down.storage();
-    if (est.quota > 0) {
-      storageHint = `${((est.quota - est.used) / 1e9).toFixed(1)} GB free`;
-    }
-  }
-
-  function startPolling(bgFetchId: string) {
-    if (pollTimer) return;
-    pollTimer = setInterval(async () => {
-      progress = await Down.progress(bgFetchId);
-    }, 500);
-  }
-
-  function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-  }
-
-  async function download() {
-    try {
-      state = "downloading";
-      progress = 0;
-      await Down.start(videoParam, title, key);
-
-      const record = await Down.get(videoParam);
-      if (record?.bgFetchId) startPolling(record.bgFetchId);
-    } catch (e) {
-      console.error("Download failed:", e);
-      state = "error";
+    if (!record) return;
+    state =
+      record.status === "done"
+        ? "done"
+        : record.status === "error"
+          ? "error"
+          : "downloading";
+    if (state === "downloading" && record.bgFetchId) {
+      pollTimer = setInterval(async () => {
+        progress = await Down.progress(record.bgFetchId!);
+      }, 500);
     }
   }
 
   async function remove() {
-    stopPolling();
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
     await Down.del(videoParam);
     state = "idle";
     progress = 0;
@@ -84,54 +62,45 @@
     init();
     unsub = Down.on((vp, record) => {
       if (vp !== videoParam) return;
-      stopPolling();
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
       state = record ? (record.status === "done" ? "done" : "error") : "idle";
     });
   });
 
   onDestroy(() => {
-    stopPolling();
+    if (pollTimer) clearInterval(pollTimer);
     unsub?.();
   });
 </script>
 
 {#if show}
   <div class="dl-wrap f al-ct g5">
-    {#if !bgfetch}
+    {#if state === "downloading"}
+      <ProgressBar value={progress} label width="120px" height="4px" />
+      <button class="btn-ghost fs-xs" onclick={remove} style="padding:2px 6px;"
+        >✕</button
+      >
+    {:else}
       <!-- svelte-ignore a11y_consider_explicit_label -->
-      <a class="ibtn cc ptr rx5 p5" href="/video/{videoParam}" download={title}>
+      <a
+        class="ibtn cc ptr rx5 p5"
+        href={fileURL}
+        download={title}
+        title="Save offline"
+      >
         <Icon name="download" />
       </a>
-    {:else if state === "idle" || state === "error"}
-      <button
-        class="ibtn cc ptr rx5 p5"
-        onclick={download}
-        title={state === "error"
-          ? `Retry — ${storageHint}`
-          : storageHint || "Download"}
-      >
-        <Icon
-          name="download"
-          color={state === "error" ? "var(--red)" : undefined}
-        />
-      </button>
-    {:else if state === "downloading"}
-      <div class="f al-ct g5">
-        <ProgressBar value={progress} label width="120px" height="4px" />
+      {#if state === "done"}
         <button
           class="btn-ghost fs-xs"
           onclick={remove}
-          style="padding:2px 6px;">✕</button
+          title="Remove PWA offline copy"
+          style="padding:2px 6px;">🗑</button
         >
-      </div>
-    {:else if state === "done"}
-      <span class="offline rx10 fs-xs">✓ Offline</span>
-      <button
-        class="btn-ghost fs-xs"
-        onclick={remove}
-        title="Remove offline copy"
-        style="padding:2px 8px;">🗑</button
-      >
+      {/if}
     {/if}
   </div>
 {/if}
@@ -146,13 +115,5 @@
   .ibtn:hover {
     color: var(--tx-5);
     background: #fff2;
-  }
-
-
-  .offline {
-    color: var(--grn);
-    padding: 2px 8px;
-    border: 1px solid var(--grn);
-    white-space: nowrap;
   }
 </style>

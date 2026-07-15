@@ -124,6 +124,14 @@ func serve(c *gin.Context, file *os.File, info os.FileInfo, name string) {
 	rng := c.GetHeader("Range")
 	ct := "video/mp4"
 
+	// ?dl=1 → force a Save dialog instead of streaming inline. Safari ignores
+	// the HTML `download` attribute for media URLs and opens the player; the
+	// only reliable cross-browser switch is Content-Disposition: attachment.
+	if c.Query("dl") == "1" {
+		base := filepath.Base(name)
+		c.Header("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(base, `"`, ``)+`"`)
+	}
+
 	if rng == "" {
 		c.Header("Content-Type", ct)
 		c.Header("Content-Length", strconv.FormatInt(size, 10))

@@ -34,6 +34,11 @@ export class HomeData {
   conversions = $state<Job[]>([]);
   loading = $state(true);
   offline = $state(false);
+  // Disks the server currently has mounted. Surfaced in the empty-state
+  // (so the user can distinguish "server has no roots" from "roots exist
+  // but no videos in them") and used as the download-target picker when
+  // a torrent search runs from the home bar.
+  disks = $state<DiskInfo[]>([]);
 
   // The server already orders groups LRU (recently-watched dirs first); we
   // just drop empties and expose the [dir, files] tuple Home.svelte iterates.
@@ -52,13 +57,26 @@ export class HomeData {
 
     (async () => {
       try {
-        const d = normalizeVideoData(await api.videoList());
-        if (d.length) {
-          this.data = d;
-          this.loadState(d);
-        } else {
+        // api.videoList() returns null on network/HTTP failure (request()
+        // catches and returns null). Distinguish that from a successful but
+        // empty response — an empty library is NOT offline; it just means
+        // the server has roots but no videos in them (or no roots at all).
+        // Conflating the two used to show "Offline" every time the server
+        // came up with no volumes attached.
+        const [raw, disks] = await Promise.all([
+          api.videoList({ silent: true }),
+          api.manage.diskInfo({ silent: true }),
+        ]);
+        if (Array.isArray(disks)) {
+          this.disks = disks.filter((d: any) => d && d.root && d.path);
+        }
+        if (raw == null) {
           this.offline = true;
           this.data = this.buildOfflineData(await recordsP);
+        } else {
+          const d = normalizeVideoData(raw);
+          this.data = d;
+          if (d.length) this.loadState(d);
         }
       } catch (err) {
         console.error("[Home load]", err);
