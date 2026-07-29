@@ -19,6 +19,8 @@
   import Sync from "./sync.svelte";
   import Related from "./related.svelte";
   import Whisper from "./whisper.svelte";
+  import Skip, { activeSkip } from "./skip.svelte";
+  import Tune from "./tune.svelte";
 
   import { clean, parseRaw, nextVid } from "../core/video";
   import { api, HEAD } from "../core/api";
@@ -33,8 +35,9 @@
   import { Sprite } from "./sprite.svelte";
   import type { WhisperCue } from "./subs";
 
-  let { videoParam }: any = $props();
+  let { videoParam: initialParam }: any = $props();
 
+  let videoParam = $state(initialParam);
   const parsed = $derived(parseRaw(videoParam));
   const dir = $derived(parsed.dir);
   const name = $derived(parsed.name);
@@ -43,7 +46,7 @@
   const masterSrc = $derived(
     `/api/hls/master?file=${encodeURIComponent(videoParam)}`,
   );
-  const autoplay =
+  let autoplay =
     new URLSearchParams(window.location.search).get("autoplay") === "1";
   const embed = window.location.pathname === "/embed";
   const watch = new WatchProgress();
@@ -57,6 +60,11 @@
   let avSync: AVSync | null = null;
   let cleanups: (() => void)[] = [];
   let playerError = $state("");
+  let listData: any[] | null = null;
+  let isOffline = false;
+  let swapping = false;
+  let whisperStop: (() => void) | null = null;
+  let skipped = { intro: false, outro: false };
 
   function safePlay() {
     const p = player?.play();
@@ -71,10 +79,183 @@
     }
   }
 
+  // Seamless next: swap the source in the same document. A full navigation
+  // drops Chrome's user-gesture autoplay allowance, so whole seasons would
+  // stall on every episode boundary. Offline records still play via direct
+  // MP4 + a real navigation.
   function goNext() {
-    if (!ps.nextURL) return;
+    if (!ps.nextURL || swapping) return;
+    if (isOffline) {
+      watch.clear(videoParam);
+      window.location.href = ps.nextURL;
+      return;
+    }
+    const url = new URL(ps.nextURL, window.location.origin);
+    const param = url.searchParams.get("video");
+    if (!param) {
+      window.location.href = ps.nextURL;
+      return;
+    }
     watch.clear(videoParam);
-    window.location.href = ps.nextURL;
+    autoplay = true;
+    url.searchParams.set("autoplay", "1");
+    history.pushState({}, "", url.pathname + url.search);
+    loadEpisode(param, true);
+  }
+
+  function setMediaMeta() {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title,
+      artist: dir === "." ? "Notflix" : dir,
+      artwork: ps.videoKey
+        ? [{ src: `/images/${ps.videoKey}.jpg`, type: "image/jpeg" }]
+        : [{ src: "/assets/icon.svg", type: "image/svg+xml" }],
+    });
+  }
+
+  function refreshMeta() {
+    if (!listData) return;
+    ps.rows = listData
+      .filter((g: any) => g.files?.length)
+      .map((g: any) => [g.dir, g.files]) as [string, any[]][];
+    ps.nextURL = nextVid(listData, dir, name, autoplay);
+    ps.videoKey =
+      listData
+        .find((g: any) => g.dir === dir)
+        ?.files?.find((f: any) => f.name === name)?.key ?? "";
+    if (ps.videoKey) sprite.load(ps.videoKey);
+    setMediaMeta();
+  }
+
+  // Resume guard: only seek to a saved position once duration is known
+  // and the position lands sanely inside the media. An earlier broken
+  // playback timeline could have persisted a drifted/huge currentTime;
+  // without this, the player yanks a fresh start to a bogus timestamp
+  // ("just started but shows ~2h, jumped back"). Out-of-range → start at 0.
+  const applyResume = (t: number) => {
+    if (!Number.isFinite(t) || t <= 0) return;
+    const trySeek = () => {
+      const d = player.duration();
+      if (!Number.isFinite(d) || d <= 0) return false;
+      if (t < d - 2) player.currentTime(t);
+      return true;
+    };
+    if (!trySeek()) player.one("loadedmetadata", trySeek);
+  };
+
+  // One-shot per episode: guards consumed on trigger, so seeking back into
+  // a range deliberately never auto-skips again (manual button + `x` still
+  // do). Paused/seeking scrubs through a range don't count — only actual
+  // playback entering it.
+  function autoSkipTick() {
+    if (swapping || player.paused() || player.seeking()) return;
+    const which = activeSkip(player.currentTime() ?? 0, introRange, outroRange);
+    if (which === "intro" && !skipped.intro) {
+      skipped.intro = true;
+      player.currentTime(introRange![1]);
+      toast.info("Skipped intro");
+    } else if (which === "outro" && !skipped.outro && ps.nextURL) {
+      skipped.outro = true;
+      toast.info("Next episode");
+      goNext();
+    }
+  }
+
+  async function loadEpisode(param: string, swap: boolean) {
+    videoParam = param;
+    document.title = `${title} | Notflix`;
+    playerError = "";
+    introRange = null;
+    outroRange = null;
+    skipped = { intro: false, outro: false };
+    whisperStop?.();
+    whisperStop = null;
+    whisperCues = [];
+    ps.wMsg = "";
+
+    if (swap) {
+      swapping = true;
+      const rt = player.remoteTextTracks();
+      for (let i = rt.length - 1; i >= 0; i--)
+        player.removeRemoteTextTrack(rt[i]);
+      view.subs.setInfo(null);
+      view.subs.markActive(null);
+      view.subs.setResults(null);
+      view.subs.close();
+      view.audio.setTracks([]);
+      view.audio.select(0);
+      view.audio.close();
+      sprite.manifest = null;
+      sprite.url = "";
+      avSync?.set(0);
+      player.src({ src: masterSrc, type: "application/vnd.apple.mpegurl" });
+      const clearSwap = () => (swapping = false);
+      player.one("loadedmetadata", clearSwap);
+      player.one("error", clearSwap);
+      safePlay();
+    }
+
+    refreshMeta();
+    watch.resume(param).then(applyResume);
+
+    if (isOffline) {
+      const subUrl = `/subs/${sub}`;
+      if (await HEAD(subUrl)) {
+        Subs.reload(player, subUrl, "Subtitles", true);
+      }
+    } else {
+      const info = await Subs.start(player, param, sub);
+      if (param !== videoParam) return;
+      view.subs.setInfo(info);
+      if (info?.local?.length) {
+        const eng = info.local.findIndex((t) =>
+          ["eng", "en", "english", "sdh"].includes(
+            t.language.replace(/\d+$/, ""),
+          ),
+        );
+        view.subs.markActive(info.local[eng >= 0 ? eng : 0]?.file ?? null);
+      }
+    }
+
+    api
+      .skip(param, { silent: true })
+      .then((res: any) => {
+        if (param !== videoParam) return;
+        introRange = asRange(res?.intro);
+        outroRange = asRange(res?.outro);
+      })
+      .catch((err: any) => console.warn("[skip]", err));
+
+    if (!isOffline) {
+      api.hls
+        .avoffset(param, { silent: true })
+        .then((res: any) => {
+          if (param !== videoParam) return;
+          if (res?.offset_ms > 0) {
+            ps.showSync(avSync!.set(res.offset_ms));
+          }
+        })
+        .catch((err: any) => console.warn("[avoffset]", err));
+
+      api.audio
+        .info(param)
+        .then((tracks: any) => {
+          if (param !== videoParam) return;
+          if (Array.isArray(tracks) && tracks.length > 1) {
+            view.audio.setTracks(tracks);
+            const atl = player.audioTracks();
+            if (!atl) return;
+            for (let i = 0; i < atl.length; i++) {
+              if (atl[i].enabled) {
+                view.audio.select(i);
+                break;
+              }
+            }
+          }
+        })
+        .catch((err: any) => console.warn("[audio info]", err));
+    }
   }
 
   function toggleFullscreen() {
@@ -88,6 +269,15 @@
   }
 
   let whisperCues = $state<WhisperCue[]>([]);
+  let tuneOpen = $state(false);
+
+  let introRange = $state<[number, number] | null>(null);
+  let outroRange = $state<[number, number] | null>(null);
+
+  const asRange = (v: any): [number, number] | null =>
+    Array.isArray(v) && v.length === 2 && v.every((n) => Number.isFinite(n))
+      ? [v[0], v[1]]
+      : null;
 
   async function searchSubs() {
     view.subs.setSearching(true);
@@ -167,29 +357,30 @@
       return;
     }
     whisperCues = [];
-    const stopWhisper = Subs.whisperStream(
+    const wsub = sub;
+    whisperStop = Subs.whisperStream(
       videoParam,
-      sub,
+      wsub,
       (msg) => (ps.wMsg = msg),
       (cue) => {
         whisperCues = [...whisperCues, cue];
       },
       () => {
         ps.wMsg = "";
-        const wsub = sub.replace(".vtt", ".whisper.vtt");
-        Subs.reload(player, `/subs/${wsub}`, "Whisper");
+        whisperStop = null;
+        Subs.reload(
+          player,
+          `/subs/${wsub.replace(".vtt", ".whisper.vtt")}`,
+          "Whisper",
+        );
         whisperCues = [];
       },
     );
-    cleanups.push(stopWhisper);
   }
 
   onMount(async () => {
-    document.title = `${title} | Notflix`;
-
     let initSrc = masterSrc;
     let initType = "application/vnd.apple.mpegurl";
-    let isOffline = false;
     if (videoParam.endsWith(".mp4") && isSupported()) {
       const record = await Down.get(videoParam);
       isOffline = record?.status === "done";
@@ -207,7 +398,6 @@
       html5: {
         vhs: {
           limitRenditionByPlayerDimensions: false,
-          useBandwidthFromLocalStorage: true,
         },
       },
     });
@@ -227,6 +417,11 @@
 
     ps.bind(player);
 
+    player.on("timeupdate", autoSkipTick);
+    player.on("ended", () => {
+      if (ps.nextURL) goNext();
+    });
+
     player.requestFullscreen = () => {
       pageEl!.requestFullscreen();
       return player;
@@ -240,23 +435,12 @@
     player.ready(() => {
       if (autoplay) safePlay();
 
-      // Resume guard: only seek to a saved position once duration is known
-      // and the position lands sanely inside the media. An earlier broken
-      // playback timeline could have persisted a drifted/huge currentTime;
-      // without this, the player yanks a fresh start to a bogus timestamp
-      // ("just started but shows ~2h, jumped back"). Out-of-range → start at 0.
-      const applyResume = (t: number) => {
-        if (!Number.isFinite(t) || t <= 0) return;
-        const trySeek = () => {
-          const d = player.duration();
-          if (!Number.isFinite(d) || d <= 0) return false;
-          if (t < d - 2) player.currentTime(t);
-          return true;
-        };
-        if (!trySeek()) player.one("loadedmetadata", trySeek);
-      };
-
-      watch.resume(videoParam).then(applyResume);
+      const savedRate = parseFloat(localStorage.getItem("speed") ?? "");
+      if (savedRate >= 0.25 && savedRate <= 4 && savedRate !== 1)
+        player.playbackRate(savedRate);
+      player.on("ratechange", () =>
+        localStorage.setItem("speed", String(player.playbackRate() || 1)),
+      );
 
       cleanups.push(Touch(player, pageEl!, toggleFullscreen));
       cleanups.push(
@@ -280,10 +464,22 @@
             const ms = avSync?.adjust(deltaMs) ?? 0;
             ps.showSync(ms);
           },
+          () => {
+            const which = activeSkip(
+              player.currentTime() ?? 0,
+              introRange,
+              outroRange,
+            );
+            if (which === "intro") player.currentTime(introRange![1]);
+            else if (which === "outro")
+              ps.nextURL ? goNext() : player.currentTime(outroRange![1]);
+          },
+          () => (tuneOpen = !tuneOpen),
         ),
       );
 
       const saveProgress = () => {
+        if (swapping) return;
         watch.save(videoParam, player.currentTime() ?? 0, player.duration() ?? 0);
       };
       const trackTimer = setInterval(() => {
@@ -316,60 +512,11 @@
       });
     });
 
-    if (isOffline) {
-      const subUrl = `/subs/${sub}`;
-      if (await HEAD(subUrl)) {
-        Subs.reload(player, subUrl, "Subtitles", true);
-      }
-    } else {
-      const info = await Subs.start(player, videoParam, sub);
-      view.subs.setInfo(info);
-      if (info?.local?.length) {
-        const eng = info.local.findIndex((t) =>
-          ["eng", "en", "english", "sdh"].includes(
-            t.language.replace(/\d+$/, ""),
-          ),
-        );
-        view.subs.markActive(info.local[eng >= 0 ? eng : 0]?.file ?? null);
-      }
-    }
-
     avSync = new AVSync().init(videoEl!);
-    if (!isOffline) {
-      api.hls
-        .avoffset(videoParam, { silent: true })
-        .then((res: any) => {
-          if (res?.offset_ms > 0) {
-            ps.showSync(avSync!.set(res.offset_ms));
-          }
-        })
-        .catch((err: any) => console.warn("[avoffset]", err));
-
-      api.audio
-        .info(videoParam)
-        .then((tracks: any) => {
-          if (Array.isArray(tracks) && tracks.length > 1) {
-            view.audio.setTracks(tracks);
-            const atl = player.audioTracks();
-            if (!atl) return;
-            for (let i = 0; i < atl.length; i++) {
-              if (atl[i].enabled) {
-                view.audio.select(i);
-                break;
-              }
-            }
-          }
-        })
-        .catch((err: any) => console.warn("[audio info]", err));
-    }
 
     if ("mediaSession" in navigator) {
       const ms = navigator.mediaSession;
-      ms.metadata = new MediaMetadata({
-        title,
-        artist: dir === "." ? "Notflix" : dir,
-        artwork: [{ src: "/assets/icon.svg", type: "image/svg+xml" }],
-      });
+      setMediaMeta();
       ms.setActionHandler("play", () => safePlay());
       ms.setActionHandler("pause", () => player.pause());
       ms.setActionHandler("seekbackward", () =>
@@ -383,7 +530,7 @@
       ms.setActionHandler("seekto", (d) => {
         if (d.seekTime != null) player.currentTime(d.seekTime);
       });
-      ms.setActionHandler("nexttrack", ps.nextURL ? goNext : null);
+      ms.setActionHandler("nexttrack", () => goNext());
       ms.setActionHandler("previoustrack", null);
 
       const updatePosition = () => {
@@ -415,29 +562,24 @@
       .videoList()
       .then((data: any) => {
         if (!Array.isArray(data)) return;
-        ps.rows = data
-          .filter((g: any) => g.files?.length)
-          .map((g: any) => [g.dir, g.files]) as [string, any[]][];
-        ps.nextURL = nextVid(data, dir, name, autoplay);
-        ps.videoKey =
-          data.find((g: any) => g.dir === dir)?.files?.find(
-            (f: any) => f.name === name,
-          )?.key ?? "";
-        if (ps.videoKey) {
-          sprite.load(ps.videoKey);
-          if ("mediaSession" in navigator) {
-            navigator.mediaSession.metadata = new MediaMetadata({
-              title,
-              artist: dir === "." ? "Notflix" : dir,
-              artwork: [
-                { src: `/images/${ps.videoKey}.jpg`, type: "image/jpeg" },
-              ],
-            });
-          }
-        }
-
+        listData = data;
+        refreshMeta();
       })
       .catch((err: any) => console.warn("[videoList]", err));
+
+    const onPop = () => {
+      const p = new URLSearchParams(window.location.search).get("video");
+      if (!p) {
+        window.location.reload();
+        return;
+      }
+      if (p !== videoParam) loadEpisode(p, true);
+    };
+    window.addEventListener("popstate", onPop);
+    cleanups.push(() => window.removeEventListener("popstate", onPop));
+    cleanups.push(() => whisperStop?.());
+
+    loadEpisode(videoParam, false);
 
     return () => {
       cleanups.forEach((fn) => fn());
@@ -511,6 +653,22 @@
     onNext={ps.nextURL ? goNext : undefined}
     onFullscreen={toggleFullscreen}
     trickplay={(sec) => sprite.tile(sec)}
+  />
+  <Skip
+    {ps}
+    intro={introRange}
+    outro={outroRange}
+    onSeek={(t) => player?.currentTime(t)}
+    onNext={goNext}
+  />
+  <Tune
+    open={tuneOpen}
+    videoEl={() => videoEl ?? null}
+    syncMs={ps.syncMs}
+    onSync={(ms) => ps.showSync(avSync?.set(ms) ?? 0)}
+    speed={ps.speed}
+    onSpeed={(r) => player?.playbackRate(r)}
+    onClose={() => (tuneOpen = false)}
   />
   <Volume level={ps.volLevel} visible={ps.volVisible} />
   <Sync ms={ps.syncMs} visible={ps.syncVisible} />

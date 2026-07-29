@@ -100,6 +100,16 @@ export const api = {
       GET(`/api/subs/whisper/status?file=${E(file)}`, opts),
   },
 
+  skip: (file: string, opts?: ReqOpts) => GET(`/api/skip?file=${E(file)}`, opts),
+
+  organize: {
+    plan: (opts?: ReqOpts) => POST("/api/organize/plan", {}, opts),
+    status: (opts?: ReqOpts) => GET("/api/organize/status", opts),
+    warm: (opts?: ReqOpts) => POST("/api/organize/warm", {}, opts),
+    apply: (moves: { file: string; root: string; folder: string }[], opts?: ReqOpts) =>
+      POST("/api/organize/apply", { moves }, opts),
+  },
+
   manage: {
     list: (opts?: ReqOpts) => GET("/api/manage/list", opts),
     diskInfo: (opts?: ReqOpts) => GET("/api/manage/diskinfo", opts),

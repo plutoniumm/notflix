@@ -80,6 +80,18 @@ func WaitAria2() {
 
 var aria2StartedAt atomic.Int64
 
+var aria2Proc atomic.Pointer[exec.Cmd]
+
+// Aria2Stop TERMs the supervised aria2c (it saves its session on TERM).
+// Called on server shutdown so a restart never leaves an orphan squatting
+// :6800 — the classic wedge where every later spawn dies on the taken port
+// and the server keeps talking to a weeks-old process with stale DHT state.
+func Aria2Stop() {
+	if cmd := aria2Proc.Load(); cmd != nil && cmd.Process != nil {
+		cmd.Process.Signal(os.Interrupt)
+	}
+}
+
 func Aria2Init(lib *library.Library) {
 	go a2SpeedTracker()
 	go a2PurgeLoop(lib)
@@ -146,6 +158,7 @@ func Aria2Init(lib *library.Library) {
 			continue
 		}
 		log.Printf("[aria2] started aria2c pid=%d", cmd.Process.Pid)
+		aria2Proc.Store(cmd)
 		aria2StartedAt.Store(time.Now().UnixNano())
 
 		ready := false

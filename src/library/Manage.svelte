@@ -12,6 +12,7 @@
   import Magnet from "./Magnet.svelte";
   import Downloads from "./Downloads.svelte";
   import FolderRow from "./FolderRow.svelte";
+  import Organize from "./Organize.svelte";
   import ProgressBar from "../components/ProgressBar.svelte";
   import ProcessStatus from "./ProcessStatus.svelte";
 
@@ -338,6 +339,8 @@
         {/each}
       </section>
     {/if}
+
+    <Organize onApplied={() => loadAll()} />
 
     <Downloads
       jobs={dlJobs}

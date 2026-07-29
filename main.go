@@ -6,8 +6,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"notflix/server/jobs"
@@ -32,6 +34,7 @@ const (
 //   - "/Volumes/…" paths: aspirational mounts. Never created (creating
 //     a regular dir at a mountpoint would silently shadow the volume).
 //     Skipped non-fatally if the drive isn't mounted.
+//
 // Any other absolute path is treated the same as a /Volumes path: must
 // pre-exist or it's dropped.
 var configuredRoots = []string{
@@ -212,7 +215,7 @@ func main() {
 
 	router.POST("/api/aria2/add", func(c *gin.Context) { jobs.Aria2Add(c, lib) })
 	router.POST("/api/aria2/add-torrent", func(c *gin.Context) { jobs.Aria2AddTorrent(c, lib) })
-	router.GET("/api/search", jobs.TPBSearch)
+	router.GET("/api/search", jobs.TorrentSearch)
 	router.GET("/api/aria2/list", jobs.Aria2List)
 	router.POST("/api/aria2/pause", jobs.Aria2Pause)
 	router.POST("/api/aria2/resume", jobs.Aria2Resume)
@@ -231,6 +234,13 @@ func main() {
 	router.GET("/api/hls/init", func(c *gin.Context) { media.HLSInit(c, lib) })
 	router.GET("/api/hls/avoffset", func(c *gin.Context) { media.HLSAVOffset(c, lib) })
 
+	router.GET("/api/skip", func(c *gin.Context) { media.SkipInfo(c, lib) })
+
+	router.POST("/api/organize/plan", func(c *gin.Context) { jobs.OrganizePlan(c, lib) })
+	router.GET("/api/organize/status", jobs.OrganizeStatus)
+	router.POST("/api/organize/warm", jobs.OrganizeWarm)
+	router.POST("/api/organize/apply", func(c *gin.Context) { jobs.OrganizeApply(c, lib) })
+
 	router.GET("/api/audio/info", func(c *gin.Context) { media.AudioInfo(c, lib) })
 	router.GET("/api/subs/info", func(c *gin.Context) { media.Subctx(c, lib) })
 	router.GET("/api/subs/search", func(c *gin.Context) { media.SubsSearch(c, lib) })
@@ -239,6 +249,21 @@ func main() {
 	router.POST("/api/subs/whisper", func(c *gin.Context) { jobs.SubsWhisper(c, lib) })
 	router.GET("/api/subs/whisper/status", jobs.SubsWhisperStatus)
 	router.GET("/api/subs/whisper/stream", func(c *gin.Context) { jobs.SubsWhisperStream(c, lib) })
+
+	// On TERM/INT, take the children down too: cancel every FFRun (ffmpeg)
+	// and TERM aria2c. Orphaned encoders from past restarts kept writing
+	// outputs the next server run then stomped (Bleach 001–010, 2026-07-29),
+	// and an orphaned aria2c squats :6800 wedging every later spawn.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sig
+		log.Println("[shutdown] stopping subprocesses")
+		jobs.Aria2Stop()
+		library.Shutdown()
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	}()
 
 	log.Printf("Starting server on http://localhost:%s", port)
 

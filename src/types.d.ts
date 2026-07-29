@@ -31,6 +31,7 @@ type Torrent = {
   added: number;
   category: string;
   status: string;
+  source: string;
 };
 
 interface VideoGroup {

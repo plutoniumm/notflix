@@ -99,22 +99,24 @@ func ladderFor(profiles map[string]hlsProfile, srcW, srcH int) []string {
 
 type srcInfo struct {
 	vCodec      string
-	vHeight     int     // display height (rotation-corrected)
-	vWidth      int     // display width (rotation-corrected)
-	vDAR        float64 // display aspect ratio, 0 if unknown
-	vBitDepth   int     // 8 / 10 / 12, 0 if unknown
-	vTransfer   string  // color_transfer (smpte2084 / arib-std-b67 = HDR)
-	vPrimaries  string  // color_primaries (bt2020 = wide gamut)
-	vColorspace string  // color_space/matrix (bt2020nc — survives SVT-AV1)
-	vRotation   int     // normalized 0/90/180/270 display rotation
-	aChannels   []int   // channel count per audio stream, in stream order
-	aLayouts    []string // channel_layout per audio stream (empty/unknown → unnamed)
+	vHeight     int         // display height (rotation-corrected)
+	vWidth      int         // display width (rotation-corrected)
+	vDAR        float64     // display aspect ratio, 0 if unknown
+	vBitDepth   int         // 8 / 10 / 12, 0 if unknown
+	vTransfer   string      // color_transfer (smpte2084 / arib-std-b67 = HDR)
+	vPrimaries  string      // color_primaries (bt2020 = wide gamut)
+	vColorspace string      // color_space/matrix (bt2020nc — survives SVT-AV1)
+	vRotation   int         // normalized 0/90/180/270 display rotation
+	aChannels   []int       // channel count per audio stream, in stream order
+	aLayouts    []string    // channel_layout per audio stream (empty/unknown → unnamed)
+	aMeta       []audioMeta // language/codec/channels per audio stream
 	vPixFmt     string
 	kfTimes     []float64
 	bounds      []float64 // segment boundaries, keyframe-aligned
 	segBitrates []int     // bps per segment, aligned with bounds
 	peakBitrate int       // peak over all segments (bps)
-	once        sync.Once
+	mu          sync.Mutex
+	ready       bool
 }
 
 var srcInfoMap sync.Map // path -> *srcInfo
@@ -236,14 +238,24 @@ func isHDR(si *srcInfo) bool {
 		strings.HasPrefix(si.vColorspace, "bt2020")
 }
 
+// getSrcInfo probes lazily and caches per path — but only a SUCCESSFUL probe
+// is cached. A probe that fails (ffprobe spawn/exec error under the startup
+// ProcessAll storm) used to be frozen forever by sync.Once, silently
+// condemning copy-eligible AV1 files to the live h264 transcode ladder until
+// the next restart. Failures now log and retry on the next request.
 func getSrcInfo(path string) *srcInfo {
 	v, _ := srcInfoMap.LoadOrStore(path, &srcInfo{})
 	si := v.(*srcInfo)
-	si.once.Do(func() {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	if !si.ready {
 		streams, err := library.Prober.Streams(context.Background(), path)
 		if err != nil {
-			return
+			log.Printf("[srcinfo] stream probe failed (will retry): %s: %v", filepath.Base(path), err)
+			return si
 		}
+		si.vCodec = ""
+		si.aChannels, si.aLayouts, si.aMeta, si.kfTimes = nil, nil, nil, nil
 		for _, s := range streams {
 			if s.CodecType == "video" && si.vCodec == "" {
 				si.vCodec = s.CodecName
@@ -281,14 +293,21 @@ func getSrcInfo(path string) *srcInfo {
 			if s.CodecType == "audio" {
 				si.aChannels = append(si.aChannels, s.Channels)
 				si.aLayouts = append(si.aLayouts, strings.ToLower(s.ChannelLayout))
+				si.aMeta = append(si.aMeta, audioMeta{language: s.Tags["language"], codec: s.CodecName, channels: s.Channels})
 			}
 		}
+		if si.vCodec == "" {
+			log.Printf("[srcinfo] stream probe returned no video stream (will retry): %s", filepath.Base(path))
+			return si
+		}
 		if si.vCodec != "h264" && si.vCodec != "av1" {
-			return
+			si.ready = true
+			return si
 		}
 		pkts, err := probePackets(path)
 		if err != nil || len(pkts) == 0 {
-			return
+			log.Printf("[srcinfo] packet probe failed (will retry): %s: %v (%d pkts)", filepath.Base(path), err, len(pkts))
+			return si
 		}
 		for _, p := range pkts {
 			if p.key {
@@ -297,7 +316,8 @@ func getSrcInfo(path string) *srcInfo {
 		}
 		si.bounds = segmentBoundaries(si.kfTimes, duration(path))
 		si.segBitrates, si.peakBitrate = segmentBitrates(pkts, si.bounds)
-	})
+		si.ready = true
+	}
 	return si
 }
 
@@ -581,22 +601,13 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	srcHeight := 0
-	srcWidth := 0
-	var aTracks []audioMeta
-
-	if streams, err := library.Prober.Streams(context.Background(), path); err == nil {
-		for _, s := range streams {
-			if s.CodecType == "audio" {
-				aTracks = append(aTracks, audioMeta{language: s.Tags["language"], codec: s.CodecName, channels: s.Channels})
-			}
-		}
-	}
-	// Single source of truth for dimensions: rotation- and SAR-corrected
-	// display grid. Drives the ladder height and advertised RESOLUTION so
-	// rotated/anamorphic sources aren't sideways or stretched.
+	// Single source of truth for dimensions AND audio tracks: the success-gated
+	// srcInfo probe. A fresh per-request Streams probe used to feed aTracks
+	// unchecked — one failed probe under load read as "zero audio", which the
+	// AV1 guard below silently punished with the live-transcode h264 ladder.
 	srcInfoP := getSrcInfo(path)
-	srcWidth, srcHeight = srcInfoP.vWidth, srcInfoP.vHeight
+	srcWidth, srcHeight := srcInfoP.vWidth, srcInfoP.vHeight
+	aTracks := srcInfoP.aMeta
 
 	multiAudio := len(aTracks) > 1
 

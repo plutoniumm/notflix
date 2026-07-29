@@ -23,11 +23,19 @@ type FFRun struct {
 	Duration float64           // optional: total seconds, enables progress
 	OnPct    func(pct float64) // optional: called on each time= match
 	Timeout  time.Duration     // optional: kill ffmpeg after this elapses
+	Nice     bool              // optional: lowest CPU priority — batch work must never starve live streaming
 }
 
 // max stderr retained for error messages. ffmpeg's real diagnostics are a few
 // lines; this is generous headroom while capping pathological output.
 const ffStderrCap = 8 << 10
+
+// shutdownCtx is the base context for every FFRun. Cancelled by Shutdown()
+// when the server exits, so no ffmpeg ever outlives its parent — an orphaned
+// encoder keeps writing files the next server run then fights over.
+var shutdownCtx, shutdownCancel = context.WithCancel(context.Background())
+
+func Shutdown() { shutdownCancel() }
 
 func (r FFRun) Run() (string, error) {
 	args := append([]string{"-nostdin", "-v", "error"}, r.Args...)
@@ -40,14 +48,19 @@ func (r FFRun) Run() (string, error) {
 		args = append(args, "-progress", "pipe:1")
 	}
 
-	ctx := context.Background()
+	ctx := shutdownCtx
 	if r.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, r.Timeout)
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	var cmd *exec.Cmd
+	if r.Nice {
+		cmd = exec.CommandContext(ctx, "nice", append([]string{"-n", "19", "ffmpeg"}, args...)...)
+	} else {
+		cmd = exec.CommandContext(ctx, "ffmpeg", args...)
+	}
 
 	errW := &TailWriter{Max: ffStderrCap}
 	cmd.Stderr = errW

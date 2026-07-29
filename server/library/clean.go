@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var videoExts = map[string]bool{
@@ -61,6 +62,13 @@ func cleanRoot(root string) {
 			}
 		}
 		if !kept && !videoExts[ext] && !subExts[ext] && !keepExts[ext] {
+			// A recently-written non-video file is someone's live output (an
+			// in-flight ffmpeg .tmp — possibly from an encoder orphaned by a
+			// restart). Deleting it unlinks the path under the writer and the
+			// finished file is lost. Only sweep files that have gone quiet.
+			if fi, err := d.Info(); err == nil && time.Since(fi.ModTime()) < time.Hour {
+				return nil
+			}
 			log.Printf("[CleanAll] junk: %s", path)
 			os.Remove(path)
 		}

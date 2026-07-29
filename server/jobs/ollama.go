@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 func ollamaHost() string {
@@ -30,6 +31,58 @@ func ollamaModel() string {
 	// which is well under playback rate. JSON-mode adherence: 4–5 / 5 in
 	// local tests; the parseTranslation fallback handles the rare miss.
 	return "aya-expanse:8b"
+}
+
+// ollamaKeepAlive rides on every chat request so a model loaded for one run
+// is still resident for the next — a cold load of the default model takes on
+// the order of a minute, dwarfing the actual generation.
+const ollamaKeepAlive = "15m"
+
+// ollamaLoaded checks /api/ps — the models currently resident in memory — so
+// callers can distinguish a cold load from an instant warm call.
+func ollamaLoaded(host, model string) bool {
+	resp, err := http.Get(host + "/api/ps")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var ps struct {
+		Models []struct {
+			Name  string `json:"name"`
+			Model string `json:"model"`
+		} `json:"models"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&ps) != nil {
+		return false
+	}
+	for _, m := range ps.Models {
+		if m.Name == model || m.Model == model {
+			return true
+		}
+	}
+	return false
+}
+
+// ollamaWarm loads the model without generating: a chat call with no messages
+// returns done_reason "load" once the weights are resident. Also refreshes
+// keep_alive on an already-loaded model, so it's safe to call eagerly.
+func ollamaWarm(host, model string) error {
+	reqBody, _ := json.Marshal(map[string]any{
+		"model":      model,
+		"messages":   []any{},
+		"keep_alive": ollamaKeepAlive,
+	})
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Post(host+"/api/chat", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama load HTTP %d: %s", resp.StatusCode, sample(body, 240))
+	}
+	return nil
 }
 
 // ollamaHasModel checks /api/tags once before the batch loop. The flood we used
@@ -93,9 +146,10 @@ func TranslateSegments(texts []string, srcLang string) ([]string, error) {
 		// (`{"out":[...]}`) because some backends only accept object roots in
 		// format=json mode.
 		reqBody, _ := json.Marshal(map[string]any{
-			"model":  model,
-			"stream": false,
-			"format": "json",
+			"model":      model,
+			"stream":     false,
+			"format":     "json",
+			"keep_alive": ollamaKeepAlive,
 			"messages": []map[string]string{
 				{"role": "user", "content": prompt +
 					`\nReturn a single JSON object with key "out" mapping to the array.`},

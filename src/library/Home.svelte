@@ -6,6 +6,7 @@
   import { HomeData } from "./homeData.svelte";
   import { parseName, epTag, type Parsed } from "./torrentName";
   import Continues from "./Continues.svelte";
+  import ShowRow from "./ShowRow.svelte";
   import ProgressBar from "../components/ProgressBar.svelte";
   import EmptyState from "../components/EmptyState.svelte";
   import Icon from "../components/Icon.svelte";
@@ -16,6 +17,31 @@
   const home = new HomeData();
   let search = $state("");
   let swUpdate = $state<ServiceWorkerRegistration | null>(null);
+
+  const HIST_KEY = "searches";
+  let history = $state<string[]>(loadHistory());
+  let searchFocus = $state(false);
+
+  function loadHistory(): string[] {
+    try {
+      const h = JSON.parse(localStorage.getItem(HIST_KEY) ?? "[]");
+      return Array.isArray(h)
+        ? h.filter((s) => typeof s === "string").slice(0, 5)
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function remember(term: string) {
+    history = [term, ...history.filter((s) => s !== term)].slice(0, 5);
+    localStorage.setItem(HIST_KEY, JSON.stringify($state.snapshot(history)));
+  }
+
+  const recent = $derived.by(() => {
+    const q = search.trim().toLowerCase();
+    return history.filter((h) => !q || (h.toLowerCase().includes(q) && h !== search.trim()));
+  });
 
   let torrentMode = $state(false);
   let torrentLoading = $state(false);
@@ -62,6 +88,7 @@
   async function runTorrent() {
     const term = search.trim();
     if (!term) return;
+    remember(term);
     torrentLoading = true;
     torrentMode = true;
     torrentQuery = term;
@@ -177,7 +204,7 @@
       <img src="/assets/tight.svg" alt="Notflix" height="50" />
     </a>
 
-    <div class="search-wrap">
+    <div class="search-wrap p-rel">
       <input
         class="field w-100"
         type="search"
@@ -186,9 +213,28 @@
           : "Search library — Enter to search torrents"}
         bind:value={search}
         onkeydown={onSearchKey}
+        onfocus={() => (searchFocus = true)}
+        onblur={() => (searchFocus = false)}
         autocomplete="off"
         spellcheck="false"
       />
+      {#if searchFocus && recent.length}
+        <div class="hist p-abs w-100 flow-h">
+          {#each recent as h (h)}
+            <button
+              class="hist-item w-100 ptr f al-ct g8"
+              onmousedown={(e) => {
+                e.preventDefault();
+                search = h;
+                runTorrent();
+              }}
+            >
+              <span class="hist-ic">↺</span>
+              <span class="trunc">{h}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
     </div>
 
     {#if torrentMode && home.disks.length > 0}
@@ -239,7 +285,7 @@
       </div>
 
       {#if torrentLoading}
-        <EmptyState>Searching The Pirate Bay…</EmptyState>
+        <EmptyState>Searching torrents…</EmptyState>
       {:else if torrentResults.length === 0}
         <EmptyState>No results for "{torrentQuery}".</EmptyState>
       {:else}
@@ -281,6 +327,7 @@
                     {#if p.codec}<Badge>{p.codec}</Badge>{/if}
                     {#if p.hdr}<Badge variant="hdr">{p.hdr}</Badge>{/if}
                     {#if p.group}<Badge variant="dim">·{p.group}</Badge>{/if}
+                    {#if t.source}<Badge variant="dim">{t.source}</Badge>{/if}
                   </span>
                 </td>
                 <td class="num">
@@ -390,8 +437,18 @@
         downloadedSet={home.downloadedSet}
         onRemove={removeContinue}
       />
-      {#each home.rows as [dir, files]}
-        {#if files?.length}
+      {#each home.rows as row (row.kind === "dir" ? row.dir : row.key)}
+        {#if row.kind === "show"}
+          <ShowRow
+            title={row.title}
+            key={row.key}
+            seasons={row.seasons}
+            continues={home.continues}
+            downloadedSet={home.downloadedSet}
+          />
+        {:else}
+          {@const dir = row.dir}
+          {@const files = row.files}
           <section class="row">
             <h2>
               {dir === "." ? "Movies" : clean(dir) || dir}
@@ -499,6 +556,32 @@
   .search-wrap {
     flex: 1;
     max-width: 380px;
+  }
+  .hist {
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 30;
+    background: rgba(13, 11, 18, 0.97);
+    border: 1px solid var(--glass-bd);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-3);
+    backdrop-filter: blur(12px);
+  }
+  .hist-item {
+    padding: 9px 14px;
+    background: none;
+    border: none;
+    color: var(--tx-3);
+    font-size: 13px;
+    text-align: left;
+  }
+  .hist-item:hover {
+    background: var(--glass);
+    color: var(--tx-5);
+  }
+  .hist-ic {
+    color: var(--tx-1);
+    flex-shrink: 0;
   }
   .actions {
     margin-left: auto;

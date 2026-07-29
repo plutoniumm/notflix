@@ -3,8 +3,90 @@ import { kv } from "../core/kv";
 import { clean } from "../core/video";
 import { JOBS_POLL_MS } from "../core/events.svelte";
 import { Down } from "./dl";
+import { parseDirSeason } from "./torrentName";
 
-type ContinueItem = { dir: string; name: string; key: string; t: number; at: number };
+export type ContinueItem = { dir: string; name: string; key: string; t: number; at: number };
+
+export type SeasonEntry = {
+  dir: string;
+  label: string;
+  n: number;
+  files: VideoEntry[];
+};
+
+export type HomeRow =
+  | { kind: "dir"; dir: string; files: VideoEntry[] }
+  | { kind: "show"; key: string; title: string; seasons: SeasonEntry[] };
+
+const showKey = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+// Collapse the season directories of one show into a single row. A show
+// forms only from ≥2 dirs whose parsed titles match exactly (normalized) and
+// that each carry a season number or episode range — marker-less dirs, loose
+// movies (".") and single mega-dirs ("JoJo Seasons 1-4") stay plain rows.
+// A show row sits at its best member's position, inheriting the server's
+// LRU ordering; ungrouped rows pass through untouched.
+export function groupRows(data: VideoData): HomeRow[] {
+  const parsed = data
+    .filter((g) => g.files?.length)
+    .map((g) => ({ g, p: parseDirSeason(g.dir) }));
+
+  const marked = ({ g, p }: (typeof parsed)[number]) =>
+    g.dir !== "." && (p.season !== undefined || !!p.range);
+
+  const counts = new Map<string, number>();
+  for (const m of parsed) {
+    if (!marked(m)) continue;
+    const k = showKey(m.p.title);
+    if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+
+  const emitted = new Set<string>();
+  const out: HomeRow[] = [];
+  for (const m of parsed) {
+    const k = marked(m) ? showKey(m.p.title) : "";
+    if (!k || (counts.get(k) ?? 0) < 2) {
+      out.push({ kind: "dir", dir: m.g.dir, files: m.g.files });
+      continue;
+    }
+    if (emitted.has(k)) continue;
+    emitted.add(k);
+
+    const members = parsed.filter((x) => marked(x) && showKey(x.p.title) === k);
+    const seasons = members
+      .map(({ g, p }, i): SeasonEntry => ({
+        dir: g.dir,
+        label:
+          p.season !== undefined
+            ? `Season ${p.season}`
+            : p.range
+              ? `Ep ${p.range[0]}–${p.range[1]}`
+              : `Part ${i + 1}`,
+        n:
+          p.season !== undefined
+            ? p.season
+            : p.range
+              ? 1000 + p.range[0]
+              : 10000 + i,
+        files: g.files,
+      }))
+      .sort((a, b) => a.n - b.n);
+
+    const dupes = new Map<string, number>();
+    for (const s of seasons) {
+      const c = (dupes.get(s.label) ?? 0) + 1;
+      dupes.set(s.label, c);
+      if (c > 1) s.label = `${s.label} · ${c}`;
+    }
+
+    out.push({ kind: "show", key: k, title: members[0].p.title, seasons });
+  }
+  return out;
+}
 
 // Tolerate either the current ordered array OR a legacy {dir: files} object
 // map (a stale cached bundle ↔ new server, or vice-versa, during rollout) —
@@ -40,13 +122,9 @@ export class HomeData {
   // a torrent search runs from the home bar.
   disks = $state<DiskInfo[]>([]);
 
-  // The server already orders groups LRU (recently-watched dirs first); we
-  // just drop empties and expose the [dir, files] tuple Home.svelte iterates.
-  rows = $derived(
-    this.data
-      .filter((g) => g.files?.length)
-      .map((g) => [g.dir, g.files] as [string, VideoEntry[]]),
-  );
+  // The server already orders groups LRU (recently-watched dirs first);
+  // groupRows drops empties and folds multi-season shows into one row.
+  rows = $derived(groupRows(this.data));
 
   // Begin loading. Returns a function to dispose subscriptions.
   start(): () => void {

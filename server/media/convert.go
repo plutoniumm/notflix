@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"notflix/server/jobs"
 	"notflix/server/library"
@@ -49,7 +50,7 @@ func ProcessAll(lib *library.Library) {
 	// (sprite/thumb/whisper) per-file as each conversion completes — so a
 	// file can gain its thumbnail while the next file is still transcoding.
 	var wg sync.WaitGroup
-	wg.Add(5)
+	wg.Add(6)
 	go func() {
 		defer wg.Done()
 		PhaseStart("convert")
@@ -84,6 +85,12 @@ func ProcessAll(lib *library.Library) {
 		jobs.BackfillWhisper(lib)
 		PhaseEnd("whisper")
 	}()
+	go func() {
+		defer wg.Done()
+		PhaseStart("skips")
+		DetectSkips(lib)
+		PhaseEnd("skips")
+	}()
 	wg.Wait()
 	log.Println("[ProcessAll] done")
 }
@@ -102,7 +109,7 @@ func ConvertAll(lib *library.Library) {
 		wg.Add(1)
 		go func(root string) {
 			defer wg.Done()
-			convertRoot(root, jobs.NewPool(5))
+			convertRoot(root, jobs.NewPool(2))
 		}(root)
 	}
 
@@ -134,8 +141,10 @@ func convertRoot(root string, pool *jobs.Pool) {
 
 		name := d.Name()
 		if strings.HasSuffix(name, ".audio.tmp") || strings.HasSuffix(name, ".audio.tmp.mp4") {
-			if err := os.Remove(path); err == nil {
-				log.Printf("[convert] removed stale temp: %s", name)
+			if !fresh(path) {
+				if err := os.Remove(path); err == nil {
+					log.Printf("[convert] removed stale temp: %s", name)
+				}
 			}
 			return nil
 		}
@@ -212,6 +221,16 @@ func toMP4(srcPath, root string) error {
 	// Probe the .mp4 first: if it's readable, the previous convert really did
 	// finish, so drop the source and be done. Only when the .mp4 is itself
 	// unreadable is it safe to blow away and re-convert.
+	// A fresh-mtime output (.mp4 or its .tmp) means another encoder — possibly
+	// an ffmpeg orphaned by a server restart — is writing it RIGHT NOW.
+	// Probing it reads "broken" (no moov yet) and the old delete-and-restart
+	// path would stomp the live encode: the orphan keeps writing an unlinked
+	// inode and the finished file is silently lost (Bleach 001–010, 2026-07-29).
+	// Skip and let a later pass handle it once it's quiet.
+	if fresh(mp4Path) || fresh(mp4Path+".tmp") {
+		log.Printf("[convert] %s: output being written by another encoder, skipping", name)
+		return nil
+	}
 	if _, err := os.Stat(mp4Path); err == nil {
 		if duration(mp4Path) > 0 {
 			log.Printf("[convert] %s: existing .mp4 is valid, dropping source", name)
@@ -408,6 +427,7 @@ func remuxAudio(srcPath string) error {
 		Args:     args,
 		Duration: dur,
 		OnPct:    func(p float64) { progress.Update(name, p) },
+		Nice:     true,
 	}.Run()
 	if err != nil {
 		log.Printf("ffmpeg audio remux error for %s:\n%s", name, stderr)
@@ -421,8 +441,19 @@ func remuxAudio(srcPath string) error {
 	return os.Rename(tmp, srcPath)
 }
 
+// fresh reports whether path exists and was modified in the last 10 minutes —
+// the signature of a file some process is still writing.
+func fresh(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && time.Since(fi.ModTime()) < 10*time.Minute
+}
+
 func remux(src, dst string, durationSec float64, name string) error {
 	tmp := dst + ".tmp"
+	if fresh(tmp) {
+		return fmt.Errorf("%s: tmp output busy (another encoder)", name)
+	}
+	os.Remove(tmp)
 
 	vc, ac := codecs(src)
 	args := []string{"-i", src, "-map", "0:v:0", "-map", "0:a"}
@@ -467,6 +498,7 @@ func remux(src, dst string, durationSec float64, name string) error {
 		Args:     args,
 		Duration: durationSec,
 		OnPct:    func(p float64) { progress.Update(name, p) },
+		Nice:     true,
 	}.Run()
 	if err != nil {
 		log.Printf("ffmpeg error for %s:\n%s", name, stderr)

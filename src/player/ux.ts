@@ -23,7 +23,9 @@ export function Touch(
 
   const handler = (e: TouchEvent) => {
     if (
-      (e.target as HTMLElement).closest(".vjs-control-bar, .bar, .dock, .rail")
+      (e.target as HTMLElement).closest(
+        ".vjs-control-bar, .bar, .dock, .rail, .tune",
+      )
     )
       return;
 
@@ -85,6 +87,8 @@ export function Hotkeys(
   onNext: () => void,
   onWhisper: () => void,
   onSync: (deltaMs: number) => void,
+  onSkip: () => void,
+  onTune: () => void,
 ): () => void {
   const handler = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement).tagName === "INPUT") return;
@@ -133,6 +137,10 @@ export function Hotkeys(
       window.location.href = "/";
     } else if (lkey === "n") {
       onNext();
+    } else if (lkey === "x") {
+      onSkip();
+    } else if (lkey === "v") {
+      onTune();
     } else if (lkey === "p") {
       if (document.pictureInPictureElement) {
         document.exitPictureInPicture();

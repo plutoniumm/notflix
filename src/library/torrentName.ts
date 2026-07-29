@@ -276,6 +276,22 @@ function parseImpl(input: string): Parsed {
   };
 }
 
+// Season identity for a library DIRECTORY name: parsed title plus either a
+// season number or an episode-range batch ("Bleach 112-139"). Range keeps
+// parseImpl's isYearish veto so "City Hunter (1987-88)" never reads as one.
+export function parseDirSeason(dir: string): {
+  title: string;
+  season?: number;
+  range?: [number, number];
+} {
+  const p = parseName(dir);
+  if (p.season !== undefined) return { title: p.title, season: p.season };
+  const rg = dir.replace(SITE, "").match(RANGE);
+  if (rg && !isYearish(+rg[1]) && !isYearish(+rg[2]))
+    return { title: p.title, range: [+rg[1], +rg[2]] };
+  return { title: p.title };
+}
+
 export function epTag(p: Parsed): string {
   if (!p) return "";
   const k = p.kind ? p.kind + " " : "";

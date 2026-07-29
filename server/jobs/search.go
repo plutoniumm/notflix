@@ -3,9 +3,11 @@ package jobs
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +79,7 @@ type Torrent struct {
 	Added    int64  `json:"added"`
 	Category string `json:"category"`
 	Status   string `json:"status"`
+	Source   string `json:"source"`
 }
 
 func atoi(s string) int {
@@ -94,9 +97,100 @@ func magnetFor(name, infoHash string) string {
 	return b.String()
 }
 
-var tpbClient = &http.Client{Timeout: 12 * time.Second}
+var searchClient = &http.Client{Timeout: 10 * time.Second}
 
-func TPBSearch(c *gin.Context) {
+func searchFetch(method, u string, body io.Reader) (io.ReadCloser, error) {
+	req, err := http.NewRequest(method, u, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (notflix)")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := searchClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return resp.Body, nil
+}
+
+func parseTPB(r io.Reader) ([]Torrent, error) {
+	var raw []tpbRaw
+	if err := json.NewDecoder(r).Decode(&raw); err != nil {
+		return nil, err
+	}
+	out := make([]Torrent, 0, len(raw))
+	for _, t := range raw {
+		if t.ID == "0" || t.InfoHash == "" {
+			continue // "No results returned" sentinel
+		}
+		out = append(out, Torrent{
+			Name:     t.Name,
+			Magnet:   magnetFor(t.Name, t.InfoHash),
+			InfoHash: t.InfoHash,
+			Size:     int64(atoi(t.Size)),
+			Seeders:  atoi(t.Seeders),
+			Leechers: atoi(t.Leechers),
+			Files:    atoi(t.NumFiles),
+			Added:    int64(atoi(t.Added)),
+			Category: catLabel(t.Category),
+			Status:   t.Status,
+			Source:   "tpb",
+		})
+	}
+	return out, nil
+}
+
+func tpbSearch(q, cat string) ([]Torrent, error) {
+	u := fmt.Sprintf("%s?q=%s&cat=%s", apibayURL, url.QueryEscape(q), url.QueryEscape(cat))
+	body, err := searchFetch(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	return parseTPB(body)
+}
+
+// Dedupe by infohash keeping the higher-seeded entry; hashless entries pass
+// through only if they already carry a magnet. Sorted seeders-desc.
+func mergeTorrents(lists ...[]Torrent) []Torrent {
+	out := []Torrent{}
+	seen := map[string]int{}
+	for _, list := range lists {
+		for _, t := range list {
+			key := strings.ToLower(t.InfoHash)
+			if key == "" {
+				if t.Magnet != "" {
+					out = append(out, t)
+				}
+				continue
+			}
+			if i, dup := seen[key]; dup {
+				if t.Seeders > out[i].Seeders {
+					out[i] = t
+				}
+				continue
+			}
+			seen[key] = len(out)
+			out = append(out, t)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Seeders > out[j].Seeders })
+	return out
+}
+
+type provResult struct {
+	name string
+	ts   []Torrent
+	err  error
+}
+
+func TorrentSearch(c *gin.Context) {
 	q := strings.TrimSpace(c.Query("q"))
 	if q == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing query"})
@@ -104,50 +198,42 @@ func TPBSearch(c *gin.Context) {
 	}
 	cat := c.DefaultQuery("cat", "0")
 
-	u := fmt.Sprintf("%s?q=%s&cat=%s", apibayURL, url.QueryEscape(q), url.QueryEscape(cat))
-	req, _ := http.NewRequest(http.MethodGet, u, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (notflix)")
+	provs := []struct {
+		name string
+		fn   func(string) ([]Torrent, error)
+	}{
+		{"tpb", func(q string) ([]Torrent, error) { return tpbSearch(q, cat) }},
+		{"knaben", knabenSearch},
+		{"tcsv", tcsvSearch},
+		{"nyaa", nyaaSearch},
+	}
 
-	resp, err := tpbClient.Do(req)
-	if err != nil {
-		log.Printf("[search] tpb fetch %q: %v", q, err)
+	ch := make(chan provResult, len(provs))
+	for _, p := range provs {
+		go func(name string, fn func(string) ([]Torrent, error)) {
+			ts, err := fn(q)
+			ch <- provResult{name, ts, err}
+		}(p.name, p.fn)
+	}
+
+	lists := make([][]Torrent, 0, len(provs))
+	reached := false
+	for range provs {
+		r := <-ch
+		if r.err != nil {
+			log.Printf("[search] %s %q: %v", r.name, q, r.err)
+			continue
+		}
+		reached = true
+		log.Printf("[search] %s %q → %d results", r.name, q, len(r.ts))
+		lists = append(lists, r.ts)
+	}
+	if !reached {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "search upstream unreachable"})
 		return
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("[search] tpb status %d for %q", resp.StatusCode, q)
-		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("upstream HTTP %d", resp.StatusCode)})
-		return
-	}
-
-	var raw []tpbRaw
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		log.Printf("[search] tpb decode %q: %v", q, err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": "bad upstream response"})
-		return
-	}
-
-	out := make([]Torrent, 0, len(raw))
-	for _, r := range raw {
-		if r.ID == "0" || r.InfoHash == "" {
-			continue // "No results returned" sentinel
-		}
-		out = append(out, Torrent{
-			Name:     r.Name,
-			Magnet:   magnetFor(r.Name, r.InfoHash),
-			InfoHash: r.InfoHash,
-			Size:     int64(atoi(r.Size)),
-			Seeders:  atoi(r.Seeders),
-			Leechers: atoi(r.Leechers),
-			Files:    atoi(r.NumFiles),
-			Added:    int64(atoi(r.Added)),
-			Category: catLabel(r.Category),
-			Status:   r.Status,
-		})
-	}
-
-	log.Printf("[search] %q → %d results", q, len(out))
+	out := mergeTorrents(lists...)
+	log.Printf("[search] %q → %d merged", q, len(out))
 	c.JSON(http.StatusOK, out)
 }
