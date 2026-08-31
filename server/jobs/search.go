@@ -1,6 +1,8 @@
 package jobs
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +15,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"notflix/server/x/httpc"
 )
 
 // The Pirate Bay's JSON backend. q.php returns up to ~100 results sorted by
@@ -97,10 +101,20 @@ func magnetFor(name, infoHash string) string {
 	return b.String()
 }
 
-var searchClient = &http.Client{Timeout: 10 * time.Second}
+const searchTimeout = 10 * time.Second
 
-func searchFetch(method, u string, body io.Reader) (io.ReadCloser, error) {
-	req, err := http.NewRequest(method, u, body)
+// searchFetch runs one provider request through httpc — enforced timeout,
+// status check, capped body — and hands back a reader over the finished
+// response, so the parsers stay io.Reader-shaped and nothing is left to
+// close. ctx is the caller's request context: a user who navigates away
+// cancels the fan-out instead of leaving four upstream fetches running.
+func searchFetch(ctx context.Context, method, u string, body []byte) (io.Reader, error) {
+	var payload io.Reader
+	if body != nil {
+		payload = bytes.NewReader(body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, u, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -108,15 +122,13 @@ func searchFetch(method, u string, body io.Reader) (io.ReadCloser, error) {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := searchClient.Do(req)
+
+	out, err := httpc.Send(req, searchTimeout)
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return resp.Body, nil
+
+	return bytes.NewReader(out), nil
 }
 
 func parseTPB(r io.Reader) ([]Torrent, error) {
@@ -146,13 +158,13 @@ func parseTPB(r io.Reader) ([]Torrent, error) {
 	return out, nil
 }
 
-func tpbSearch(q, cat string) ([]Torrent, error) {
+func tpbSearch(ctx context.Context, q, cat string) ([]Torrent, error) {
 	u := fmt.Sprintf("%s?q=%s&cat=%s", apibayURL, url.QueryEscape(q), url.QueryEscape(cat))
-	body, err := searchFetch(http.MethodGet, u, nil)
+	body, err := searchFetch(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
+
 	return parseTPB(body)
 }
 
@@ -197,12 +209,13 @@ func TorrentSearch(c *gin.Context) {
 		return
 	}
 	cat := c.DefaultQuery("cat", "0")
+	ctx := c.Request.Context()
 
 	provs := []struct {
 		name string
-		fn   func(string) ([]Torrent, error)
+		fn   func(context.Context, string) ([]Torrent, error)
 	}{
-		{"tpb", func(q string) ([]Torrent, error) { return tpbSearch(q, cat) }},
+		{"tpb", func(ctx context.Context, q string) ([]Torrent, error) { return tpbSearch(ctx, q, cat) }},
 		{"knaben", knabenSearch},
 		{"tcsv", tcsvSearch},
 		{"nyaa", nyaaSearch},
@@ -210,8 +223,8 @@ func TorrentSearch(c *gin.Context) {
 
 	ch := make(chan provResult, len(provs))
 	for _, p := range provs {
-		go func(name string, fn func(string) ([]Torrent, error)) {
-			ts, err := fn(q)
+		go func(name string, fn func(context.Context, string) ([]Torrent, error)) {
+			ts, err := fn(ctx, q)
 			ch <- provResult{name, ts, err}
 		}(p.name, p.fn)
 	}

@@ -1,8 +1,20 @@
 package jobs
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
+
+	"notflix/server/library"
 )
 
 func TestParseOrganize(t *testing.T) {
@@ -148,6 +160,113 @@ func TestValidMoves(t *testing.T) {
 	}
 	if _, ok := byFile["lone.mp4"]; ok {
 		t.Error("singleton folder should have been dropped")
+	}
+}
+
+// /apply takes {file,root,folder} straight from the request body. The
+// model-index indirection that keeps a hallucinated path out of a move only
+// covers /plan, so a posted move that isn't in the stored plan has to be
+// refused — otherwise /apply is an arbitrary file-mover.
+func TestOrganizeApplyRejectsUnplanned(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	root := t.TempDir()
+	base := filepath.Base(root)
+	for _, name := range []string{"planned.mp4", "elsewhere.mp4"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	orgMu.Lock()
+	orgState = orgStatus{Stage: "done", Moves: []OrgMove{{File: "planned.mp4", Root: base, Folder: "2000s"}}}
+	orgMu.Unlock()
+	t.Cleanup(func() {
+		orgMu.Lock()
+		orgState = orgStatus{Stage: "idle", Moves: []OrgMove{}}
+		orgMu.Unlock()
+	})
+
+	body := fmt.Sprintf(`{"moves":[
+		{"file":"planned.mp4","root":%q,"folder":"2000s"},
+		{"file":"elsewhere.mp4","root":%q,"folder":"2000s"}]}`, base, base)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/organize/apply", strings.NewReader(body))
+	OrganizeApply(c, &library.Library{Roots: []string{root}})
+
+	var out struct {
+		Moved  int      `json:"moved"`
+		Errors []string `json:"errors"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Moved != 1 {
+		t.Fatalf("moved = %d, want only the planned one (%v)", out.Moved, out.Errors)
+	}
+	if _, err := os.Stat(filepath.Join(root, "elsewhere.mp4")); err != nil {
+		t.Fatalf("unplanned move was executed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "2000s", "planned.mp4")); err != nil {
+		t.Fatalf("planned move did not run: %v", err)
+	}
+}
+
+// 7% of the library is -[YTS.MX] releases, and filepath.Glob reads their "["
+// as a character class: the old sidecar lookup matched nothing, with a nil
+// error, so applying a plan stranded the .srt at the root for the junk sweep
+// to reap.
+func TestSidecarsBracketedName(t *testing.T) {
+	dir := t.TempDir()
+	video := "Movie [2020] 1080p BluRay x264-[YTS.MX].mp4"
+	base := strings.TrimSuffix(video, ".mp4")
+	for _, name := range []string{
+		video,
+		base + ".en.srt",
+		base + ".vtt",
+		base + ".nfo",
+		"Unrelated.srt",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if m, err := filepath.Glob(filepath.Join(dir, base+".*")); err == nil && len(m) > 0 {
+		t.Fatalf("premise gone: Glob now matches bracketed names (%v)", m)
+	}
+
+	got := sidecars(dir, video)
+	sort.Strings(got)
+	want := []string{base + ".en.srt", base + ".vtt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sidecars = %v, want %v", got, want)
+	}
+}
+
+func TestApplyMoveTakesSidecars(t *testing.T) {
+	root := t.TempDir()
+	video := "Movie [2020] 1080p BluRay x264-[YTS.MX].mp4"
+	sub := strings.TrimSuffix(video, ".mp4") + ".en.srt"
+	for _, name := range []string{video, sub} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := applyMove(root, OrgMove{File: video, Root: filepath.Base(root), Folder: "2020s"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{video, sub} {
+		if _, err := os.Stat(filepath.Join(root, "2020s", name)); err != nil {
+			t.Errorf("%s did not move: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(root, name)); err == nil {
+			t.Errorf("%s left behind at the root", name)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -165,15 +166,15 @@ func TestLiveProviders(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live network test")
 	}
-	provs := map[string]func(string) ([]Torrent, error){
-		"tpb":    func(q string) ([]Torrent, error) { return tpbSearch(q, "0") },
+	provs := map[string]func(context.Context, string) ([]Torrent, error){
+		"tpb":    func(ctx context.Context, q string) ([]Torrent, error) { return tpbSearch(ctx, q, "0") },
 		"knaben": knabenSearch,
 		"tcsv":   tcsvSearch,
 		"nyaa":   nyaaSearch,
 	}
 	lists := [][]Torrent{}
 	for name, fn := range provs {
-		ts, err := fn("frieren")
+		ts, err := fn(context.Background(), "frieren")
 		if err != nil {
 			t.Logf("%s: %v", name, err)
 			continue
