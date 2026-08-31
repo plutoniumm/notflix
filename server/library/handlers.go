@@ -240,6 +240,24 @@ func DirSizes(c *gin.Context, lib *Library) {
 	c.JSON(http.StatusOK, out)
 }
 
+// filepath.Glob reads "[" as a character class and Go ships no escaper, so
+// a bracketed release name ("Movie [2020] 1080p") silently matches nothing
+// and its language sidecars get orphaned. Scan the directory instead.
+func sideVtts(base string) []string {
+	dir, prefix := filepath.Split(base)
+	entries, _ := os.ReadDir(dir)
+
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, prefix+".") && strings.HasSuffix(name, ".vtt") {
+			out = append(out, filepath.Join(dir, name))
+		}
+	}
+
+	return out
+}
+
 func Rename(c *gin.Context, lib *Library) {
 	var body struct {
 		Path    string `json:"path"`
@@ -251,7 +269,8 @@ func Rename(c *gin.Context, lib *Library) {
 		return
 	}
 
-	if body.NewName == "" || strings.ContainsAny(body.NewName, "/\\") {
+	name := body.NewName
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name"})
 		return
 	}
@@ -262,7 +281,12 @@ func Rename(c *gin.Context, lib *Library) {
 		return
 	}
 
-	dst := filepath.Join(filepath.Dir(abs), body.NewName)
+	dst := filepath.Join(filepath.Dir(abs), name)
+	if _, err := os.Stat(dst); err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "destination exists"})
+		return
+	}
+
 	if err := os.Rename(abs, dst); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -280,8 +304,7 @@ func Rename(c *gin.Context, lib *Library) {
 			}
 		}
 
-		matches, _ := filepath.Glob(base + ".*.vtt")
-		for _, old := range matches {
+		for _, old := range sideVtts(base) {
 			suffix := strings.TrimPrefix(old, base)
 			os.Rename(old, nbase+suffix)
 		}
@@ -317,22 +340,34 @@ func DirDelete(c *gin.Context, lib *Library) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// VideoDelete resolves exactly one absolute path through FindFile: that is
+// both the traversal guard and the reason a rel path present in two roots
+// no longer deletes the copy in every root.
 func VideoDelete(c *gin.Context, lib *Library) {
-	fname := c.Param("filename")
-	rel := strings.TrimPrefix(fname, "/")
-	base := strings.TrimSuffix(rel, filepath.Ext(rel))
-
-	for _, root := range lib.Roots {
-		DelFile(filepath.Join(root, rel))
-		for _, suf := range []string{".vtt", ".srt"} {
-			DelFile(filepath.Join(root, base+suf))
-		}
-
-		matches, _ := filepath.Glob(filepath.Join(root, base+".*.vtt"))
-		for _, m := range matches {
-			DelFile(m)
-		}
+	abs := lib.FindFile(c.Param("filename"))
+	if abs == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
 	}
 
-	c.String(http.StatusOK, "true")
+	if info, err := os.Stat(abs); err != nil || info.IsDir() {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+
+	if err := os.Remove(abs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	base := strings.TrimSuffix(abs, filepath.Ext(abs))
+	for _, suf := range []string{".vtt", ".srt"} {
+		DelFile(base + suf)
+	}
+
+	for _, m := range sideVtts(base) {
+		DelFile(m)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
