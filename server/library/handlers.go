@@ -251,7 +251,8 @@ func Rename(c *gin.Context, lib *Library) {
 		return
 	}
 
-	if body.NewName == "" || strings.ContainsAny(body.NewName, "/\\") {
+	name := body.NewName
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name"})
 		return
 	}
@@ -262,7 +263,12 @@ func Rename(c *gin.Context, lib *Library) {
 		return
 	}
 
-	dst := filepath.Join(filepath.Dir(abs), body.NewName)
+	dst := filepath.Join(filepath.Dir(abs), name)
+	if _, err := os.Stat(dst); err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "destination exists"})
+		return
+	}
+
 	if err := os.Rename(abs, dst); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -317,22 +323,35 @@ func DirDelete(c *gin.Context, lib *Library) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// VideoDelete resolves exactly one absolute path through FindFile: that is
+// both the traversal guard and the reason a rel path present in two roots
+// no longer deletes the copy in every root.
 func VideoDelete(c *gin.Context, lib *Library) {
-	fname := c.Param("filename")
-	rel := strings.TrimPrefix(fname, "/")
-	base := strings.TrimSuffix(rel, filepath.Ext(rel))
-
-	for _, root := range lib.Roots {
-		DelFile(filepath.Join(root, rel))
-		for _, suf := range []string{".vtt", ".srt"} {
-			DelFile(filepath.Join(root, base+suf))
-		}
-
-		matches, _ := filepath.Glob(filepath.Join(root, base+".*.vtt"))
-		for _, m := range matches {
-			DelFile(m)
-		}
+	abs := lib.FindFile(c.Param("filename"))
+	if abs == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
 	}
 
-	c.String(http.StatusOK, "true")
+	if info, err := os.Stat(abs); err != nil || info.IsDir() {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+
+	if err := os.Remove(abs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	base := strings.TrimSuffix(abs, filepath.Ext(abs))
+	for _, suf := range []string{".vtt", ".srt"} {
+		DelFile(base + suf)
+	}
+
+	matches, _ := filepath.Glob(base + ".*.vtt")
+	for _, m := range matches {
+		DelFile(m)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

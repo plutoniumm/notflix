@@ -16,25 +16,42 @@ import (
 
 var Prober = astiffprobe.New(astiffprobe.Configuration{BinaryPath: "ffprobe"})
 
+// resolve joins rel onto root and proves the result still sits inside root.
+// The trailing separator on the prefix test is load-bearing: without it
+// "/Volumes/AomineEvil" passes a "/Volumes/Aomine" containment check.
+// Rejecting the ".." path element (post-Clean) rather than the ".."
+// substring keeps legitimate names like "Movie..2020.mp4" servable.
+func resolve(root, rel string) (string, bool) {
+	absR, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+
+	abs, err := filepath.Abs(filepath.Join(absR, rel))
+	if err != nil {
+		return "", false
+	}
+
+	if abs != absR && !strings.HasPrefix(abs, absR+string(filepath.Separator)) {
+		return "", false
+	}
+
+	return abs, true
+}
+
 func FindFile(rel string, roots []string) string {
 	rel = strings.TrimPrefix(rel, "/")
-	if rel == "" || strings.Contains(rel, "..") {
+	if rel == "" {
 		return ""
 	}
 
 	for _, root := range roots {
-		absR, err := filepath.Abs(root)
-		if err != nil {
+		abs, ok := resolve(root, rel)
+		if !ok {
 			continue
 		}
 
-		candidate := filepath.Join(root, rel)
-		abs, err := filepath.Abs(candidate)
-		if err != nil || !strings.HasPrefix(abs, absR) {
-			continue
-		}
-
-		if _, err := os.Stat(candidate); err == nil {
+		if _, err := os.Stat(abs); err == nil {
 			return abs
 		}
 	}
@@ -50,7 +67,7 @@ func FindVid(file string, roots []string) (string, bool) {
 
 func Error(message string, c *gin.Context, statusCode int) {
 	fmt.Println("Error:", message)
-	c.String(statusCode, message)
+	c.JSON(statusCode, gin.H{"error": message})
 }
 
 func Hash(name string) string {
@@ -76,23 +93,78 @@ func EnsureDir(dir string) bool {
 	return true
 }
 
+// DelFile serves optional sidecars (.vtt/.srt) as much as the video itself,
+// so a missing file is the normal case, not a failure worth logging.
 func DelFile(path string) {
-	if err := os.Remove(path); err != nil {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		log.Printf("Failed to delete file %s: %v", path, err)
 	}
 }
 
-func Range(hdr string, size int64) (start int64, end int64, clen string) {
-	parts := strings.Split(hdr, "=")
-	lr := strings.Split(parts[1], "-")
-
-	start, _ = strconv.ParseInt(lr[0], 10, 64)
-	if lr[1] != "" {
-		end, _ = strconv.ParseInt(lr[1], 10, 64)
-	} else {
-		end = size - 1
+// ParseRange reads a single-range "bytes=" header against a known size.
+// ok is false for a malformed header and for an unsatisfiable one (start
+// past EOF), which is the caller's cue to answer 416.
+func ParseRange(hdr string, size int64) (start, end int64, ok bool) {
+	spec, found := strings.CutPrefix(strings.ToLower(strings.TrimSpace(hdr)), "bytes=")
+	if !found || size <= 0 {
+		return 0, 0, false
 	}
-	clen = strconv.FormatInt(end-start+1, 10)
 
-	return start, end, clen
+	if i := strings.IndexByte(spec, ','); i >= 0 {
+		spec = spec[:i]
+	}
+
+	lo, hi, found := strings.Cut(strings.TrimSpace(spec), "-")
+	if !found {
+		return 0, 0, false
+	}
+	lo, hi = strings.TrimSpace(lo), strings.TrimSpace(hi)
+
+	// "bytes=-N" is a suffix range: the LAST N bytes, not a start offset.
+	if lo == "" {
+		n, err := strconv.ParseInt(hi, 10, 64)
+		if err != nil || n <= 0 {
+			return 0, 0, false
+		}
+
+		if n > size {
+			n = size
+		}
+
+		return size - n, size - 1, true
+	}
+
+	start, err := strconv.ParseInt(lo, 10, 64)
+	if err != nil || start < 0 || start >= size {
+		return 0, 0, false
+	}
+
+	end = size - 1
+	if hi != "" {
+		last, err := strconv.ParseInt(hi, 10, 64)
+		if err != nil || last < start {
+			return 0, 0, false
+		}
+
+		if last < end {
+			end = last
+		}
+	}
+
+	return start, end, true
+}
+
+// Range never fails: a malformed or unsatisfiable header degrades to the
+// whole file so a bad client header can't panic the video handler.
+func Range(hdr string, size int64) (start int64, end int64, clen string) {
+	start, end, ok := ParseRange(hdr, size)
+	if !ok {
+		start, end = 0, size-1
+	}
+
+	if end < start {
+		end = start
+	}
+
+	return start, end, strconv.FormatInt(end-start+1, 10)
 }
