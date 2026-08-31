@@ -1,15 +1,15 @@
 package jobs
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"notflix/server/x/httpc"
 )
 
 func ollamaHost() string {
@@ -38,23 +38,28 @@ func ollamaModel() string {
 // the order of a minute, dwarfing the actual generation.
 const ollamaKeepAlive = "15m"
 
+// Every ollama call is against a Tailscale peer that can be asleep: it
+// accepts the connection and then never answers, so an untimed request hangs
+// forever. ollamaQuick covers the control-plane calls; ollamaChat has to
+// cover a cold model load, which really can take a minute.
+const (
+	ollamaQuick = 10 * time.Second
+	ollamaChat  = 5 * time.Minute
+)
+
 // ollamaLoaded checks /api/ps — the models currently resident in memory — so
 // callers can distinguish a cold load from an instant warm call.
 func ollamaLoaded(host, model string) bool {
-	resp, err := http.Get(host + "/api/ps")
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
 	var ps struct {
 		Models []struct {
 			Name  string `json:"name"`
 			Model string `json:"model"`
 		} `json:"models"`
 	}
-	if json.NewDecoder(resp.Body).Decode(&ps) != nil {
+	if httpc.GetJSON(context.Background(), host+"/api/ps", &ps, ollamaQuick) != nil {
 		return false
 	}
+
 	for _, m := range ps.Models {
 		if m.Name == model || m.Model == model {
 			return true
@@ -67,21 +72,15 @@ func ollamaLoaded(host, model string) bool {
 // returns done_reason "load" once the weights are resident. Also refreshes
 // keep_alive on an already-loaded model, so it's safe to call eagerly.
 func ollamaWarm(host, model string) error {
-	reqBody, _ := json.Marshal(map[string]any{
+	req := map[string]any{
 		"model":      model,
 		"messages":   []any{},
 		"keep_alive": ollamaKeepAlive,
-	})
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Post(host+"/api/chat", "application/json", bytes.NewReader(reqBody))
-	if err != nil {
-		return err
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ollama load HTTP %d: %s", resp.StatusCode, sample(body, 240))
+	if err := httpc.PostJSON(context.Background(), host+"/api/chat", req, nil, ollamaChat); err != nil {
+		return fmt.Errorf("ollama load: %w", err)
 	}
+
 	return nil
 }
 
@@ -90,21 +89,16 @@ func ollamaWarm(host, model string) error {
 // configured model that simply wasn't pulled on the host. Failing fast here
 // logs the available models once and lets the caller save the raw transcript.
 func ollamaHasModel(host, model string) bool {
-	resp, err := http.Get(host + "/api/tags")
-	if err != nil {
-		log.Printf("[ollama] /api/tags unreachable: %v", err)
-		return false
-	}
-	defer resp.Body.Close()
 	var tags struct {
 		Models []struct {
 			Name string `json:"name"`
 		} `json:"models"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
-		log.Printf("[ollama] /api/tags parse error: %v", err)
+	if err := httpc.GetJSON(context.Background(), host+"/api/tags", &tags, ollamaQuick); err != nil {
+		log.Printf("[ollama] /api/tags: %v", err)
 		return false
 	}
+
 	have := make([]string, len(tags.Models))
 	for i, m := range tags.Models {
 		have[i] = m.Name
@@ -145,7 +139,7 @@ func TranslateSegments(texts []string, srcLang string) ([]string, error) {
 		// array in prose or markdown. The prompt asks for an object wrapper
 		// (`{"out":[...]}`) because some backends only accept object roots in
 		// format=json mode.
-		reqBody, _ := json.Marshal(map[string]any{
+		req := map[string]any{
 			"model":      model,
 			"stream":     false,
 			"format":     "json",
@@ -154,20 +148,6 @@ func TranslateSegments(texts []string, srcLang string) ([]string, error) {
 				{"role": "user", "content": prompt +
 					`\nReturn a single JSON object with key "out" mapping to the array.`},
 			},
-		})
-
-		resp, err := http.Post(host+"/api/chat", "application/json", bytes.NewReader(reqBody))
-		if err != nil {
-			log.Printf("[ollama] batch %d request error: %v — using original", i/batchSize, err)
-			continue
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			log.Printf("[ollama] batch %d HTTP %d — using original. body=%s",
-				i/batchSize, resp.StatusCode, sample(body, 240))
-			continue
 		}
 
 		var chatResp struct {
@@ -176,9 +156,8 @@ func TranslateSegments(texts []string, srcLang string) ([]string, error) {
 			} `json:"message"`
 			Error string `json:"error"`
 		}
-		if err := json.Unmarshal(body, &chatResp); err != nil {
-			log.Printf("[ollama] batch %d outer parse error: %v — body=%s",
-				i/batchSize, err, sample(body, 240))
+		if err := httpc.PostJSON(context.Background(), host+"/api/chat", req, &chatResp, ollamaChat); err != nil {
+			log.Printf("[ollama] batch %d: %v — using original", i/batchSize, err)
 			continue
 		}
 		if chatResp.Error != "" {

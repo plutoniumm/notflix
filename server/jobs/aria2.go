@@ -1,7 +1,7 @@
 package jobs
 
 import (
-	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,9 +20,17 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"notflix/server/library"
+	"notflix/server/x/httpc"
 )
 
 const aria2RPC = "http://localhost:6800/jsonrpc"
+
+// A wedged aria2c keeps accepting on :6800 without ever answering — the exact
+// state a2WedgeWatchdog exists to heal. Without a deadline the watchdog's own
+// aria2.shutdown blocks forever on the wedge it is trying to break, and the
+// torrentPaths refresher freezes with it (stale IsBusy, so half-downloaded
+// files get transcoded).
+const rpcTimeout = 10 * time.Second
 
 var rpcSeq atomic.Int64
 
@@ -37,14 +46,6 @@ func a2call(method string, params ...any) (json.RawMessage, error) {
 		req["params"] = params
 	}
 
-	body, _ := json.Marshal(req)
-	resp, err := http.Post(aria2RPC, "application/json", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-
-	defer resp.Body.Close()
-
 	var out struct {
 		Result json.RawMessage `json:"result"`
 		Error  *struct {
@@ -53,7 +54,7 @@ func a2call(method string, params ...any) (json.RawMessage, error) {
 		} `json:"error"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := httpc.PostJSON(context.Background(), aria2RPC, req, &out, rpcTimeout); err != nil {
 		return nil, err
 	}
 	if out.Error != nil {
@@ -628,6 +629,16 @@ func torrentPathsRefresher() {
 	}
 }
 
+// Aria2Owns reports whether aria2 currently holds path. This is the hot
+// question — library.IsBusy asks it for every file of every background pass —
+// so it stays a single locked lookup instead of copying the whole set.
+func Aria2Owns(path string) bool {
+	torrentPathsMu.RLock()
+	defer torrentPathsMu.RUnlock()
+
+	return torrentPaths[path]
+}
+
 // Aria2ActivePaths returns a snapshot of the maintained torrent-paths set.
 // Safe to hold and iterate; the caller doesn't need to lock. Includes
 // stopped-but-not-yet-purged paths, so a just-finished download stays exempt
@@ -760,9 +771,9 @@ func Aria2Remove(c *gin.Context) {
 // removeDownloadResult; the deletion after, so a half-removed tornet can't be
 // re-touched by aria2 mid-delete.
 //
-// Safety: only deletes when the download is NOT complete, and only removes the
-// torrent's own top-level entry under the download dir (never the root itself
-// or a sibling download).
+// Safety: only deletes when the download is NOT complete, and only the files
+// aria2 itself enumerated plus their .aria2 control siblings. Directories go
+// non-recursively, so a folder shared with unrelated media survives.
 func aria2OrphanFiles(gid string) func() {
 	noop := func() {}
 
@@ -789,20 +800,59 @@ func aria2OrphanFiles(gid string) func() {
 	}
 
 	files, tops := aria2CleanupTargets(st.Dir, paths)
-	return func() {
-		for _, p := range files {
-			os.Remove(p)
-			os.Remove(p + ".aria2")
-		}
-		// Sweep the torrent's top-level folder (empty subdirs + leftover
-		// control file). Bounded to entries strictly under root.
-		for _, t := range tops {
-			os.Remove(t + ".aria2")
-			if fi, err := os.Stat(t); err == nil && fi.IsDir() {
-				os.RemoveAll(t)
+	dirs := cleanupDirs(st.Dir, paths)
+
+	return func() { removeDownload(files, dirs, tops) }
+}
+
+// removeDownload erases one removed download: the files aria2 enumerated plus
+// their .aria2 control siblings, then the directories, deepest first and never
+// recursively. The download dir is shared — the organizer is explicitly told
+// to reuse existing folders — so anything not enumerated is someone else's
+// media, and os.Remove fails harmlessly on the non-empty dir holding it.
+// RemoveAll here used to take that media with it.
+func removeDownload(files, dirs, tops []string) {
+	for _, p := range files {
+		os.Remove(p)
+		os.Remove(p + ".aria2")
+	}
+
+	for _, d := range dirs {
+		os.Remove(d)
+	}
+	for _, t := range tops {
+		os.Remove(t + ".aria2")
+		os.Remove(t)
+	}
+}
+
+// cleanupDirs lists every directory between the download dir and the removed
+// files, deepest first, so the non-recursive sweep unwinds the torrent's own
+// folders and stops at the first one that still holds something. Never
+// includes root itself or anything outside it. Pure, so it's unit-testable.
+func cleanupDirs(dir string, paths []string) []string {
+	root := filepath.Clean(dir)
+	seen := map[string]bool{}
+
+	var out []string
+	for _, p := range paths {
+		for d := filepath.Dir(filepath.Clean(p)); d != root; d = filepath.Dir(d) {
+			rel, err := filepath.Rel(root, d)
+			if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+				break
+			}
+			if !seen[d] {
+				seen[d] = true
+				out = append(out, d)
 			}
 		}
 	}
+	sep := string(filepath.Separator)
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.Count(out[i], sep) > strings.Count(out[j], sep)
+	})
+
+	return out
 }
 
 // aria2CleanupTargets resolves what to delete for a removed download: the file

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"os/exec"
 	"path/filepath"
@@ -106,6 +107,12 @@ func YTDlpAdd(url, dir string, lib *library.Library) (string, error) {
 		url,
 	}
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
+	// yt-dlp forks its own ffmpeg for the mux. Signalling the direct child
+	// leaves that ffmpeg writing into a library root, which the next server
+	// run then stomps — so give the download its own process group and
+	// always signal the group.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return killGroup(cmd, syscall.SIGKILL) }
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -134,6 +141,14 @@ func YTDlpAdd(url, dir string, lib *library.Library) (string, error) {
 		for sc.Scan() {
 			parseYTLine(job, sc.Text())
 		}
+		if err := sc.Err(); err != nil {
+			log.Printf("[yt-dlp] output scan gid=%s: %v", gid, err)
+		}
+
+		// A token past the scanner's limit stops the loop with the pipe still
+		// filling; yt-dlp then blocks writing and cmd.Wait never returns.
+		io.Copy(io.Discard, stdout)
+
 		waitErr := cmd.Wait()
 
 		ytMu.Lock()
@@ -200,14 +215,53 @@ func YTDlpRemove(gid string) {
 	if !ok {
 		return
 	}
-	if j.Cmd != nil && j.Cmd.Process != nil {
-		_ = j.Cmd.Process.Signal(syscall.SIGCONT)
-		_ = j.Cmd.Process.Signal(syscall.SIGTERM)
+	stopJob(j)
+	log.Printf("[yt-dlp] remove gid=%s", gid)
+}
+
+// YTDlpStopAll TERMs every running download. Nothing else covers these: on
+// SIGTERM aria2c and the ffmpegs get taken down, but an orphaned yt-dlp keeps
+// writing into a library root and the next server run stomps what it wrote.
+// Wire into the signal handler alongside Aria2Stop.
+func YTDlpStopAll() {
+	ytMu.Lock()
+	running := make([]*ytJob, 0, len(ytJobs))
+	for _, j := range ytJobs {
+		running = append(running, j)
 	}
+	ytMu.Unlock()
+
+	for _, j := range running {
+		stopJob(j)
+	}
+	if len(running) > 0 {
+		log.Printf("[yt-dlp] stopped %d download(s)", len(running))
+	}
+}
+
+// stopJob signals the whole group (CONT first, so a paused download can act on
+// the TERM) and then cancels, which KILLs the group if TERM wasn't enough.
+func stopJob(j *ytJob) {
+	killGroup(j.Cmd, syscall.SIGCONT)
+	killGroup(j.Cmd, syscall.SIGTERM)
 	if j.Cancel != nil {
 		j.Cancel()
 	}
-	log.Printf("[yt-dlp] remove gid=%s", gid)
+}
+
+func killGroup(cmd *exec.Cmd, sig syscall.Signal) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+
+	// Signal the handle first: os.Process refuses once the child has been
+	// reaped (ErrProcessDone), which keeps the raw group kill below from ever
+	// landing on a pid the OS has since recycled.
+	if err := cmd.Process.Signal(sig); err != nil {
+		return err
+	}
+
+	return syscall.Kill(-cmd.Process.Pid, sig)
 }
 
 func YTDlpPause(gid string) error {
@@ -220,7 +274,7 @@ func YTDlpPause(gid string) error {
 	if j.Cmd == nil || j.Cmd.Process == nil {
 		return fmt.Errorf("no process")
 	}
-	if err := j.Cmd.Process.Signal(syscall.SIGSTOP); err != nil {
+	if err := killGroup(j.Cmd, syscall.SIGSTOP); err != nil {
 		return err
 	}
 	ytMu.Lock()
@@ -240,7 +294,7 @@ func YTDlpResume(gid string) error {
 	if j.Cmd == nil || j.Cmd.Process == nil {
 		return fmt.Errorf("no process")
 	}
-	if err := j.Cmd.Process.Signal(syscall.SIGCONT); err != nil {
+	if err := killGroup(j.Cmd, syscall.SIGCONT); err != nil {
 		return err
 	}
 	ytMu.Lock()

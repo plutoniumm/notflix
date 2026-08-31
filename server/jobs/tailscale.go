@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"os/exec"
 	"strings"
@@ -48,13 +49,13 @@ import (
 // Device is the per-device identifier (always MagicDNS short name when
 // available, falling back to HostName). Stable; safe to use as a map key.
 type Identity struct {
-	User    string   `json:"user"`    // grouping key (real user OR per-device for tagged)
-	Device  string   `json:"device"`  // MagicDNS short name (e.g. "dragon"); per-device
-	Host    string   `json:"host"`    // raw HostName ("Dragon's Mac Studio")
-	OS      string   `json:"os"`      // "macOS", "android", "iOS", "windows", "linux"
-	Login   string   `json:"login"`   // email / handle ("AdvithDesu@github"); empty for tagged
-	Tags    []string `json:"tags"`    // ["walle", "eve"] — without the "tag:" prefix
-	Online  bool     `json:"online"`  // last known connectivity from the local daemon
+	User   string   `json:"user"`   // grouping key (real user OR per-device for tagged)
+	Device string   `json:"device"` // MagicDNS short name (e.g. "dragon"); per-device
+	Host   string   `json:"host"`   // raw HostName ("Dragon's Mac Studio")
+	OS     string   `json:"os"`     // "macOS", "android", "iOS", "windows", "linux"
+	Login  string   `json:"login"`  // email / handle ("AdvithDesu@github"); empty for tagged
+	Tags   []string `json:"tags"`   // ["walle", "eve"] — without the "tag:" prefix
+	Online bool     `json:"online"` // last known connectivity from the local daemon
 }
 
 type tsStatus struct {
@@ -88,6 +89,7 @@ var (
 const (
 	tsCacheTTL     = 30 * time.Second
 	tsRefreshEvery = 5 * time.Minute
+	tsExecMax      = 5 * time.Second
 )
 
 // TailscaleInit warms the cache once and then keeps it warm in the
@@ -157,14 +159,22 @@ func ensureTSCache() {
 }
 
 func refreshTailscale() {
+	// Claim the refresh slot, then drop the lock: TailscaleIdentity runs
+	// inline on the stats path of every watch-progress ping, so holding the
+	// write lock across the CLI call meant a restarting tailscaled stalled
+	// every ping and piled up gin workers. Bounded exec for the same reason.
 	tsMu.Lock()
-	defer tsMu.Unlock()
 	if time.Since(tsLastLoad) < tsCacheTTL {
+		tsMu.Unlock()
 		return // someone else just refreshed
 	}
 	tsLastLoad = time.Now()
+	tsMu.Unlock()
 
-	out, err := exec.Command("tailscale", "status", "--json").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), tsExecMax)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "tailscale", "status", "--json").Output()
 	if err != nil {
 		// Daemon not running / CLI missing — keep whatever stale map we have.
 		return
@@ -188,10 +198,13 @@ func refreshTailscale() {
 	for _, p := range st.Peer {
 		add(p)
 	}
+
+	tsMu.Lock()
 	tsMap = next
 	if st.Self != nil {
 		tsSelf = resolveIdentity(st.Self, st.User)
 	}
+	tsMu.Unlock()
 }
 
 // resolveIdentity builds the rich Identity for one peer.

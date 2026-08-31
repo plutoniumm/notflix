@@ -1,7 +1,7 @@
 package jobs
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"notflix/server/library"
+	"notflix/server/x/httpc"
 )
 
 // Organize is the LLM-assisted library categorizer. The model only ever sees
@@ -123,27 +124,22 @@ Return ONLY a JSON object: {"moves":[{"i":<file index>,"folder":"<folder name>"}
 		string(foldersJSON), string(filesJSON))
 }
 
+// Generous — a whole-library prompt on a cold model — but finite: an asleep
+// ollama host accepts the connection and never answers, which used to hang a
+// plan run forever.
+const organizeTimeout = 10 * time.Minute
+
 // organizeChat is a single JSON-mode chat completion against the shared
 // ollama host. One prompt, one answer — no batching. Model availability is
 // checked once by the job runner, not per call.
 func organizeChat(prompt string) (string, error) {
-	host := ollamaHost()
-	model := ollamaModel()
-
-	reqBody, _ := json.Marshal(map[string]any{
-		"model":      model,
+	req := map[string]any{
+		"model":      ollamaModel(),
 		"stream":     false,
 		"format":     "json",
 		"keep_alive": ollamaKeepAlive,
 		"messages":   []map[string]string{{"role": "user", "content": prompt}},
-	})
-
-	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Post(host+"/api/chat", "application/json", bytes.NewReader(reqBody))
-	if err != nil {
-		return "", err
 	}
-	defer resp.Body.Close()
 
 	var chatResp struct {
 		Message struct {
@@ -151,12 +147,13 @@ func organizeChat(prompt string) (string, error) {
 		} `json:"message"`
 		Error string `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return "", fmt.Errorf("ollama response parse: %w", err)
+	if err := httpc.PostJSON(context.Background(), ollamaHost()+"/api/chat", req, &chatResp, organizeTimeout); err != nil {
+		return "", err
 	}
 	if chatResp.Error != "" {
 		return "", fmt.Errorf("ollama: %s", chatResp.Error)
 	}
+
 	return chatResp.Message.Content, nil
 }
 
@@ -468,15 +465,38 @@ func applyMove(root string, m OrgMove) error {
 		return err
 	}
 
-	base := strings.TrimSuffix(src, filepath.Ext(src))
-	sidecars, _ := filepath.Glob(base + ".*")
-	for _, sc := range sidecars {
-		ext := strings.ToLower(filepath.Ext(sc))
-		if ext == ".vtt" || ext == ".srt" {
-			os.Rename(sc, filepath.Join(dir, filepath.Base(sc)))
+	for _, sc := range sidecars(root, m.File) {
+		os.Rename(filepath.Join(root, sc), filepath.Join(dir, sc))
+	}
+
+	return nil
+}
+
+// sidecars lists the subtitle files belonging to video (both in dir).
+// filepath.Glob is unusable here: a "[" in a release name — every -[YTS.MX]
+// rip, 7% of the library — reads as a character class, so the pattern matches
+// nothing and returns a nil error. Go ships no glob escaper, so scan the
+// directory instead.
+func sidecars(dir, video string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	prefix := strings.TrimSuffix(video, filepath.Ext(video)) + "."
+
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		if ext := strings.ToLower(filepath.Ext(name)); ext == ".vtt" || ext == ".srt" {
+			out = append(out, name)
 		}
 	}
-	return nil
+
+	return out
 }
 
 func OrganizeApply(c *gin.Context, lib *library.Library) {
@@ -493,11 +513,19 @@ func OrganizeApply(c *gin.Context, lib *library.Library) {
 		roots[filepath.Base(r)] = r
 	}
 
+	// "Filenames never round-trip through the model" only holds up to the
+	// plan — the client posts back whatever it likes. Every applied move must
+	// be one this server planned, or /apply is an arbitrary file-mover.
+	planned := map[OrgMove]bool{}
+	for _, m := range orgSnap().Moves {
+		planned[m] = true
+	}
+
 	moved := 0
 	var errs []string
 	for _, m := range body.Moves {
 		root, ok := roots[m.Root]
-		if !ok || !folderOK(m.Folder) || m.File == "" || strings.ContainsAny(m.File, `/\`) {
+		if !ok || !planned[m] || !folderOK(m.Folder) || m.File == "" || strings.ContainsAny(m.File, `/\`) {
 			errs = append(errs, fmt.Sprintf("%s: invalid move", m.File))
 			continue
 		}

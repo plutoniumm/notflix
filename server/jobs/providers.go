@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -64,17 +65,17 @@ func parseKnaben(r io.Reader) ([]Torrent, error) {
 	return out, nil
 }
 
-func knabenSearch(q string) ([]Torrent, error) {
+func knabenSearch(ctx context.Context, q string) ([]Torrent, error) {
 	body, _ := json.Marshal(map[string]any{
 		"search_type": "100%", "search_field": "title", "query": q,
 		"order_by": "seeders", "order_direction": "desc", "size": 100,
 		"hide_unsafe": true, "hide_xxx": true,
 	})
-	resp, err := searchFetch(http.MethodPost, knabenURL, strings.NewReader(string(body)))
+	resp, err := searchFetch(ctx, http.MethodPost, knabenURL, body)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Close()
+
 	return parseKnaben(resp)
 }
 
@@ -113,12 +114,12 @@ func parseTCSV(r io.Reader) ([]Torrent, error) {
 	return out, nil
 }
 
-func tcsvSearch(q string) ([]Torrent, error) {
-	body, err := searchFetch(http.MethodGet, tcsvURL+"?q="+url.QueryEscape(q), nil)
+func tcsvSearch(ctx context.Context, q string) ([]Torrent, error) {
+	body, err := searchFetch(ctx, http.MethodGet, tcsvURL+"?q="+url.QueryEscape(q), nil)
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
+
 	return parseTCSV(body)
 }
 
@@ -182,11 +183,11 @@ func parseNyaa(r io.Reader) ([]Torrent, error) {
 	return out, nil
 }
 
-func nyaaSearch(q string) ([]Torrent, error) {
-	body, err := searchFetch(http.MethodGet, fmt.Sprintf("%s&q=%s", nyaaURL, url.QueryEscape(q)), nil)
+func nyaaSearch(ctx context.Context, q string) ([]Torrent, error) {
+	body, err := searchFetch(ctx, http.MethodGet, fmt.Sprintf("%s&q=%s", nyaaURL, url.QueryEscape(q)), nil)
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
+
 	return parseNyaa(body)
 }

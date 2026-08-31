@@ -3,8 +3,10 @@ package jobs
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -23,10 +25,41 @@ import (
 
 const pythonPath = "/opt/homebrew/Caskroom/miniconda/base/envs/global/bin/python"
 
+// Hard ceiling on one background transcription.
+const whisperMax = 4 * time.Hour
+
 var (
+	// activeProcs maps a stream request's file key to the run serving it.
+	// Entries leave by process identity, never by key alone: deleting by key
+	// let a finishing handler drop a LATER run's entry, so the next request
+	// found nothing to kill and started a third python — two of them then
+	// racing to write the same .whisper.vtt.
 	activeProcs sync.Map
 	whisperJobs sync.Map
 )
+
+func procKill(key string) {
+	if cur, ok := activeProcs.Load(key); ok {
+		log.Printf("[whisper] killing existing run for %q", key)
+		killCmd(cur.(*exec.Cmd))
+	}
+}
+
+func procSwap(key string, cmd *exec.Cmd) {
+	if old, loaded := activeProcs.Swap(key, cmd); loaded {
+		killCmd(old.(*exec.Cmd))
+	}
+}
+
+func procDone(key string, cmd *exec.Cmd) {
+	activeProcs.CompareAndDelete(key, cmd)
+}
+
+func killCmd(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		cmd.Process.Kill()
+	}
+}
 
 func whisperVTTOf(path string) string {
 	ext := filepath.Ext(path)
@@ -162,11 +195,7 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	if old, ok := activeProcs.Load(raw); ok {
-		log.Printf("[whisper] killing existing process for %q", raw)
-		old.(*exec.Cmd).Process.Kill()
-		activeProcs.Delete(raw)
-	}
+	procKill(raw)
 
 	tmpWAV, err := extractToWAV(path)
 	if err != nil {
@@ -204,10 +233,11 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 	}
 	log.Printf("[whisper] python pid=%d", cmd.Process.Pid)
 
-	activeProcs.Store(raw, cmd)
-	defer activeProcs.Delete(raw)
+	procSwap(raw, cmd)
+	defer procDone(raw, cmd)
 
 	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
 
 	// First line from Python: {"lang": "ja"} — capture detected language
 	var lang string
@@ -243,10 +273,21 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 		segs = append(segs, whisperSeg{seg.Start, seg.End, seg.Text})
 		sendEvent(map[string]any{"start": seg.Start, "end": seg.End, "text": seg.Text})
 	}
-	log.Printf("[whisper] scanner done, %d segments read, stderr: %s", len(segs), stderrBuf.String())
+	if err := scanner.Err(); err != nil {
+		log.Printf("[whisper] stdout scan: %v", err)
+	}
 
-	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
-		log.Printf("[whisper] python wait error: %v | stderr: %s", err, stderrBuf.String())
+	// A token past the scanner's limit stops the loop with the pipe still
+	// filling; python then blocks on the write and cmd.Wait never returns.
+	io.Copy(io.Discard, stdout)
+
+	// stderrBuf is a TailWriter, so os/exec fills it from an internal
+	// goroutine that only Wait joins — reading it before Wait races.
+	waitErr := cmd.Wait()
+	log.Printf("[whisper] %d segments read, stderr: %s", len(segs), stderrBuf.String())
+
+	if waitErr != nil && ctx.Err() == nil {
+		log.Printf("[whisper] python wait error: %v | stderr: %s", waitErr, stderrBuf.String())
 		sendEvent(map[string]string{"error": "python error: " + stderrBuf.String()})
 		return
 	}
@@ -310,19 +351,23 @@ func SubsWhisper(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	if existing, loaded := whisperJobs.Load(body.File); loaded {
-		job := existing.(*WhisperJob)
-		status, msg := job.read()
+	// A terminal entry is replaced, not reported: leaving it in place made one
+	// transient failure permanent — every later request answered "error" for
+	// that file until the server restarted.
+	job := &WhisperJob{Status: "pending"}
+	if prev, loaded := whisperJobs.LoadOrStore(body.File, job); loaded {
+		status, msg := prev.(*WhisperJob).read()
 		if status == "pending" {
 			c.JSON(http.StatusOK, gin.H{"status": "pending"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": status, "error": msg})
-		return
+		if !whisperJobs.CompareAndSwap(body.File, prev, job) {
+			c.JSON(http.StatusOK, gin.H{"status": "pending"})
+			return
+		}
+		log.Printf("[whisper] retrying %q after %s %s", body.File, status, msg)
 	}
 
-	job := &WhisperJob{Status: "pending"}
-	whisperJobs.Store(body.File, job)
 	go runJob(path, whisperVTTOf(path), body.File, job)
 	c.JSON(http.StatusOK, gin.H{"status": "pending"})
 }
@@ -358,9 +403,21 @@ func runJob(src, dst, key string, job *WhisperJob) {
 	}
 	defer os.Remove(tmpWAV)
 
-	cmd := exec.Command(pythonPath, "tools/stream_whisper.py", tmpWAV)
+	// A hung python would otherwise sit here forever holding the 1-wide
+	// auto-whisper pool, so every later file's transcription never starts.
+	// The budget is far past a real transcription (base model, feature film).
+	ctx, cancel := context.WithTimeout(context.Background(), whisperMax)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, pythonPath, "tools/stream_whisper.py", tmpWAV)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return killGroup(cmd, syscall.SIGKILL) }
+
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			log.Printf("[whisper] %s timed out after %v", key, whisperMax)
+		}
 		job.set("error", "python error: "+err.Error())
 		return
 	}
