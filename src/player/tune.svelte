@@ -1,4 +1,6 @@
 <script lang="ts" module>
+  import { local } from "../core/store";
+
   export type Fx = {
     bright: number;
     contrast: number;
@@ -6,21 +8,18 @@
     gamma: number;
   };
 
-  const FX_KEY = "vidfx";
+  const fxStore = local<Partial<Fx>>("vidfx", {});
   const num = (x: any, d: number) => (Number.isFinite(+x) ? +x : d);
 
   function loadFx(): Fx {
-    try {
-      const v = JSON.parse(localStorage.getItem(FX_KEY) ?? "{}");
-      return {
-        bright: num(v.bright, 1),
-        contrast: num(v.contrast, 1),
-        sat: num(v.sat, 1),
-        gamma: num(v.gamma, 1),
-      };
-    } catch {
-      return { bright: 1, contrast: 1, sat: 1, gamma: 1 };
-    }
+    const v = fxStore.get();
+
+    return {
+      bright: num(v.bright, 1),
+      contrast: num(v.contrast, 1),
+      sat: num(v.sat, 1),
+      gamma: num(v.gamma, 1),
+    };
   }
 </script>
 
@@ -59,9 +58,7 @@
     }
     const el = videoEl();
     if (el) el.style.filter = f;
-    try {
-      localStorage.setItem(FX_KEY, JSON.stringify($state.snapshot(fx)));
-    } catch {}
+    fxStore.set($state.snapshot(fx));
   });
 
   function reset() {

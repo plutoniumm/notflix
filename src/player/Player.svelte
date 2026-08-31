@@ -28,6 +28,7 @@
   import Subs from "./subs";
   import WatchProgress from "./watch";
   import { Down, isSupported } from "../library/dl";
+  import { local } from "../core/store";
   import { Touch, Hotkeys, togglePip, pipOk, av1Ok } from "./ux";
   import { SAVE_INTERVAL_MS } from "../core/events.svelte";
   import { AVSync } from "./avsync";
@@ -56,6 +57,7 @@
   let autoplay =
     new URLSearchParams(window.location.search).get("autoplay") === "1";
   const embed = window.location.pathname === "/embed";
+  const speed = local<number>("speed", 1);
   const watch = new WatchProgress();
   const view = new PlayerView();
   const ps = view.state;
@@ -452,8 +454,7 @@
     let initSrc = masterSrc;
     let initType = "application/vnd.apple.mpegurl";
     if (videoParam.endsWith(".mp4") && isSupported()) {
-      const record = await Down.get(videoParam);
-      isOffline = record?.status === "done";
+      isOffline = await Down.has(videoParam);
       if (isOffline) {
         initSrc = fileSrc;
         initType = "video/mp4";
@@ -524,18 +525,10 @@
     player.ready(() => {
       if (autoplay) safePlay();
 
-      // localStorage throws outright in private mode / with site data blocked.
-      let savedRate = NaN;
-      try {
-        savedRate = parseFloat(localStorage.getItem("speed") ?? "");
-      } catch {}
+      const savedRate = speed.get();
       if (savedRate >= 0.25 && savedRate <= 4 && savedRate !== 1)
         player.playbackRate(savedRate);
-      player.on("ratechange", () => {
-        try {
-          localStorage.setItem("speed", String(player.playbackRate() || 1));
-        } catch {}
-      });
+      player.on("ratechange", () => speed.set(player.playbackRate() || 1));
 
       cleanups.push(Touch(player, pageEl!, toggleFullscreen));
       cleanups.push(

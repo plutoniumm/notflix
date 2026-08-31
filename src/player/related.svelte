@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { clean, vidURL } from "../core/video";
+  import { clean, vidURL, thumbFail } from "../core/video";
 
   let { rows, dir, name, paused, embed }: any = $props();
 
@@ -34,7 +34,13 @@
           class:active={i === activeIdx}
         >
           <div class="thumb-wrap p-rel">
-            <img src="/images/{f.key}.jpg" alt="" loading="lazy" class="w-100" />
+            <img
+              src="/images/{f.key}.jpg"
+              alt=""
+              loading="lazy"
+              class="w-100"
+              onerror={thumbFail}
+            />
             {#if i === activeIdx}<span class="now-pill">NOW</span>{/if}
           </div>
           <span class="title d-b fs-xs p5 trunc">{clean(f.name)}</span>
