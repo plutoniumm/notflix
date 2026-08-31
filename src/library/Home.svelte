@@ -21,7 +21,7 @@
 
   const home = new HomeData();
   let search = $state("");
-  let swUpdate = $state<ServiceWorkerRegistration | null>(null);
+  let swUpdate = $state<(() => void) | null>(null);
 
   const searches = local<string[]>("searches", []);
   const saved = searches.get();
@@ -172,11 +172,11 @@
   }
 
   function applyUpdate() {
-    swUpdate?.waiting?.postMessage({ type: "SKIP_WAITING" });
+    swUpdate?.();
   }
 </script>
 
-<div style="min-height: 100vh;">
+<div style="min-height: 100vh; min-height: 100dvh;">
   <header class="glass-header f al-ct g20">
     <a href="/">
       <img src="/assets/tight.svg" alt="Notflix" height="50" />
@@ -472,6 +472,7 @@
 <style>
   header {
     padding: 16px 48px;
+    padding-top: calc(16px + var(--safe-t));
   }
   .search-wrap {
     flex: 1;
@@ -728,7 +729,7 @@
   }
 
   .panel {
-    bottom: 24px;
+    bottom: calc(24px + var(--safe-b));
     right: 24px;
     width: 320px;
     max-height: 60vh;
@@ -777,6 +778,7 @@
   @media (max-width: 640px) {
     header {
       padding: 10px 16px;
+      padding-top: calc(10px + var(--safe-t));
       gap: 10px;
     }
     header img {

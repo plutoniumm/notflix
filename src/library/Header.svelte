@@ -49,6 +49,7 @@
 <style>
   header {
     padding: 20px 40px;
+    padding-top: calc(20px + var(--safe-t));
   }
   header h1 {
     font-size: 22px;

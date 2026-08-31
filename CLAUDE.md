@@ -15,7 +15,7 @@ pnpm run build    # frontend production build → public/assets/
 
 Tests live in `server/media/dual_path_test.go` and cover the codec selector, segPaths layout, master/playlist generation, and an ffmpeg-driven AV1 init/segment round-trip. Run with `go test ./server/media/`. The e2e tests skip cleanly if `libsvtav1` isn't in the local ffmpeg build (`testing.Short()` also skips them).
 
-Frontend: `node --test tools/fmt.test.ts` covers `src/core/fmt.ts` (node strips the types itself; no runner dependency). It pins the edge cases the old per-component formatters got wrong — hour tiers, sub-MB byte tiers, NaN and negatives.
+Frontend: `pnpm run build && node --test tools/*.test.ts` (node strips the types itself; no runner dependency). `fmt.test.ts` pins the edge cases the old per-component formatters got wrong — hour tiers, sub-MB byte tiers, NaN and negatives. `mobile.test.ts` asserts on the compiled bundle for the touch/PWA rules that can't be exercised without a device: every hover-revealed control also reveals under `@media (hover: none)` (an opacity-0 button still takes taps), 44px touch targets, 16px fields (iOS zooms in below that and never back out), safe-area insets, `100dvh`.
 
 ## Architecture
 

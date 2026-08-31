@@ -1,8 +1,24 @@
 import { IDB } from "../core/idb";
 import { head } from "../core/api";
+import { bytes } from "../core/fmt";
 import { toast } from "./../core/toast.svelte";
 
 const OFFLINE_CACHE = "notflix-offline-v1";
+const READY_MS = 3000;
+
+// serviceWorker.ready never settles when nothing is registered, so a bare
+// await hangs the caller forever — no spinner, no timeout, no error.
+function swReady(): Promise<ServiceWorkerRegistration | null> {
+  if (!("serviceWorker" in navigator)) return Promise.resolve(null);
+
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<null>((ok) => setTimeout(() => ok(null), READY_MS)),
+  ]);
+}
+
+const bgFetchOf = (reg: ServiceWorkerRegistration | null) =>
+  (reg as any)?.backgroundFetch ?? null;
 
 export function isSupported(): boolean {
   return "serviceWorker" in navigator && "BackgroundFetchManager" in self;
@@ -84,15 +100,17 @@ class Downloads {
     const record = await this.get(videoParam);
 
     if (record?.bgFetchId && record.status === "downloading") {
-      const reg = await navigator.serviceWorker.ready;
-      const bgReg = await (reg as any).backgroundFetch.get(record.bgFetchId);
+      const bgFetch = bgFetchOf(await swReady());
+      const bgReg = await bgFetch?.get(record.bgFetchId);
 
       if (bgReg) await bgReg.abort();
     }
 
-    const cache = await caches.open(OFFLINE_CACHE);
-    await cache.delete(`/video/${videoParam}`);
-    await cache.delete(`/subs/${videoParam.replace(/\.mp4$/i, ".vtt")}`);
+    if (globalThis.caches) {
+      const cache = await caches.open(OFFLINE_CACHE);
+      await cache.delete(`/video/${videoParam}`);
+      await cache.delete(`/subs/${videoParam.replace(/\.mp4$/i, ".vtt")}`);
+    }
 
     await d.del("downloads", videoParam);
     if (record?.bgFetchId) await d.del("bgfetch-map", record.bgFetchId);
@@ -122,8 +140,8 @@ class Downloads {
       console.warn("[recover] all()", err);
       return;
     }
-    const reg = await navigator.serviceWorker.ready;
-    const bgFetch = (reg as any).backgroundFetch;
+    const bgFetch = bgFetchOf(await swReady());
+    if (!bgFetch) return;
 
     for (const r of records) {
       if (r.status !== "downloading" || !r.bgFetchId) continue;
@@ -143,8 +161,8 @@ class Downloads {
 
   async start(videoParam: string, title: string, key: string): Promise<void> {
     try {
-      const reg = await navigator.serviceWorker.ready;
-      const bgFetch = (reg as any).backgroundFetch;
+      const bgFetch = bgFetchOf(await swReady());
+      if (!bgFetch) throw new Error("background downloads unavailable");
 
       const src = await head(`/video/${videoParam}`);
       if (!src.ok) throw new Error(`HEAD /video/${videoParam} failed`);
@@ -152,9 +170,21 @@ class Downloads {
         console.warn("[Down.start] no Content-Length — downloading with unknown size");
       }
 
+      // Over-quota fetches fail late and land as a generic "error" record, so
+      // refuse up front while the number is still explainable.
+      const { used, quota } = await this.storage();
+      const free = quota - used;
+      if (quota && src.size > free)
+        throw new Error(
+          `needs ${bytes(src.size)}, only ${bytes(free)} of storage free`,
+        );
+
       if (navigator.storage?.persist) {
         try {
-          await navigator.storage.persist();
+          if (!(await navigator.storage.persist()))
+            toast.info(
+              "Storage isn't persistent — the browser may evict this download",
+            );
         } catch (err) {
           console.warn("[storage.persist]", err);
         }
@@ -201,12 +231,23 @@ class Downloads {
   }
 
   async progress(bgFetchId: string): Promise<number> {
-    const reg = await navigator.serviceWorker.ready;
-    const bgReg = await (reg as any).backgroundFetch.get(bgFetchId);
+    const bgFetch = bgFetchOf(await swReady());
+    const bgReg = await bgFetch?.get(bgFetchId);
 
     if (!bgReg || bgReg.downloadTotal === 0) return 0;
 
     return Math.round((bgReg.downloaded / bgReg.downloadTotal) * 100);
+  }
+
+  // A "done" record is not proof the bytes are still there: browsers evict
+  // non-persisted caches (iOS after ~7 unused days).
+  async has(videoParam: string): Promise<boolean> {
+    const record = await this.get(videoParam);
+    if (record?.status !== "done" || !globalThis.caches) return false;
+
+    const cache = await caches.open(OFFLINE_CACHE);
+
+    return !!(await cache.match(`/video/${videoParam}`));
   }
 
   async storage(): Promise<{ used: number; quota: number }> {

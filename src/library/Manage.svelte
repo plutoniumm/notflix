@@ -3,7 +3,7 @@
   import { api } from "../core/api";
   import { kv } from "../core/kv";
   import { toast } from "../core/toast.svelte";
-  import { JOBS_POLL_MS, DL_POLL_MS, PWA_POLL_MS } from "../core/events.svelte";
+  import { ARM_MS, JOBS_POLL_MS, DL_POLL_MS, PWA_POLL_MS } from "../core/events.svelte";
   import { usePoll } from "../core/poll";
   import { Down, isSupported } from "./dl";
   import { clean } from "../core/video";
@@ -15,6 +15,7 @@
   import FolderRow from "./FolderRow.svelte";
   import Organize from "./Organize.svelte";
   import ProgressBar from "../components/ProgressBar.svelte";
+  import DeleteBtn from "../components/DeleteBtn.svelte";
   import ProcessStatusPanel from "./ProcessStatus.svelte";
 
   declare const __BUILD_TIME__: string;
@@ -42,6 +43,9 @@
   >([]);
   let dirSizes = $state<Record<string, { bytes: number; root: string }>>({});
 
+  let armed = $state<string | null>(null);
+  let armTimer: ReturnType<typeof setTimeout> | undefined;
+
   let pollers: (() => void)[] = [];
   let pwaUnsub: (() => void) | null = null;
   let wasProcessing = false;
@@ -49,7 +53,22 @@
   onDestroy(() => {
     pollers.forEach((stop) => stop());
     pwaUnsub?.();
+    clearTimeout(armTimer);
   });
+
+  // Deletes are two-step: the first tap arms, a second within ARM_MS commits.
+  // These buttons sit inches apart in a dense list on a phone, and the server
+  // deletes off the disk.
+  function arm(key: string) {
+    armed = key;
+    clearTimeout(armTimer);
+    armTimer = setTimeout(() => (armed = null), ARM_MS);
+  }
+
+  function disarm() {
+    armed = null;
+    clearTimeout(armTimer);
+  }
 
   async function pollPwaDownloads() {
     let records: DownloadRecord[];
@@ -188,9 +207,16 @@
 
   async function delFile(dir: string, f: string) {
     const rel = join(dir, f);
-    const res = await api.deleteVideo(rel);
-    if (res === null) {
-      toast.err(`Delete failed: ${rel}`);
+    if (armed !== rel) {
+      arm(rel);
+      return;
+    }
+    disarm();
+
+    const res = await api.deleteVideo(rel, { tag: `Delete ${f}` });
+    if (res === null) return;
+    if (res.ok === false) {
+      toast.err(`Delete failed: ${res.error ?? rel}`);
       return;
     }
 
@@ -199,9 +225,16 @@
   }
 
   async function delDir(dir: string) {
-    const res = await api.deleteDir(dir);
-    if (!res?.ok) {
-      toast.err("Delete failed: " + (res?.error ?? "unknown"));
+    if (armed !== dir) {
+      arm(dir);
+      return;
+    }
+    disarm();
+
+    const res = await api.deleteDir(dir, { tag: `Delete ${dir}` });
+    if (res === null) return;
+    if (res.ok === false) {
+      toast.err(`Delete failed: ${res.error ?? dir}`);
       return;
     }
 
@@ -274,7 +307,7 @@
   );
 </script>
 
-<div style="min-height:100vh">
+<div style="min-height:100vh; min-height:100dvh">
   <Header
     {rows}
     {total}
@@ -303,13 +336,11 @@
                 {cf.dir === "." ? "Root" : cf.dir} · {cf.root}
               </span>
             </div>
-            <button
-              class="btn-icon danger sh-0"
+            <DeleteBtn
+              armed={armed === join(cf.dir, cf.name)}
               title="Delete file"
               onclick={() => delFile(cf.dir, cf.name)}
-            >
-              🗑
-            </button>
+            />
           </div>
         {/each}
       </section>
@@ -366,6 +397,7 @@
           diskTotal={disk?.total ?? 0}
           hidden={hiddenSet.has(dir)}
           onToggleHidden={() => toggleHidden(dir)}
+          {armed}
         />
       {/each}
     {/if}

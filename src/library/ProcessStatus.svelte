@@ -38,11 +38,7 @@
   }
 
   let now = $state(Date.now());
-  $effect(() =>
-    usePoll(() => {
-      now = Date.now();
-    }, TICK_MS),
-  );
+  $effect(() => usePoll(() => (now = Date.now()), TICK_MS));
 
   let visible = $derived(status?.running || status?.phases?.some((p) => p.state !== "pending"));
   let totalElapsed = $derived(

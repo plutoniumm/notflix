@@ -1,6 +1,7 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
 import { SW_POLL_MS } from "./core/events.svelte";
+import { usePoll } from "./core/poll";
 import { toast } from "./core/toast.svelte";
 import "../public/assets/global.css";
 import "../public/assets/atomic.css";
@@ -22,31 +23,39 @@ window.addEventListener("error", (e) => {
 });
 
 if ("serviceWorker" in navigator) {
-  const hadController = !!navigator.serviceWorker.controller;
+  // Only a reload the user asked for. A new worker taking control used to
+  // reload the page on its own, which yanks the video out mid-playback.
+  let swapping = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (hadController) window.location.reload();
+    if (swapping) window.location.reload();
   });
 
   navigator.serviceWorker
     .register("/sw.js")
     .then((reg) => {
-      setInterval(() => {
-        if (document.hidden) return;
-        reg.update().catch((err) => {
-          console.warn("[sw.update]", err);
-        });
-      }, SW_POLL_MS);
+      usePoll(() => reg.update(), SW_POLL_MS);
 
-      const onUpdate = () => {
-        window.dispatchEvent(new CustomEvent("sw-update", { detail: reg }));
+      const apply = () => {
+        const waiting = reg.waiting;
+        if (!waiting) {
+          window.location.reload();
+          return;
+        }
+
+        swapping = true;
+        waiting.postMessage({ type: "SKIP_WAITING" });
       };
 
-      if (reg.waiting) onUpdate();
+      const offer = () => {
+        window.dispatchEvent(new CustomEvent("sw-update", { detail: apply }));
+      };
+
+      if (reg.waiting) offer();
       reg.addEventListener("updatefound", () => {
         const sw = reg.installing;
         sw?.addEventListener("statechange", () => {
           if (sw.state === "installed" && navigator.serviceWorker.controller) {
-            onUpdate();
+            offer();
           }
         });
       });

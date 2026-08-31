@@ -107,6 +107,18 @@
   .cw-remove:active {
     transform: scale(0.88);
   }
+  /* No hover to reveal it on touch: opacity 0 still takes taps, so the card
+     carried an invisible delete button where a thumb naturally lands. */
+  @media (hover: none) {
+    .cw-remove {
+      opacity: 0.85;
+      top: 2px;
+      right: 2px;
+      width: 44px;
+      height: 44px;
+      font-size: 16px;
+    }
+  }
 
   .cw-bar {
     bottom: 0;

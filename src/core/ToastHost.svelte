@@ -20,7 +20,7 @@
 <style>
   .host {
     position: fixed;
-    bottom: 16px;
+    bottom: calc(16px + var(--safe-b));
     right: 16px;
     z-index: 10000;
     display: flex;

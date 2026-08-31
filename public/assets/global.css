@@ -47,6 +47,11 @@
   /* type */
   --font-display: "Bricolage Grotesque", system-ui, -apple-system, sans-serif;
   --font-body: "Manrope", system-ui, -apple-system, sans-serif;
+
+  /* notch/home-indicator insets. Zero everywhere except a standalone PWA on
+     an inset display, and only when the viewport meta says viewport-fit=cover. */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
 }
 
 html,
@@ -112,6 +117,7 @@ body {
   background: var(--bg-2);
   color: var(--tx-5);
   min-height: 100vh;
+  min-height: 100dvh;
   position: relative;
 }
 
@@ -398,6 +404,11 @@ video {
     opacity: 1;
     padding: 8px 12px;
     font-size: 14px;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 }
 
@@ -470,6 +481,12 @@ video {
   box-shadow: 0 0 0 4px var(--red-soft);
 }
 .field::placeholder { color: var(--tx-1); }
+/* iOS zooms the page on focus for anything under 16px and never zooms back. */
+@media (hover: none) {
+  .field {
+    font-size: 16px;
+  }
+}
 
 /* ── action button (gradient) ── */
 .btn-action {

@@ -1,10 +1,12 @@
 <script lang="ts">
   import { clean } from "../core/video";
   import { join } from "../core/path";
+  import DeleteBtn from "../components/DeleteBtn.svelte";
 
   let {
     dir,
     f,
+    armed = null,
     root = null,
     corrupt = false,
     job,
@@ -57,7 +59,7 @@
     {#if editing === fpath}
       <form class="form f" onsubmit={confirmEdit}>
         <input
-          class="input"
+          class="field input"
           bind:value={val}
           onkeydown={(e) => e.key === "Escape" && cancelEdit()}
           onblur={confirmEdit}
@@ -73,8 +75,14 @@
         <span class="disk-tag fs-xs sh-0" data-root={root}>{root}</span>
       {/if}
       <div class="actions f g2">
-        <button class="btn-icon" onclick={() => startEdit(fpath, f)}>✏️</button>
-        <button class="btn-icon danger" onclick={onDelete}> 🗑 </button>
+        <button
+          class="btn-icon"
+          title="Rename"
+          onclick={() => startEdit(fpath, f)}
+        >
+          ✏️
+        </button>
+        <DeleteBtn armed={armed === fpath} onclick={onDelete} />
       </div>
     {/if}
   </div>
@@ -144,6 +152,13 @@
     opacity: 0;
     transition: opacity 0.18s var(--ease-out);
   }
+  /* An opacity-0 wrapper still takes taps — on touch these were an invisible
+     rename and an invisible delete sitting under the row. */
+  @media (hover: none) {
+    .actions {
+      opacity: 1;
+    }
+  }
   .file.corrupt .actions,
   .file.corrupt .btn-icon {
     opacity: 1;
@@ -160,12 +175,7 @@
   .input {
     flex: 1;
     width: 100%;
-    background: var(--bg-2);
-    border: 1px solid var(--red);
-    color: var(--tx-5);
-    padding: 5px 12px;
-    border-radius: var(--r-md);
-    font-family: inherit;
+    border-color: var(--red);
     box-shadow: 0 0 0 4px var(--red-soft);
   }
 </style>
