@@ -74,15 +74,21 @@ const db = new IDB( 'notflix-offline', 1, ( D ) => {
 } );
 
 
+// No skipWaiting on install: taking over immediately reloads the page
+// mid-playback. The swap waits for the client's SKIP_WAITING message.
 self.addEventListener( 'install', ( e ) => {
-  e.waitUntil(
-    caches
-      .open( CACHE )
-      .then( ( c ) => c.addAll( SHELL ) )
+  e.waitUntil( fill() );
+} );
+
+async function fill () {
+  const c = await caches.open( CACHE );
+  const done = await Promise.allSettled(
+    SHELL.map( ( u ) => c.add( u ) )
   );
 
-  self.skipWaiting();
-} );
+  const bad = SHELL.filter( ( _, i ) => done[ i ].status === 'rejected' );
+  if ( bad.length ) console.warn( '[sw install] shell misses', bad );
+}
 
 self.addEventListener( 'message', ( e ) => {
   if ( e.data?.type === 'SKIP_WAITING' ) self.skipWaiting();
@@ -107,12 +113,8 @@ self.addEventListener( 'fetch', ( e ) => {
   if ( e.request.method !== 'GET' ) return;
 
   if ( url.pathname.startsWith( '/video/' ) || url.pathname.startsWith( '/subs/' ) ) {
-    e.respondWith(
-      caches
-        .open( OFFLINE_CACHE )
-        .then( ( c ) => c.match( e.request ) )
-        .then( ( r ) => r || fetch( e.request ) )
-    );
+    e.respondWith( offline( e.request ) );
+
     return;
   }
 
@@ -150,6 +152,54 @@ self.addEventListener( 'fetch', ( e ) => {
       )
   );
 } );
+
+async function offline ( req ) {
+  const c = await caches.open( OFFLINE_CACHE );
+  const hit = await c.match( req );
+
+  if ( !hit ) return fetch( req );
+
+  return carve( hit, req.headers.get( 'range' ) );
+}
+
+// The Cache API ignores Range and only ever hands back the whole stored
+// response, so a seek would get a 200 and never move. Slice it here.
+async function carve ( res, range ) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec( ( range || '' ).trim() );
+  if ( !m || ( !m[ 1 ] && !m[ 2 ] ) ) return res;
+
+  const body = await res.blob();
+  const size = body.size;
+  let start, end;
+
+  if ( m[ 1 ] ) {
+    start = +m[ 1 ];
+    end = m[ 2 ] ? Math.min( +m[ 2 ], size - 1 ) : size - 1;
+  } else {
+    start = Math.max( size - +m[ 2 ], 0 );
+    end = size - 1;
+  }
+
+  if ( start >= size || start > end )
+    return new Response( null, {
+      status: 416,
+      headers: {
+        'Content-Range': `bytes */${ size }`,
+        'Accept-Ranges': 'bytes'
+      }
+    } );
+
+  const head = new Headers( res.headers );
+  head.set( 'Content-Range', `bytes ${ start }-${ end }/${ size }` );
+  head.set( 'Content-Length', String( end - start + 1 ) );
+  head.set( 'Accept-Ranges', 'bytes' );
+
+  return new Response( body.slice( start, end + 1 ), {
+    status: 206,
+    statusText: 'Partial Content',
+    headers: head
+  } );
+}
 
 
 self.addEventListener(
