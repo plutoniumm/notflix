@@ -42,7 +42,9 @@
   const dir = $derived(parsed.dir);
   const name = $derived(parsed.name);
   const title = $derived(clean(name));
-  const sub = $derived(videoParam.replace(/\.mp4$/i, ".vtt"));
+  // Any extension the server calls playable (.mp4/.mkv/.mov) reaches here, so
+  // swap whatever is present — matching the server's own `base` computation.
+  const sub = $derived(videoParam.replace(/\.[^./]+$/, ".vtt"));
   const masterSrc = $derived(
     `/api/hls/master?file=${encodeURIComponent(videoParam)}`,
   );
@@ -63,7 +65,10 @@
   let listData: any[] | null = null;
   let isOffline = false;
   let swapping = false;
+  let dead = false;
   let whisperStop: (() => void) | null = null;
+  let resumeSeek: (() => boolean) | null = null;
+  let audioInfo: any[] = [];
   let skipped = { intro: false, outro: false };
 
   function safePlay() {
@@ -133,15 +138,20 @@
   // playback timeline could have persisted a drifted/huge currentTime;
   // without this, the player yanks a fresh start to a bogus timestamp
   // ("just started but shows ~2h, jumped back"). Out-of-range → start at 0.
-  const applyResume = (t: number) => {
-    if (!Number.isFinite(t) || t <= 0) return;
+  const applyResume = (param: string, t: number) => {
+    if (param !== videoParam || !Number.isFinite(t) || t <= 0) return;
     const trySeek = () => {
+      if (param !== videoParam) return true;
       const d = player.duration();
       if (!Number.isFinite(d) || d <= 0) return false;
       if (t < d - 2) player.currentTime(t);
+      resumeSeek = null;
       return true;
     };
-    if (!trySeek()) player.one("loadedmetadata", trySeek);
+    if (trySeek()) return;
+
+    resumeSeek = trySeek;
+    player.one("loadedmetadata", trySeek);
   };
 
   // One-shot per episode: guards consumed on trigger, so seeking back into
@@ -162,6 +172,28 @@
     }
   }
 
+  // ffprobe sees every audio stream, but the picker can only switch what HLS
+  // actually shipped: the AV1 demuxed-CMAF master emits ONE #EXT-X-MEDIA
+  // rendition, so advertising the probe list there sells switches that don't
+  // exist. Re-runs on `addtrack` because the manifest is parsed after the
+  // probe call resolves.
+  function applyAudio() {
+    const atl = player?.audioTracks?.();
+    const n = atl?.length ?? 0;
+    if (n < 2 || audioInfo.length < 2) {
+      view.audio.setTracks([]);
+      return;
+    }
+
+    view.audio.setTracks(audioInfo);
+    for (let i = 0; i < n; i++) {
+      if (atl[i].enabled) {
+        view.audio.select(i);
+        break;
+      }
+    }
+  }
+
   async function loadEpisode(param: string, swap: boolean) {
     videoParam = param;
     document.title = `${title} | Notflix`;
@@ -176,6 +208,10 @@
 
     if (swap) {
       swapping = true;
+      if (resumeSeek) {
+        player.off("loadedmetadata", resumeSeek);
+        resumeSeek = null;
+      }
       const rt = player.remoteTextTracks();
       for (let i = rt.length - 1; i >= 0; i--)
         player.removeRemoteTextTrack(rt[i]);
@@ -183,6 +219,7 @@
       view.subs.markActive(null);
       view.subs.setResults(null);
       view.subs.close();
+      audioInfo = [];
       view.audio.setTracks([]);
       view.audio.select(0);
       view.audio.close();
@@ -197,7 +234,7 @@
     }
 
     refreshMeta();
-    watch.resume(param).then(applyResume);
+    watch.resume(param).then((t) => applyResume(param, t));
 
     if (isOffline) {
       const subUrl = `/subs/${sub}`;
@@ -242,17 +279,8 @@
         .info(param)
         .then((tracks: any) => {
           if (param !== videoParam) return;
-          if (Array.isArray(tracks) && tracks.length > 1) {
-            view.audio.setTracks(tracks);
-            const atl = player.audioTracks();
-            if (!atl) return;
-            for (let i = 0; i < atl.length; i++) {
-              if (atl[i].enabled) {
-                view.audio.select(i);
-                break;
-              }
-            }
-          }
+          audioInfo = Array.isArray(tracks) ? tracks : [];
+          applyAudio();
         })
         .catch((err: any) => console.warn("[audio info]", err));
     }
@@ -331,8 +359,6 @@
 
   function selectAudio(track: number) {
     const atl = player?.audioTracks();
-    const list = atl ? Array.from({ length: atl.length }, (_, i) => atl[i]) : [];
-    console.log("[selectAudio] track=", track, "atl.length=", atl?.length, "list=", list.map((t: any) => ({ label: t.label, lang: t.language, enabled: t.enabled })));
     if (!atl || atl.length === 0) {
       toast.err("Audio tracks not available (HLS not parsed yet?)");
       view.audio.close();
@@ -352,7 +378,7 @@
 
   function runWhisper() {
     if (view.subs.info?.whisper) {
-      const wsub = sub.replace(".vtt", ".whisper.vtt");
+      const wsub = sub.replace(/\.vtt$/, ".whisper.vtt");
       Subs.reload(player, `/subs/${wsub}`, "Whisper", true);
       return;
     }
@@ -370,7 +396,7 @@
         whisperStop = null;
         Subs.reload(
           player,
-          `/subs/${wsub.replace(".vtt", ".whisper.vtt")}`,
+          `/subs/${wsub.replace(/\.vtt$/, ".whisper.vtt")}`,
           "Whisper",
         );
         whisperCues = [];
@@ -378,7 +404,7 @@
     );
   }
 
-  onMount(async () => {
+  async function init() {
     let initSrc = masterSrc;
     let initType = "application/vnd.apple.mpegurl";
     if (videoParam.endsWith(".mp4") && isSupported()) {
@@ -389,6 +415,7 @@
         initType = "video/mp4";
       }
     }
+    if (dead) return;
 
     player = videojs(videoEl!, {
       controls: true,
@@ -407,13 +434,17 @@
       if (err) playerError = err.message || "Playback error";
     });
 
-    console.log("[Player] src=", initSrc, "type=", initType, "isOffline=", isOffline);
     player.src({ src: initSrc, type: initType });
 
-    player.on("loadedmetadata", () => {
-      const atl = player.audioTracks();
-      console.log("[Player] loadedmetadata audioTracks.length=", atl?.length ?? 0);
-    });
+    const atl = player.audioTracks?.();
+    if (atl?.addEventListener) {
+      atl.addEventListener("addtrack", applyAudio);
+      atl.addEventListener("removetrack", applyAudio);
+      cleanups.push(() => {
+        atl.removeEventListener("addtrack", applyAudio);
+        atl.removeEventListener("removetrack", applyAudio);
+      });
+    }
 
     ps.bind(player);
 
@@ -435,12 +466,18 @@
     player.ready(() => {
       if (autoplay) safePlay();
 
-      const savedRate = parseFloat(localStorage.getItem("speed") ?? "");
+      // localStorage throws outright in private mode / with site data blocked.
+      let savedRate = NaN;
+      try {
+        savedRate = parseFloat(localStorage.getItem("speed") ?? "");
+      } catch {}
       if (savedRate >= 0.25 && savedRate <= 4 && savedRate !== 1)
         player.playbackRate(savedRate);
-      player.on("ratechange", () =>
-        localStorage.setItem("speed", String(player.playbackRate() || 1)),
-      );
+      player.on("ratechange", () => {
+        try {
+          localStorage.setItem("speed", String(player.playbackRate() || 1));
+        } catch {}
+      });
 
       cleanups.push(Touch(player, pageEl!, toggleFullscreen));
       cleanups.push(
@@ -580,12 +617,21 @@
     cleanups.push(() => whisperStop?.());
 
     loadEpisode(videoParam, false);
+  }
+
+  // onMount must stay synchronous: Svelte only honours a returned FUNCTION,
+  // so an async callback's promise silently discards the teardown.
+  onMount(() => {
+    init().catch((err: any) => console.warn("[player init]", err));
 
     return () => {
+      dead = true;
       cleanups.forEach((fn) => fn());
+      cleanups = [];
       view.destroy();
       avSync?.destroy();
       player?.dispose();
+      player = null;
     };
   });
 </script>

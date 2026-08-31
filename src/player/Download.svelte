@@ -31,10 +31,10 @@
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let unsub: (() => void) | null = null;
 
-  async function init() {
+  async function init(vp: string) {
     if (!bgfetch) return;
-    const record = await Down.get(videoParam);
-    if (!record) return;
+    const record = await Down.get(vp);
+    if (!record || vp !== videoParam) return;
     state =
       record.status === "done"
         ? "done"
@@ -43,7 +43,9 @@
           : "downloading";
     if (state === "downloading" && record.bgFetchId) {
       pollTimer = setInterval(async () => {
-        progress = await Down.progress(record.bgFetchId!);
+        // Down.progress is NaN while BackgroundFetch has no downloadTotal yet.
+        const p = await Down.progress(record.bgFetchId!);
+        progress = Number.isFinite(p) ? p : 0;
       }, 500);
     }
   }
@@ -58,8 +60,23 @@
     progress = 0;
   }
 
+  // videoParam changes under this component during the in-place next-episode
+  // swap, so the offline state has to be re-read, not just read on mount.
+  $effect(() => {
+    const vp = videoParam;
+    state = "idle";
+    progress = 0;
+    init(vp);
+
+    return () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+  });
+
   onMount(() => {
-    init();
     unsub = Down.on((vp, record) => {
       if (vp !== videoParam) return;
       if (pollTimer) {

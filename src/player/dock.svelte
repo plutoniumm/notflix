@@ -37,42 +37,54 @@
     flipDir = $state(0);
   }
   const s = new Scrub();
-  let trackEl = $state<HTMLDivElement>();
+  // barEl IS the drawn bar: its box excludes the track's touch padding, so
+  // the fill width, the head offset and the click mapping share one basis.
+  let barEl = $state<HTMLDivElement>();
+  let dragged = false;
 
   const pct = $derived(ps.pct);
   const dur = $derived(ps.duration);
   const cur = $derived(ps.currentTime);
+  const headPct = $derived(
+    s.scrubbing && dur > 0 ? (s.hoverSec / dur) * 100 : pct,
+  );
 
-  function xToSec(clientX: number): number {
-    if (!trackEl || dur <= 0) return 0;
-    const rect = trackEl.getBoundingClientRect();
-    const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    return f * dur;
+  function track(e: MouseEvent): number {
+    if (!barEl || dur <= 0) return 0;
+    const r = barEl.getBoundingClientRect();
+    const x = Math.max(0, Math.min(r.width, e.clientX - r.left));
+    s.hoverX = x;
+    s.hoverSec = (x / r.width) * dur;
+
+    return s.hoverSec;
   }
 
   function onMove(e: MouseEvent) {
-    if (!trackEl) return;
     s.hovering = true;
-    const rect = trackEl.getBoundingClientRect();
-    s.hoverX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-    s.hoverSec = xToSec(e.clientX);
-    if (s.scrubbing) onSeek(s.hoverSec);
+    track(e);
   }
   function onLeave() {
     s.hovering = false;
   }
+
+  // Two seeks per drag (press + release). Seeking on every mousemove aborts
+  // and restarts the in-flight HLS segment fetch dozens of times a second.
   function onDown(e: MouseEvent) {
     s.scrubbing = true;
-    onSeek(xToSec(e.clientX));
+    dragged = false;
+    onSeek(track(e));
     window.addEventListener("mousemove", onWinMove);
     window.addEventListener("mouseup", onUp);
   }
   function onWinMove(e: MouseEvent) {
     if (!s.scrubbing) return;
-    onMove(e);
+    dragged = true;
+    track(e);
   }
   function onUp() {
+    if (dragged) onSeek(s.hoverSec);
     s.scrubbing = false;
+    dragged = false;
     window.removeEventListener("mousemove", onWinMove);
     window.removeEventListener("mouseup", onUp);
   }
@@ -92,9 +104,6 @@
   const tile = $derived(
     trickplay && s.hovering && dur > 0 ? trickplay(s.hoverSec) : "",
   );
-  const tipPct = $derived(
-    trackEl ? (s.hoverX / trackEl.getBoundingClientRect().width) * 100 : 0,
-  );
   const fmtSpeed = (n: number) => parseFloat(n.toFixed(2)).toString();
 </script>
 
@@ -102,29 +111,26 @@
   <div class="dock p-fix" class:hidden={ps.hideUI} style="--pct:{pct}%">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="track"
-      bind:this={trackEl}
+      class="track ptr"
       onmousemove={onMove}
       onmouseleave={onLeave}
       onmousedown={onDown}
     >
-      <div class="bar-bg"></div>
-      <div class="bar-fill" style="width:{pct}%"></div>
-      <div class="bar-head" style="left:{pct}%"></div>
+      <div class="bar" bind:this={barEl}>
+        <div class="bg"></div>
+        <div class="fill" style="width:{headPct}%"></div>
+        <div class="head" style="left:{headPct}%"></div>
 
-      {#if s.hovering}
-        <div class="scrub-line" style="left:{s.hoverX}px"></div>
-        <div
-          class="tip"
-          style="left:{tipPct}%"
-          class:withtile={!!tile}
-        >
-          {#if tile}
-            <div class="tile" style={tile}></div>
-          {/if}
-          <div class="tip-time">{fmtTime(s.hoverSec)}</div>
-        </div>
-      {/if}
+        {#if s.hovering}
+          <div class="scrub-line" style="left:{s.hoverX}px"></div>
+          <div class="tip" style="left:{s.hoverX}px" class:withtile={!!tile}>
+            {#if tile}
+              <div class="tile" style={tile}></div>
+            {/if}
+            <div class="tip-time">{fmtTime(s.hoverSec)}</div>
+          </div>
+        {/if}
+      </div>
     </div>
 
     <div class="row f al-ct g10 p20">
@@ -198,38 +204,40 @@
     position: relative;
     height: 18px;
     padding: 0 16px;
-    cursor: pointer;
     user-select: none;
   }
-  .bar-bg,
-  .bar-fill {
+  .bar {
+    position: absolute;
+    inset: 0 16px;
+  }
+  .bg,
+  .fill {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    left: 16px;
-    right: 16px;
+    left: 0;
     height: 3px;
     border-radius: 99px;
     transition: height 0.18s var(--ease-out);
   }
-  .bar-bg { background: rgba(255, 255, 255, 0.18); }
-  .bar-fill { background: var(--red); right: auto; }
-  .track:hover .bar-bg,
-  .track:hover .bar-fill { height: 6px; }
+  .bg { background: rgba(255, 255, 255, 0.18); right: 0; }
+  .fill { background: var(--red); }
+  .track:hover .bg,
+  .track:hover .fill { height: 6px; }
 
-  .bar-head {
+  .head {
     position: absolute;
     top: 50%;
     width: 12px;
     height: 12px;
     border-radius: 50%;
     background: var(--red);
-    transform: translate(calc(-50% + 16px), -50%);
+    transform: translate(-50%, -50%);
     opacity: 0;
     transition: opacity 0.18s var(--ease-out);
     box-shadow: 0 0 6px var(--red-glow);
   }
-  .track:hover .bar-head { opacity: 1; }
+  .track:hover .head { opacity: 1; }
 
   .scrub-line {
     position: absolute;

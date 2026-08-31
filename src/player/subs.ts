@@ -145,7 +145,7 @@ export default {
     }
 
     if (info.whisper) {
-      const wsub = sub.replace(".vtt", ".whisper.vtt");
+      const wsub = sub.replace(/\.vtt$/, ".whisper.vtt");
       this.reload(player, `/subs/${wsub}`, "Whisper", true);
     }
 

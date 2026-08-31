@@ -57,7 +57,9 @@
     }
     const el = videoEl();
     if (el) el.style.filter = f;
-    localStorage.setItem(FX_KEY, JSON.stringify($state.snapshot(fx)));
+    try {
+      localStorage.setItem(FX_KEY, JSON.stringify($state.snapshot(fx)));
+    } catch {}
   });
 
   function reset() {

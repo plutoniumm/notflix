@@ -26,7 +26,10 @@ const RES = /\b(4320p|2160p|1440p|1080p|720p|576p|480p|360p)\b|\b(4k|uhd)\b/i;
 // veto the match (e.g. "S01E10v2"); \d{1,3} still caps the episode digits.
 const SE = /\bS(\d{1,2})[ ._]?E(\d{1,3})(?!\d)/i;
 const SXE = /\b(\d{1,2})x(\d{2,3})(?!\d)/i;
-const SEASON = /\bS(?:eason)?[ ._-]?(\d{1,2})\b/i;
+// \b alone sits happily between an apostrophe and the s, so a possessive
+// before a number ("Ocean's 11") read as season 11 and folded unrelated films
+// into one fake show row. Reject a quote — real markers never follow one.
+const SEASON = /(?<!['‘’ʼ])\bS(?:eason)?[ ._-]?(\d{1,2})\b/i;
 // "4th Season", "2nd-season".
 const SEASON_ORD = /\b(\d{1,2})(?:st|nd|rd|th)[ ._-]?season\b/i;
 const EP = /\b(?:Episode|Ep|E)[ ._-]?(\d{1,3})(?!\d)/i;
