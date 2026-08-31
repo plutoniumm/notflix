@@ -36,7 +36,9 @@ async function request(
   const tag = opts.tag ?? `${method} ${url.split("?")[0]}`;
   try {
     const init: RequestInit = { method };
-    if (body !== undefined) {
+    if (body instanceof FormData) {
+      init.body = body;
+    } else if (body !== undefined) {
       init.headers = { "Content-Type": "application/json" };
       init.body = typeof body === "string" ? body : JSON.stringify(body);
     }
@@ -60,15 +62,23 @@ async function request(
 export const GET = (url: string, opts?: ReqOpts) => request("GET", url, undefined, opts);
 export const POST = (url: string, data: any, opts?: ReqOpts) => request("POST", url, data ?? {}, opts);
 export const DEL = (url: string, opts?: ReqOpts) => request("DELETE", url, undefined, opts);
+export const POSTForm = (url: string, form: FormData, opts?: ReqOpts) =>
+  request("POST", url, form, opts);
 
-export async function HEAD(url: string): Promise<boolean> {
+export async function head(url: string): Promise<{ ok: boolean; size: number }> {
   try {
     const r = await fetch(url, { method: "HEAD" });
-    return r.ok;
+
+    return {
+      ok: r.ok,
+      size: parseInt(r.headers.get("Content-Length") ?? "0", 10) || 0,
+    };
   } catch {
-    return false;
+    return { ok: false, size: 0 };
   }
 }
+
+export const HEAD = async (url: string) => (await head(url)).ok;
 
 const E = encodeURIComponent;
 
@@ -131,6 +141,13 @@ export const api = {
     list: (opts?: ReqOpts) => GET("/api/aria2/list", opts),
     add: (magnet: string, dir: string, opts?: ReqOpts) =>
       POST("/api/aria2/add", { magnet, dir }, opts),
+    addTorrent: (file: File, dir: string, opts?: ReqOpts) => {
+      const form = new FormData();
+      form.append("torrent", file);
+      form.append("dir", dir);
+
+      return POSTForm("/api/aria2/add-torrent", form, opts);
+    },
     pause: (gid: string, opts?: ReqOpts) => POST(`/api/aria2/pause?gid=${gid}`, {}, opts),
     resume: (gid: string, opts?: ReqOpts) => POST(`/api/aria2/resume?gid=${gid}`, {}, opts),
     remove: (gid: string, opts?: ReqOpts) => DEL(`/api/aria2/remove?gid=${gid}`, opts),

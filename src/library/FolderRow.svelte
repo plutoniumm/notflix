@@ -1,5 +1,6 @@
 <script lang="ts">
   import { clean } from "../core/video";
+  import { bytes, pct } from "../core/fmt";
   import FileRow from "./FileRow.svelte";
 
   type FileEntry = { name: string; root: string; corrupt?: boolean };
@@ -20,7 +21,6 @@
     diskTotal = 0,
     hidden = false,
     onToggleHidden,
-    fmtBytes,
   }: {
     dir: string;
     files: FileEntry[];
@@ -37,10 +37,9 @@
     diskTotal?: number;
     hidden?: boolean;
     onToggleHidden?: () => void;
-    fmtBytes?: (b: number) => string;
   } = $props();
 
-  const pct = $derived(diskTotal > 0 ? (sizeBytes / diskTotal) * 100 : 0);
+  const share = $derived(diskTotal > 0 ? (sizeBytes / diskTotal) * 100 : 0);
 
   const converting = $derived(
     jobs.some((j) => files.some((f) => f.name === j.name)),
@@ -92,8 +91,8 @@
         >
       {/if}
       <span class="fs-sm tx-1 sh-0" style="margin-left:auto">
-        {#if sizeBytes > 0 && fmtBytes}
-          {fmtBytes(sizeBytes)} · {pct.toFixed(1)}% of disk ·
+        {#if sizeBytes > 0}
+          {bytes(sizeBytes)} · {pct(share, 1)} of disk ·
         {/if}
         {files.length} files
       </span>

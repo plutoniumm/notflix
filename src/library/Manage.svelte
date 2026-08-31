@@ -7,6 +7,7 @@
   import { usePoll } from "../core/poll";
   import { Down, isSupported } from "./dl";
   import { clean } from "../core/video";
+  import { join } from "../core/path";
 
   import Header from "./Header.svelte";
   import Magnet from "./Magnet.svelte";
@@ -14,7 +15,7 @@
   import FolderRow from "./FolderRow.svelte";
   import Organize from "./Organize.svelte";
   import ProgressBar from "../components/ProgressBar.svelte";
-  import ProcessStatus from "./ProcessStatus.svelte";
+  import ProcessStatusPanel from "./ProcessStatus.svelte";
 
   declare const __BUILD_TIME__: string;
   const frontendBuild = __BUILD_TIME__;
@@ -158,12 +159,6 @@
     if (d) data = d;
   }
 
-  function fmtBytes(b: number): string {
-    if (b >= 1e12) return (b / 1e12).toFixed(1) + " TB";
-    if (b >= 1e9) return (b / 1e9).toFixed(1) + " GB";
-    return (b / 1e6).toFixed(0) + " MB";
-  }
-
   function startEdit(path: string, name: string) {
     editing = path;
     val = name;
@@ -192,7 +187,7 @@
   }
 
   async function delFile(dir: string, f: string) {
-    const rel = dir === "." ? f : `${dir}/${f}`;
+    const rel = join(dir, f);
     const res = await api.deleteVideo(rel);
     if (res === null) {
       toast.err(`Delete failed: ${rel}`);
@@ -220,23 +215,9 @@
   }
 
   async function addTorrentFile(file: File, dir: string) {
-    try {
-      const form = new FormData();
-      form.append("torrent", file);
-      form.append("dir", dir);
-      const r = await fetch("/api/aria2/add-torrent", {
-        method: "POST",
-        body: form,
-      });
-      if (!r.ok) {
-        const text = await r.text().catch(() => "");
-        toast.err(`Torrent upload failed: HTTP ${r.status} ${text.slice(0, 80)}`);
-        return;
-      }
-      toast.ok(`Torrent uploaded: ${file.name}`);
-    } catch (err: any) {
-      toast.err(`Torrent upload failed: ${err?.message ?? err}`);
-    }
+    const res = await api.aria2.addTorrent(file, dir, { tag: "Torrent upload" });
+    if (res === null) return;
+    toast.ok(`Torrent uploaded: ${file.name}`);
   }
 
   async function removeDownload(gid: string) {
@@ -298,19 +279,13 @@
     {rows}
     {total}
     {disks}
-    {fmtBytes}
     processing={processingLib}
     onProcess={processLibrary}
   />
-  <Magnet
-    {disks}
-    {fmtBytes}
-    onAdd={addDownload}
-    onAddTorrent={addTorrentFile}
-  />
+  <Magnet {disks} onAdd={addDownload} onAddTorrent={addTorrentFile} />
 
   <main>
-    <ProcessStatus status={procStatus} {jobs} />
+    <ProcessStatusPanel status={procStatus} {jobs} />
 
     {#if corruptFiles.length > 0}
       <section class="corrupt surface flow-h">
@@ -344,7 +319,6 @@
 
     <Downloads
       jobs={dlJobs}
-      {fmtBytes}
       onRemove={removeDownload}
       onPause={pauseDownload}
       onResume={resumeDownload}
@@ -392,7 +366,6 @@
           diskTotal={disk?.total ?? 0}
           hidden={hiddenSet.has(dir)}
           onToggleHidden={() => toggleHidden(dir)}
-          {fmtBytes}
         />
       {/each}
     {/if}

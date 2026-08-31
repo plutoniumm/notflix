@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { clean, vidURL } from "../core/video";
+  import { join } from "../core/path";
+  import { local } from "../core/store";
+  import MediaCard from "../components/MediaCard.svelte";
+  import ScrollRow from "../components/ScrollRow.svelte";
   import type { SeasonEntry, ContinueItem } from "./homeData.svelte";
 
   let {
@@ -18,13 +21,14 @@
 
   let picked = $state<string | null>(null);
 
-  function stored(): { dir: string; at: number } | null {
-    try {
-      const s = JSON.parse(localStorage.getItem(`season:${key}`) ?? "null");
-      return s?.dir ? s : null;
-    } catch {
-      return null;
-    }
+  const seen = $derived(
+    local<{ dir: string; at: number } | null>(`season:${key}`, null),
+  );
+
+  function stored() {
+    const s = seen.get();
+
+    return s?.dir ? s : null;
   }
 
   // Freshest signal wins: an explicit pill click this session, else the most
@@ -47,15 +51,11 @@
 
   function pick(dir: string) {
     picked = dir;
-    localStorage.setItem(`season:${key}`, JSON.stringify({ dir, at: Date.now() }));
+    seen.set({ dir, at: Date.now() });
   }
 
   const short = (label: string) =>
     label.replace(/^Season /, "S").replace(/^Ep /, "");
-
-  function scrollRow(el: HTMLElement, dir: number) {
-    el.scrollBy({ left: dir * 400, behavior: "smooth" });
-  }
 </script>
 
 <section class="row">
@@ -76,58 +76,21 @@
     </div>
   </div>
 
-  <div class="scroll-row f al-ct p-rel">
-    <button
-      class="scroll-arrow cc h-100 p0 left"
-      onclick={(e) => {
-        const el: any = e.currentTarget.nextElementSibling;
-        scrollRow(el, -1);
-      }}>‹</button
-    >
-
+  <ScrollRow>
     {#key season.dir}
       <div class="cards flow-x-s g5 f">
-        {#each season.files as f, idx}
-          {@const vidParam = `${season.dir}/${f.name}`}
-          <a
-            href={vidURL(season.dir, f.name)}
-            class="media-card ptr flow-h p-rel"
-            style="--i: {idx}"
-          >
-            <div class="thumb p-rel flow-h">
-              <img
-                class="h-100 w-100 d-b"
-                src="/images/{f.key}.jpg"
-                alt=""
-                loading="lazy"
-                onerror={(e) => {
-                  const i = e.currentTarget as HTMLImageElement;
-                  i.src = "/assets/tight.svg";
-                  i.onerror = null;
-                }}
-              />
-              <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
-              {#if downloadedSet.has(vidParam)}
-                <div class="dot p-abs"></div>
-              {/if}
-            </div>
-
-            <div class="card-name">
-              {clean(f.name)}
-            </div>
-          </a>
+        {#each season.files as f, idx (f.name)}
+          <MediaCard
+            dir={season.dir}
+            name={f.name}
+            key={f.key}
+            {idx}
+            downloaded={downloadedSet.has(join(season.dir, f.name))}
+          />
         {/each}
       </div>
     {/key}
-
-    <button
-      class="scroll-arrow cc h-100 p0 right"
-      onclick={(e) => {
-        const el: any = e.currentTarget.previousElementSibling;
-        scrollRow(el, 1);
-      }}>›</button
-    >
-  </div>
+  </ScrollRow>
 </section>
 
 <style>

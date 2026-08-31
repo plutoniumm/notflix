@@ -1,12 +1,12 @@
 <script lang="ts">
+  import { bytes } from "../core/fmt";
+
   let {
     disks,
-    fmtBytes,
     onAdd,
     onAddTorrent,
   }: {
     disks: DiskInfo[];
-    fmtBytes: (b: number) => string;
     onAdd: (magnet: string, dir: string) => void;
     onAddTorrent: (file: File, dir: string) => void;
   } = $props();
@@ -55,7 +55,7 @@
   <select class="field" bind:value={dir}>
     {#each disks as d}
       <option value={d.path}>
-        {d.root} ({fmtBytes(d.free)} free)
+        {d.root} ({bytes(d.free)} free)
       </option>
     {/each}
   </select>

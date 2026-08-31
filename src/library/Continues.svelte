@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { clean, vidURL } from "../core/video";
-  import { fmtAgo } from "../core/events.svelte";
+  import { ago, durWords } from "../core/fmt";
+  import { join } from "../core/path";
+  import MediaCard from "../components/MediaCard.svelte";
+  import ScrollRow from "../components/ScrollRow.svelte";
 
   type Item = { dir: string; name: string; key: string; t: number; at: number };
 
@@ -13,68 +15,40 @@
     downloadedSet: Set<string>;
     onRemove: (e: Event, dir: string, name: string) => void;
   } = $props();
-
-  function scrollSibling(e: Event, dir: number) {
-    const btn = e.currentTarget as HTMLElement;
-    const el = (dir < 0 ? btn.nextElementSibling : btn.previousElementSibling) as HTMLElement | null;
-    el?.scrollBy({ left: dir * 400, behavior: "smooth" });
-  }
-
-  function fmt(t: number) {
-    const h = Math.floor(t / 3600);
-    return h > 0 ? `${h}h ${Math.floor((t % 3600) / 60)}m` : `${Math.floor(t / 60)}m`;
-  }
-
-  function vidParam(item: Item) {
-    return item.dir === "." ? item.name : `${item.dir}/${item.name}`;
-  }
 </script>
 
 {#if items.length > 0}
   <section class="row">
     <h2>Continue Watching</h2>
-    <div class="scroll-row f al-ct p-rel">
-      <button class="scroll-arrow cc h-100 p0 left" onclick={(e) => scrollSibling(e, -1)}>‹</button>
+    <ScrollRow>
       <div class="cards f flow-x-s g5">
-        {#each items as item, idx}
-          <a
-            href={vidURL(item.dir, item.name)}
-            class="media-card ptr flow-h p-rel"
-            style="--i: {idx}"
+        {#each items as item, idx (join(item.dir, item.name))}
+          <MediaCard
+            dir={item.dir}
+            name={item.name}
+            key={item.key}
+            {idx}
+            downloaded={downloadedSet.has(join(item.dir, item.name))}
           >
-            <div class="thumb p-rel flow-h">
-              <img
-                class="h-100 w-100 d-b"
-                src="/images/{item.key}.jpg"
-                alt=""
-                loading="lazy"
-                onerror={(e) => {
-                  const i = e.currentTarget as HTMLImageElement;
-                  i.src = "/assets/tight.svg";
-                  i.onerror = null;
-                }}
-              />
-              <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
-              {#if downloadedSet.has(vidParam(item))}
-                <div class="dot p-abs"></div>
-              {/if}
+            {#snippet overlay()}
               <!-- svelte-ignore a11y_consider_explicit_label -->
               <button
                 class="cw-remove p-abs cc o-0 ptr"
                 onclick={(e) => onRemove(e, item.dir, item.name)}>✕</button
               >
               <div class="cw-bar p-abs"></div>
-            </div>
-            <div class="card-name">{clean(item.name)}</div>
-            <div class="cw-time fs-xs f al-ct j-bw g5">
-              <span>{fmt(item.t)}</span>
-              <span class="cw-ago">{fmtAgo(item.at)}</span>
-            </div>
-          </a>
+            {/snippet}
+
+            {#snippet footer()}
+              <div class="cw-time fs-xs f al-ct j-bw g5">
+                <span>{durWords(item.t)}</span>
+                <span class="cw-ago">{ago(item.at)}</span>
+              </div>
+            {/snippet}
+          </MediaCard>
         {/each}
       </div>
-      <button class="scroll-arrow cc h-100 p0 right" onclick={(e) => scrollSibling(e, 1)}>›</button>
-    </div>
+    </ScrollRow>
   </section>
 {/if}
 

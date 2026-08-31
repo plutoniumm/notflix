@@ -1,5 +1,6 @@
 <script lang="ts">
   import { clean } from "../core/video";
+  import { join } from "../core/path";
 
   let {
     dir,
@@ -15,7 +16,7 @@
     onDelete,
   }: any = $props();
 
-  const fpath = $derived(dir === "." ? f : `${dir}/${f}`);
+  const fpath = $derived(join(dir, f));
 
   function icon(name: string) {
     const ext = name.split(".").pop()?.toLowerCase();

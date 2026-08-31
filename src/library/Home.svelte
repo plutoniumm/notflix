@@ -1,12 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "../core/api";
-  import { clean, vidURL } from "../core/video";
+  import { clean } from "../core/video";
+  import { ago, bytes } from "../core/fmt";
+  import { join } from "../core/path";
+  import { local } from "../core/store";
   import { toast } from "../core/toast.svelte";
   import { HomeData } from "./homeData.svelte";
   import { parseName, epTag, type Parsed } from "./torrentName";
   import Continues from "./Continues.svelte";
   import ShowRow from "./ShowRow.svelte";
+  import MediaCard from "../components/MediaCard.svelte";
+  import ScrollRow from "../components/ScrollRow.svelte";
   import ProgressBar from "../components/ProgressBar.svelte";
   import EmptyState from "../components/EmptyState.svelte";
   import Icon from "../components/Icon.svelte";
@@ -18,24 +23,16 @@
   let search = $state("");
   let swUpdate = $state<ServiceWorkerRegistration | null>(null);
 
-  const HIST_KEY = "searches";
-  let history = $state<string[]>(loadHistory());
+  const searches = local<string[]>("searches", []);
+  const saved = searches.get();
+  let history = $state<string[]>(
+    Array.isArray(saved) ? saved.filter((s) => typeof s === "string").slice(0, 5) : [],
+  );
   let searchFocus = $state(false);
-
-  function loadHistory(): string[] {
-    try {
-      const h = JSON.parse(localStorage.getItem(HIST_KEY) ?? "[]");
-      return Array.isArray(h)
-        ? h.filter((s) => typeof s === "string").slice(0, 5)
-        : [];
-    } catch {
-      return [];
-    }
-  }
 
   function remember(term: string) {
     history = [term, ...history.filter((s) => s !== term)].slice(0, 5);
-    localStorage.setItem(HIST_KEY, JSON.stringify($state.snapshot(history)));
+    searches.set($state.snapshot(history));
   }
 
   const recent = $derived.by(() => {
@@ -177,25 +174,6 @@
   function applyUpdate() {
     swUpdate?.waiting?.postMessage({ type: "SKIP_WAITING" });
   }
-
-  function scrollRow(el: HTMLElement, dir: number) {
-    el.scrollBy({ left: dir * 400, behavior: "smooth" });
-  }
-
-  function fmtBytes(b: number): string {
-    if (b >= 1e12) return (b / 1e12).toFixed(1) + " TB";
-    if (b >= 1e9) return (b / 1e9).toFixed(1) + " GB";
-    return (b / 1e6).toFixed(0) + " MB";
-  }
-
-  function ago(ts: number): string {
-    const s = Date.now() / 1000 - ts;
-    if (s < 3600) return Math.max(1, Math.floor(s / 60)) + "m";
-    if (s < 86400) return Math.floor(s / 3600) + "h";
-    if (s < 2592000) return Math.floor(s / 86400) + "d";
-    if (s < 31536000) return Math.floor(s / 2592000) + "mo";
-    return Math.floor(s / 31536000) + "y";
-  }
 </script>
 
 <div style="min-height: 100vh;">
@@ -240,7 +218,7 @@
     {#if torrentMode && home.disks.length > 0}
       <select class="field sh-0" bind:value={dlDir} title="Download target disk">
         {#each home.disks as d}
-          <option value={d.path}>{d.root} ({fmtBytes(d.free)} free)</option>
+          <option value={d.path}>{d.root} ({bytes(d.free)} free)</option>
         {/each}
       </select>
     {/if}
@@ -336,11 +314,11 @@
                   {#if p.source}<span class="src fs-xs tx-1">{p.source}</span
                     >{/if}
                 </td>
-                <td class="num">{fmtBytes(t.size)}</td>
+                <td class="num">{bytes(t.size)}</td>
                 <td class="num seed">{t.seeders}</td>
                 <td class="num tx-1">{t.leechers}</td>
                 <td class="num tx-1">{t.files || "—"}</td>
-                <td class="num tx-1">{ago(t.added)}</td>
+                <td class="num tx-1">{t.added ? ago(t.added * 1000) : "—"}</td>
                 <td class="num">
                   <button
                     class="add ptr fs-xs"
@@ -372,41 +350,22 @@
       </div>
 
       <div class="grid">
-        {#each localResults as item, idx (item.dir + "/" + item.name)}
-          {@const vidParam =
-            item.dir === "." ? item.name : `${item.dir}/${item.name}`}
-          <a
-            href={vidURL(item.dir, item.name)}
-            class="media-card ptr flow-h p-rel"
-            style="--i: {idx}"
+        {#each localResults as item, idx (join(item.dir, item.name))}
+          <MediaCard
+            dir={item.dir}
+            name={item.name}
+            key={item.key}
+            {idx}
+            downloaded={home.downloadedSet.has(join(item.dir, item.name))}
           >
-            <div class="thumb p-rel flow-h">
-              <img
-                class="h-100 w-100 d-b"
-                src="/images/{item.key}.jpg"
-                alt=""
-                loading="lazy"
-                onerror={(e) => {
-                  const i = e.currentTarget as HTMLImageElement;
-                  i.src = "/assets/tight.svg";
-                  i.onerror = null;
-                }}
-              />
-              <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
-              {#if home.downloadedSet.has(vidParam)}
-                <div class="dot p-abs"></div>
+            {#snippet footer()}
+              {#if item.dir !== "."}
+                <div class="card-dir fs-xs">
+                  {item.dir}
+                </div>
               {/if}
-            </div>
-
-            <div class="card-name">
-              {clean(item.name)}
-            </div>
-            {#if item.dir !== "."}
-              <div class="card-dir fs-xs">
-                {item.dir}
-              </div>
-            {/if}
-          </a>
+            {/snippet}
+          </MediaCard>
         {/each}
 
         {#if localResults.length === 0}
@@ -454,58 +413,19 @@
               {dir === "." ? "Movies" : clean(dir) || dir}
             </h2>
 
-            <div class="scroll-row f al-ct p-rel">
-              <button
-                class="scroll-arrow cc h-100 p0 left"
-                onclick={(e) => {
-                  const el: any = e.currentTarget.nextElementSibling;
-                  scrollRow(el, -1);
-                }}>‹</button
-              >
-
-              <div
-                class="cards flow-x-s g5 {dir === '.' ? 'multi' : 'f'}"
-              >
-                {#each files as f, idx}
-                  {@const vidParam = dir === "." ? f.name : `${dir}/${f.name}`}
-                  <a
-                    href={vidURL(dir, f.name)}
-                    class="media-card ptr flow-h p-rel"
-                    style="--i: {idx}"
-                  >
-                    <div class="thumb p-rel flow-h">
-                      <img
-                        class="h-100 w-100 d-b"
-                        src="/images/{f.key}.jpg"
-                        alt=""
-                        loading="lazy"
-                        onerror={(e) => {
-                          const i = e.currentTarget as HTMLImageElement;
-                          i.src = "/assets/tight.svg";
-                          i.onerror = null;
-                        }}
-                      />
-                      <div class="play-icon p-abs cc o-0 fs-lg">▶</div>
-                      {#if home.downloadedSet.has(vidParam)}
-                        <div class="dot p-abs"></div>
-                      {/if}
-                    </div>
-
-                    <div class="card-name">
-                      {clean(f.name)}
-                    </div>
-                  </a>
+            <ScrollRow>
+              <div class="cards flow-x-s g5 {dir === '.' ? 'multi' : 'f'}">
+                {#each files as f, idx (f.name)}
+                  <MediaCard
+                    {dir}
+                    name={f.name}
+                    key={f.key}
+                    {idx}
+                    downloaded={home.downloadedSet.has(join(dir, f.name))}
+                  />
                 {/each}
               </div>
-
-              <button
-                class="scroll-arrow cc h-100 p0 right"
-                onclick={(e) => {
-                  const el: any = e.currentTarget.previousElementSibling;
-                  scrollRow(el, 1);
-                }}>›</button
-              >
-            </div>
+            </ScrollRow>
           </section>
         {/if}
       {/each}

@@ -1,6 +1,9 @@
 <script lang="ts">
   import ProgressBar from "../components/ProgressBar.svelte";
   import { clean } from "../core/video";
+  import { durWords, pct } from "../core/fmt";
+  import { TICK_MS } from "../core/events.svelte";
+  import { usePoll } from "../core/poll";
 
   let {
     status,
@@ -26,30 +29,24 @@
     done: "✓",
   };
 
-  function fmtElapsed(ms: number): string {
-    if (ms < 1000) return "<1s";
-    const s = Math.floor(ms / 1000);
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    const rem = s % 60;
-    return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
-  }
+  const elapsed = (ms: number) => (ms < 1000 ? "<1s" : durWords(ms / 1000));
 
   function phaseElapsed(p: PhaseInfo, now: number): string {
     if (!p.startedAt) return "";
-    const end = p.endedAt ?? now;
-    return fmtElapsed(end - p.startedAt);
+
+    return elapsed((p.endedAt ?? now) - p.startedAt);
   }
 
   let now = $state(Date.now());
-  $effect(() => {
-    const t = setInterval(() => (now = Date.now()), 1000);
-    return () => clearInterval(t);
-  });
+  $effect(() =>
+    usePoll(() => {
+      now = Date.now();
+    }, TICK_MS),
+  );
 
   let visible = $derived(status?.running || status?.phases?.some((p) => p.state !== "pending"));
   let totalElapsed = $derived(
-    status?.startedAt ? fmtElapsed((status.endedAt ?? now) - status.startedAt) : "",
+    status?.startedAt ? elapsed((status.endedAt ?? now) - status.startedAt) : "",
   );
 
   let convertActive = $derived(
@@ -112,7 +109,7 @@
             <div class="jb">
               <ProgressBar value={j.percent} variant="striped" label={false} />
             </div>
-            <span class="jp fs-xs tx-1 sh-0">{j.percent.toFixed(0)}%</span>
+            <span class="jp fs-xs tx-1 sh-0">{pct(j.percent)}</span>
           </div>
         {/each}
       </div>
@@ -146,7 +143,7 @@
   .jobs-hd { text-transform: uppercase; letter-spacing: 0.04em; }
   .job { padding: 4px 10px; }
   .jn { flex: 1; min-width: 0; }
-  .jb { width: 120px; sh-0: 0; }
+  .jb { width: 120px; flex-shrink: 0; }
   .jp { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 
   @keyframes pulse {

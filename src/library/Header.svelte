@@ -1,18 +1,17 @@
 <script lang="ts">
   import BackLink from "../components/BackLink.svelte";
+  import { bytes } from "../core/fmt";
 
   let {
     rows,
     total,
     disks,
-    fmtBytes,
     processing = false,
     onProcess,
   }: {
     rows: [string, { name: string; root: string }[]][];
     total: number;
     disks: DiskInfo[];
-    fmtBytes: (b: number) => string;
     processing?: boolean;
     onProcess?: () => void;
   } = $props();
@@ -39,7 +38,7 @@
             <div class="disk-fill h-100 rx2" style="width:{pct}%"></div>
           </div>
           <span class="fs-xs tx-1" style="white-space:nowrap">
-            {fmtBytes(d.free)} free
+            {bytes(d.free)} free
           </span>
         </div>
       {/each}

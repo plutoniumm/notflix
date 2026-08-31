@@ -1,4 +1,5 @@
 import { IDB } from "../core/idb";
+import { head } from "../core/api";
 import { toast } from "./../core/toast.svelte";
 
 const OFFLINE_CACHE = "notflix-offline-v1";
@@ -7,13 +8,24 @@ export function isSupported(): boolean {
   return "serviceWorker" in navigator && "BackgroundFetchManager" in self;
 }
 
-const db = new IDB("notflix-offline", 1, (idb) => {
-  if (!idb.objectStoreNames.contains("downloads"))
-    idb.createObjectStore("downloads", { keyPath: "videoParam" });
+let handle: IDB | null = null;
 
-  if (!idb.objectStoreNames.contains("bgfetch-map"))
-    idb.createObjectStore("bgfetch-map", { keyPath: "bgFetchId" });
-});
+// Opened on first use, never at module scope: `indexedDB` throws where site
+// data is blocked, and dl.ts is imported by both Home and Player — an eager
+// open takes the whole bundle down with a blank page. Absent DB = no
+// downloads, which is exactly true.
+function db(): IDB | null {
+  if (!handle && globalThis.indexedDB)
+    handle = new IDB("notflix-offline", 1, (idb) => {
+      if (!idb.objectStoreNames.contains("downloads"))
+        idb.createObjectStore("downloads", { keyPath: "videoParam" });
+
+      if (!idb.objectStoreNames.contains("bgfetch-map"))
+        idb.createObjectStore("bgfetch-map", { keyPath: "bgFetchId" });
+    });
+
+  return handle;
+}
 
 type UpdateCb = (videoParam: string, record: DownloadRecord | null) => void;
 
@@ -46,14 +58,29 @@ class Downloads {
   }
 
   async get(videoParam: string): Promise<DownloadRecord | null> {
-    return (await db.get<DownloadRecord>("downloads", videoParam)) ?? null;
+    const d = db();
+    if (!d) return null;
+
+    try {
+      return (await d.get<DownloadRecord>("downloads", videoParam)) ?? null;
+    } catch (err) {
+      console.warn("[Down.get]", videoParam, err);
+
+      return null;
+    }
   }
 
   async set(record: DownloadRecord): Promise<void> {
-    await db.set("downloads", record);
+    const d = db();
+    if (!d) return;
+
+    await d.set("downloads", record);
   }
 
   async del(videoParam: string): Promise<void> {
+    const d = db();
+    if (!d) return;
+
     const record = await this.get(videoParam);
 
     if (record?.bgFetchId && record.status === "downloading") {
@@ -67,14 +94,23 @@ class Downloads {
     await cache.delete(`/video/${videoParam}`);
     await cache.delete(`/subs/${videoParam.replace(/\.mp4$/i, ".vtt")}`);
 
-    await db.del("downloads", videoParam);
-    if (record?.bgFetchId) await db.del("bgfetch-map", record.bgFetchId);
+    await d.del("downloads", videoParam);
+    if (record?.bgFetchId) await d.del("bgfetch-map", record.bgFetchId);
 
     this.#emit(videoParam, null);
   }
 
   async all(): Promise<DownloadRecord[]> {
-    return db.all<DownloadRecord>("downloads");
+    const d = db();
+    if (!d) return [];
+
+    try {
+      return await d.all<DownloadRecord>("downloads");
+    } catch (err) {
+      console.warn("[Down.all]", err);
+
+      return [];
+    }
   }
 
   async recover(): Promise<void> {
@@ -95,7 +131,7 @@ class Downloads {
         const bgReg = await bgFetch.get(r.bgFetchId);
         if (!bgReg) {
           r.status = "error";
-          await db.set("downloads", r);
+          await this.set(r);
           this.#emit(r.videoParam, r);
           toast.err(`Download "${r.title}" was lost — please retry`);
         }
@@ -110,12 +146,9 @@ class Downloads {
       const reg = await navigator.serviceWorker.ready;
       const bgFetch = (reg as any).backgroundFetch;
 
-      const head = await fetch(`/video/${videoParam}`, { method: "HEAD" });
-      if (!head.ok) {
-        throw new Error(`HEAD /video/${videoParam} returned ${head.status}`);
-      }
-      const size = parseInt(head.headers.get("Content-Length") ?? "0", 10);
-      if (!size) {
+      const src = await head(`/video/${videoParam}`);
+      if (!src.ok) throw new Error(`HEAD /video/${videoParam} failed`);
+      if (!src.size) {
         console.warn("[Down.start] no Content-Length — downloading with unknown size");
       }
 
@@ -127,10 +160,13 @@ class Downloads {
         }
       }
 
+      const d = db();
+      if (!d) throw new Error("offline storage unavailable");
+
       const bgFetchId = `dl-${videoParam}`;
       const bgReg = await bgFetch.fetch(bgFetchId, `/video/${videoParam}`, {
         title,
-        downloadTotal: size || undefined,
+        downloadTotal: src.size || undefined,
         icons: [
           {
             src: "/assets/icon.svg",
@@ -143,13 +179,13 @@ class Downloads {
         videoParam,
         title,
         key,
-        size,
+        size: src.size,
         status: "downloading",
         downloadedAt: null,
         bgFetchId: bgReg.id,
       };
 
-      await db.tx(["downloads", "bgfetch-map"], "readwrite", (tx) => {
+      await d.tx(["downloads", "bgfetch-map"], "readwrite", (tx) => {
         tx.objectStore("downloads").put(record);
         tx.objectStore("bgfetch-map").put({
           bgFetchId: bgReg.id,

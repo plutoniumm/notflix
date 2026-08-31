@@ -1,7 +1,9 @@
 import { api } from "../core/api";
 import { kv } from "../core/kv";
 import { clean } from "../core/video";
+import { join } from "../core/path";
 import { JOBS_POLL_MS } from "../core/events.svelte";
+import { usePoll } from "../core/poll";
 import { Down } from "./dl";
 import { parseDirSeason } from "./torrentName";
 
@@ -176,12 +178,14 @@ export class HomeData {
 
     // Surface active ffmpeg conversions (the user-useful progress) on the
     // default screen — same poll cadence as Manage.
-    const pollJobs = async () => {
-      const j = await api.conversions({ silent: true });
-      this.conversions = Array.isArray(j) ? j : [];
-    };
-    pollJobs();
-    const jobsTimer = setInterval(pollJobs, JOBS_POLL_MS);
+    const stopJobs = usePoll(
+      async () => {
+        const j = await api.conversions({ silent: true });
+        this.conversions = Array.isArray(j) ? j : [];
+      },
+      JOBS_POLL_MS,
+      { immediate: true },
+    );
 
     const unsubSW = Down.on((videoParam, record) => {
       const next = new Set(this.downloadedSet);
@@ -201,14 +205,14 @@ export class HomeData {
     });
 
     return () => {
-      clearInterval(jobsTimer);
+      stopJobs();
       unsubSW();
     };
   }
 
   // Remove an item from Continue Watching (server + local).
   removeContinue(dir: string, name: string) {
-    const param = dir === "." ? name : `${dir}/${name}`;
+    const param = join(dir, name);
     kv.set(`watched:${param}`, null);
     this.continues = this.continues.filter(
       (c) => !(c.dir === dir && c.name === name),
@@ -244,7 +248,7 @@ export class HomeData {
     const allParams: { dir: string; name: string; key: string; param: string }[] = [];
     for (const g of d) {
       for (const f of g.files ?? []) {
-        const param = g.dir === "." ? f.name : `${g.dir}/${f.name}`;
+        const param = join(g.dir, f.name);
         allParams.push({ dir: g.dir, name: f.name, key: f.key, param });
       }
     }
