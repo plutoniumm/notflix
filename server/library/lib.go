@@ -43,9 +43,15 @@ func (l *Library) FindRoot(name string) (root, abs string, ok bool) {
 		return "", "", false
 	}
 
-	rel := strings.TrimPrefix(name, "/")
 	for _, r := range l.Roots {
-		if strings.HasPrefix(abs, r) || strings.HasPrefix(abs, filepath.Join(r, rel)) {
+		absR, err := filepath.Abs(r)
+		if err != nil {
+			continue
+		}
+
+		// The trailing separator is load-bearing: a bare prefix test reads
+		// /Volumes/AomineEvil as living inside root /Volumes/Aomine.
+		if abs == absR || strings.HasPrefix(abs, absR+string(filepath.Separator)) {
 			return r, abs, true
 		}
 	}

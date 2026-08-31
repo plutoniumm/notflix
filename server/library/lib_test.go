@@ -45,3 +45,28 @@ func TestAllVideos_WalksFullDepth(t *testing.T) {
 		t.Fatalf("AllVideos = %v, want %v", got, want)
 	}
 }
+
+// A sibling whose name merely extends a root's ("/Volumes/AomineEvil" vs
+// root "/Volumes/Aomine") is not inside that root — a bare prefix test says
+// it is, and FindRoot then hands callers the wrong root for the path.
+func TestFindRoot_SiblingRootIsNotContained(t *testing.T) {
+	base := t.TempDir()
+	aomine := filepath.Join(base, "Aomine")
+	evil := filepath.Join(base, "AomineEvil")
+	os.MkdirAll(aomine, 0755)
+	os.MkdirAll(evil, 0755)
+	os.WriteFile(filepath.Join(evil, "movie.mp4"), []byte("x"), 0644)
+
+	lib := &Library{Roots: []string{aomine, evil}}
+
+	root, abs, ok := lib.FindRoot("movie.mp4")
+	if !ok {
+		t.Fatal("FindRoot did not find the file")
+	}
+	if root != evil {
+		t.Errorf("root = %q, want %q", root, evil)
+	}
+	if abs != filepath.Join(evil, "movie.mp4") {
+		t.Errorf("abs = %q, want %q", abs, filepath.Join(evil, "movie.mp4"))
+	}
+}
