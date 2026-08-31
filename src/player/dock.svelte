@@ -11,6 +11,7 @@
     onSpeedDown,
     onSpeedUp,
     onNext,
+    onPip,
     onFullscreen,
     trickplay,
   }: {
@@ -22,6 +23,7 @@
     onSpeedDown: () => void;
     onSpeedUp: () => void;
     onNext?: () => void;
+    onPip?: () => void;
     onFullscreen: () => void;
     // Renderer for the trickplay preview tile. Receives the hovered
     // timestamp in seconds, returns inline CSS for a 160-wide tile (or
@@ -59,34 +61,35 @@
     return s.hoverSec;
   }
 
-  function onMove(e: MouseEvent) {
-    s.hovering = true;
-    track(e);
-  }
-  function onLeave() {
-    s.hovering = false;
-  }
-
-  // Two seeks per drag (press + release). Seeking on every mousemove aborts
-  // and restarts the in-flight HLS segment fetch dozens of times a second.
-  function onDown(e: MouseEvent) {
+  // Pointer events cover mouse and touch in one path; the mouse-only version
+  // left dragging dead on every touch device (a tap seeked via the synthesized
+  // compatibility click, a drag did nothing) and never showed the preview
+  // tile. Capture keeps the move stream on the track once the drag starts.
+  function onDown(e: PointerEvent) {
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     s.scrubbing = true;
+    s.hovering = true;
     dragged = false;
     onSeek(track(e));
-    window.addEventListener("mousemove", onWinMove);
-    window.addEventListener("mouseup", onUp);
   }
-  function onWinMove(e: MouseEvent) {
-    if (!s.scrubbing) return;
-    dragged = true;
+  function onMove(e: PointerEvent) {
+    s.hovering = true;
+    if (s.scrubbing) dragged = true;
     track(e);
   }
-  function onUp() {
+
+  // Two seeks per drag (press + release). Seeking on every move aborts and
+  // restarts the in-flight HLS segment fetch dozens of times a second.
+  function onUp(e: PointerEvent) {
+    if (!s.scrubbing) return;
     if (dragged) onSeek(s.hoverSec);
     s.scrubbing = false;
     dragged = false;
-    window.removeEventListener("mousemove", onWinMove);
-    window.removeEventListener("mouseup", onUp);
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    if (e.pointerType !== "mouse") s.hovering = false;
+  }
+  function onLeave() {
+    if (!s.scrubbing) s.hovering = false;
   }
 
   function speedWheel(e: WheelEvent) {
@@ -112,9 +115,11 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="track ptr"
-      onmousemove={onMove}
-      onmouseleave={onLeave}
-      onmousedown={onDown}
+      onpointerdown={onDown}
+      onpointermove={onMove}
+      onpointerup={onUp}
+      onpointercancel={onUp}
+      onpointerleave={onLeave}
     >
       <div class="bar" bind:this={barEl}>
         <div class="bg"></div>
@@ -169,6 +174,12 @@
         </button>
       {/if}
 
+      {#if onPip}
+        <button class="ctrl ptr cc" aria-label="Picture in picture" onclick={onPip}>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2" /><rect x="12" y="11" width="8" height="7" rx="1" fill="currentColor" /></svg>
+        </button>
+      {/if}
+
       <button class="ctrl ptr cc" aria-label="Fullscreen" onclick={onFullscreen}>
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
       </button>
@@ -182,6 +193,11 @@
     left: 0;
     right: 0;
     z-index: 10;
+    /* No padding of its own, so a bare env() is safe — and it insets the
+       scrub track too, which keeps the track box and its hit-test aligned. */
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
     background: linear-gradient(
       to top,
       rgba(7, 6, 10, 0.85) 0%,
@@ -205,6 +221,7 @@
     height: 18px;
     padding: 0 16px;
     user-select: none;
+    touch-action: none;
   }
   .bar {
     position: absolute;
@@ -276,6 +293,7 @@
 
   .ctrl {
     background: transparent;
+    touch-action: manipulation;
     color: var(--tx-4);
     border: none;
     border-radius: var(--r-md);

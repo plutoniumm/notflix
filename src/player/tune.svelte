@@ -28,6 +28,7 @@
   let {
     open,
     videoEl,
+    canSync = true,
     syncMs,
     onSync,
     speed,
@@ -36,6 +37,7 @@
   }: {
     open: boolean;
     videoEl: () => HTMLVideoElement | null;
+    canSync?: boolean;
     syncMs: number;
     onSync: (ms: number) => void;
     speed: number;
@@ -104,11 +106,13 @@
   {@render slider("Saturation", 0, 2, 0.01, fx.sat, (v) => (fx.sat = v), fx.sat.toFixed(2))}
   {@render slider("Gamma", 0.5, 2, 0.01, fx.gamma, (v) => (fx.gamma = v), fx.gamma.toFixed(2))}
 
-  <div class="sec fs-xs tx-1">audio</div>
-  {@render slider("Delay", 0, 2000, 25, syncMs, onSync, `+${syncMs}ms`)}
-  <div class="hint fs-xs tx-1">
-    browsers can only play audio later, not earlier
-  </div>
+  {#if canSync}
+    <div class="sec fs-xs tx-1">audio</div>
+    {@render slider("Delay", 0, 2000, 25, syncMs, onSync, `+${syncMs}ms`)}
+    <div class="hint fs-xs tx-1">
+      browsers can only play audio later, not earlier
+    </div>
+  {/if}
 
   <div class="sec fs-xs tx-1">playback</div>
   {@render slider("Speed", 0.25, 3, 0.05, speed, onSpeed, `${speed.toFixed(2)}×`)}

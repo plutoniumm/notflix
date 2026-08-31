@@ -48,19 +48,21 @@ export function Touch(
         ripple(el, x, touch.clientY, "+10s");
       } else {
         onFullscreen();
-        ripple(el, x, touch.clientY, document.fullscreenElement ? "⛶" : "⛶");
+        ripple(el, x, touch.clientY, "⛶");
       }
       last = 0;
     } else {
       last = now;
       prev = x;
-      if (x > w / 3 && x < (2 * w) / 3) {
-        if (tapTimer) clearTimeout(tapTimer);
-        tapTimer = setTimeout(() => {
-          tapTimer = null;
-          player.paused() ? safePlay(player) : player.pause();
-        }, 300);
-      }
+      // A single tap anywhere toggles playback. Gating this on the centre
+      // third left the outer two thirds inert, which reads as a dead player.
+      // The timer outlasts the 300ms double-tap window so a seek gesture in
+      // the outer thirds can never also toggle play.
+      if (tapTimer) clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => {
+        tapTimer = null;
+        player.paused() ? safePlay(player) : player.pause();
+      }, 320);
     }
   };
 
@@ -83,7 +85,7 @@ function ripple(el: HTMLElement, x: number, y: number, label: string) {
 
 export function Hotkeys(
   player: any,
-  container: HTMLElement,
+  onFullscreen: () => void,
   onNext: () => void,
   onWhisper: () => void,
   onSync: (deltaMs: number) => void,
@@ -118,9 +120,7 @@ export function Hotkeys(
       e.preventDefault();
       player.paused() ? safePlay(player) : player.pause();
     } else if (lkey === "f") {
-      document.fullscreenElement
-        ? document.exitFullscreen()
-        : container.requestFullscreen();
+      onFullscreen();
     } else if (lkey === "m") {
       player.muted(!player.muted());
     } else if (lkey === "d") {
@@ -142,11 +142,7 @@ export function Hotkeys(
     } else if (lkey === "v") {
       onTune();
     } else if (lkey === "p") {
-      if (document.pictureInPictureElement) {
-        document.exitPictureInPicture();
-      } else {
-        player.requestPictureInPicture?.();
-      }
+      togglePip(player);
     } else if (lkey === "b") {
       player.el()?.querySelector("video")?.classList.toggle("bright");
     } else if (lkey === "c") {
@@ -168,6 +164,45 @@ export function Hotkeys(
 
   document.addEventListener("keydown", handler);
   return () => document.removeEventListener("keydown", handler);
+}
+
+export function pipOk(player: any): boolean {
+  const v = vidEl(player);
+  if (!v) return false;
+
+  return !!(
+    (document.pictureInPictureEnabled && v.requestPictureInPicture) ||
+    v.webkitSupportsPresentationMode?.("picture-in-picture")
+  );
+}
+
+// WebKit has no requestPictureInPicture; Chrome rejects it outside a user
+// gesture, so this must only ever run from a hotkey or a button press.
+export function togglePip(player: any) {
+  const v = vidEl(player);
+  if (!v) return;
+
+  if (v.webkitSupportsPresentationMode?.("picture-in-picture")) {
+    const mode =
+      v.webkitPresentationMode === "picture-in-picture"
+        ? "inline"
+        : "picture-in-picture";
+    v.webkitSetPresentationMode(mode);
+    return;
+  }
+
+  if (document.pictureInPictureElement) {
+    document.exitPictureInPicture().catch(() => {});
+    return;
+  }
+
+  v.requestPictureInPicture?.().catch((err: any) => {
+    toast.err(`Picture-in-picture: ${err?.message ?? err}`);
+  });
+}
+
+function vidEl(player: any): any {
+  return player?.el()?.querySelector("video") ?? null;
 }
 
 function seek(player: any, n: number) {

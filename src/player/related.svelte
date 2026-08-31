@@ -21,10 +21,10 @@
     onmouseenter={() => (open = true)}
     onmouseleave={() => (open = false)}
   >
-    <div class="tab cc fw5 fs-xs">
+    <button class="tab cc fw5 fs-xs ptr" onclick={() => (open = !open)}>
       <span class="chev d-ib" class:rot={open}></span>
       <span class="label">UP NEXT</span>
-    </div>
+    </button>
 
     <div class="list flow-y-s f-col g10 p10">
       {#each files as f, i (f.key)}
@@ -48,7 +48,7 @@
   .rail {
     top: 64px;
     bottom: 96px;
-    left: 0;
+    left: env(safe-area-inset-left);
     z-index: 9;
     width: 36px;
     display: flex;
@@ -66,6 +66,11 @@
     animation: slide-r 0.3s var(--ease-out);
   }
   .rail.open { width: 220px; }
+  /* Hover-only affordance. On a phone the 36px strip can never be opened but
+     still swallows taps in the left edge — part of the back-10s zone. */
+  @media (hover: none) {
+    .rail { display: none; }
+  }
 
   .tab {
     flex-direction: column;
@@ -73,8 +78,11 @@
     width: 36px;
     color: var(--tx-3);
     padding: 14px 0;
+    background: transparent;
+    border: none;
     border-right: 1px solid var(--glass-bd);
     user-select: none;
+    touch-action: manipulation;
   }
   .chev {
     width: 6px;

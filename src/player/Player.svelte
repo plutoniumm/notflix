@@ -28,7 +28,7 @@
   import Subs from "./subs";
   import WatchProgress from "./watch";
   import { Down, isSupported } from "../library/dl";
-  import { Touch, Hotkeys } from "./ux";
+  import { Touch, Hotkeys, togglePip, pipOk } from "./ux";
   import { SAVE_INTERVAL_MS } from "../core/events.svelte";
   import { AVSync } from "./avsync";
   import { PlayerView } from "./view.svelte";
@@ -48,6 +48,7 @@
   const masterSrc = $derived(
     `/api/hls/master?file=${encodeURIComponent(videoParam)}`,
   );
+  const fileSrc = $derived(`/video/${videoParam}`);
   let autoplay =
     new URLSearchParams(window.location.search).get("autoplay") === "1";
   const embed = window.location.pathname === "/embed";
@@ -67,6 +68,7 @@
   let swapping = false;
   let dead = false;
   let whisperStop: (() => void) | null = null;
+  let fellBack = false;
   let resumeSeek: (() => boolean) | null = null;
   let audioInfo: any[] = [];
   let skipped = { intro: false, outro: false };
@@ -198,6 +200,7 @@
     videoParam = param;
     document.title = `${title} | Notflix`;
     playerError = "";
+    fellBack = false;
     introRange = null;
     outroRange = null;
     skipped = { intro: false, outro: false };
@@ -269,14 +272,14 @@
         .avoffset(param, { silent: true })
         .then((res: any) => {
           if (param !== videoParam) return;
-          if (res?.offset_ms > 0) {
-            ps.showSync(avSync!.set(res.offset_ms));
+          if (res?.offset_ms > 0 && avSync?.on) {
+            ps.showSync(avSync.set(res.offset_ms));
           }
         })
         .catch((err: any) => console.warn("[avoffset]", err));
 
       api.audio
-        .info(param)
+        .info(param, { silent: true })
         .then((tracks: any) => {
           if (param !== videoParam) return;
           audioInfo = Array.isArray(tracks) ? tracks : [];
@@ -286,18 +289,55 @@
     }
   }
 
-  function toggleFullscreen() {
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-      (screen.orientation as any)?.unlock?.();
-    } else {
-      pageEl?.requestFullscreen();
+  // iPhone Safari exposes no Fullscreen API on non-video ELEMENTS — neither
+  // requestFullscreen nor webkitRequestFullscreen exists there, and
+  // document.fullscreenElement is always undefined. Only the video itself can
+  // go fullscreen, at the cost of the custom chrome.
+  function isFull(): boolean {
+    return !!(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (videoEl as any)?.webkitDisplayingFullscreen
+    );
+  }
+
+  function enterFull() {
+    const el = pageEl as any;
+    const req = el?.requestFullscreen ?? el?.webkitRequestFullscreen;
+    if (req) {
+      req.call(el)?.catch?.(() => {});
       (screen.orientation as any)?.lock?.("landscape").catch(() => {});
+      return;
     }
+
+    const v = videoEl as any;
+    if (v?.webkitEnterFullscreen) v.webkitEnterFullscreen();
+    else v?.webkitSetPresentationMode?.("fullscreen");
+  }
+
+  function exitFull() {
+    const d = document as any;
+    if (d.fullscreenElement && d.exitFullscreen) {
+      d.exitFullscreen()?.catch?.(() => {});
+      (screen.orientation as any)?.unlock?.();
+      return;
+    }
+    if (d.webkitFullscreenElement && d.webkitExitFullscreen) {
+      d.webkitExitFullscreen();
+      return;
+    }
+
+    (videoEl as any)?.webkitExitFullscreen?.();
+  }
+
+  function toggleFullscreen() {
+    isFull() ? exitFull() : enterFull();
   }
 
   let whisperCues = $state<WhisperCue[]>([]);
   let tuneOpen = $state(false);
+  let canPip = $state(false);
+  let canSync = $state(false);
 
   let introRange = $state<[number, number] | null>(null);
   let outroRange = $state<[number, number] | null>(null);
@@ -411,7 +451,7 @@
       const record = await Down.get(videoParam);
       isOffline = record?.status === "done";
       if (isOffline) {
-        initSrc = `/video/${videoParam}`;
+        initSrc = fileSrc;
         initType = "video/mp4";
       }
     }
@@ -421,6 +461,7 @@
       controls: true,
       preload: "auto",
       fill: true,
+      playsinline: true,
       playbackRates: [0.5, 1, 1.25, 1.5, 2],
       html5: {
         vhs: {
@@ -429,9 +470,22 @@
       },
     });
 
+    // MEDIA_ERR_DECODE / MEDIA_ERR_SRC_NOT_SUPPORTED means the device can't
+    // play what HLS offered — most often an AV1 master on hardware with no AV1
+    // decoder. The stored file is served with byte ranges and faststart, so one
+    // retry there rescues the session instead of dead-ending on the overlay.
     player.on("error", () => {
       const err = player.error();
-      if (err) playerError = err.message || "Playback error";
+      if (!err) return;
+      if (!fellBack && !isOffline && (err.code === 3 || err.code === 4)) {
+        fellBack = true;
+        const at = player.currentTime() ?? 0;
+        player.src({ src: fileSrc, type: "video/mp4" });
+        if (at > 0) player.one("loadedmetadata", () => player.currentTime(at));
+        safePlay();
+        return;
+      }
+      playerError = err.message || "Playback error";
     });
 
     player.src({ src: initSrc, type: initType });
@@ -454,14 +508,14 @@
     });
 
     player.requestFullscreen = () => {
-      pageEl!.requestFullscreen();
+      enterFull();
       return player;
     };
     player.exitFullscreen = () => {
-      document.exitFullscreen();
+      exitFull();
       return player;
     };
-    player.isFullscreen = () => !!document.fullscreenElement;
+    player.isFullscreen = () => isFull();
 
     player.ready(() => {
       if (autoplay) safePlay();
@@ -483,7 +537,7 @@
       cleanups.push(
         Hotkeys(
           player,
-          pageEl!,
+          toggleFullscreen,
           goNext,
           () => {
             const tracks = player.textTracks();
@@ -498,8 +552,7 @@
             runWhisper();
           },
           (deltaMs) => {
-            const ms = avSync?.adjust(deltaMs) ?? 0;
-            ps.showSync(ms);
+            if (canSync) ps.showSync(avSync!.adjust(deltaMs));
           },
           () => {
             const which = activeSkip(
@@ -526,30 +579,31 @@
       player.on("pause", saveProgress);
       player.on("seeked", saveProgress);
 
+      // iOS Safari does not reliably fire beforeunload on app switch, screen
+      // lock, tab discard or PWA swipe-away, and the 2s loop stops saving the
+      // moment the page hides — so the last write has to happen on pagehide and
+      // on visibilitychange, over sendBeacon, which a suspending page keeps.
       const saveOnLeave = () => {
         watch.flushOnLeave(videoParam, player.currentTime() ?? 0, player.duration() ?? 0);
       };
-      window.addEventListener("beforeunload", saveOnLeave);
-
-      const onVisChange = () => {
-        const vid = player.tech_?.el_ as HTMLVideoElement | undefined;
-        if (!vid || player.paused()) return;
-        if (document.hidden) {
-          vid.requestPictureInPicture?.().catch(() => {});
-        } else if (document.pictureInPictureElement === vid) {
-          document.exitPictureInPicture().catch(() => {});
-        }
+      const onHide = () => {
+        if (document.visibilityState === "hidden") saveOnLeave();
       };
-      document.addEventListener("visibilitychange", onVisChange);
+      window.addEventListener("pagehide", saveOnLeave);
+      window.addEventListener("beforeunload", saveOnLeave);
+      document.addEventListener("visibilitychange", onHide);
 
       cleanups.push(() => {
         clearInterval(trackTimer);
+        window.removeEventListener("pagehide", saveOnLeave);
         window.removeEventListener("beforeunload", saveOnLeave);
-        document.removeEventListener("visibilitychange", onVisChange);
+        document.removeEventListener("visibilitychange", onHide);
       });
     });
 
     avSync = new AVSync().init(videoEl!);
+    canSync = avSync.on;
+    canPip = pipOk(player);
 
     if ("mediaSession" in navigator) {
       const ms = navigator.mediaSession;
@@ -596,7 +650,7 @@
     }
 
     api
-      .videoList()
+      .videoList({ silent: true })
       .then((data: any) => {
         if (!Array.isArray(data)) return;
         listData = data;
@@ -660,8 +714,11 @@
   />
 
   <div class="video-wrap p-abs">
+    <!-- Without playsinline iPhone Safari hijacks playback into the native
+         fullscreen player and every piece of custom chrome disappears. -->
     <video
       bind:this={videoEl}
+      playsinline
       class="video-js vjs-default-skin vjs-big-play-centered"
     ></video>
   </div>
@@ -697,6 +754,7 @@
         Math.min(4, Math.round((player.playbackRate() + 0.25) * 4) / 4),
       )}
     onNext={ps.nextURL ? goNext : undefined}
+    onPip={canPip ? () => togglePip(player) : undefined}
     onFullscreen={toggleFullscreen}
     trickplay={(sec) => sprite.tile(sec)}
   />
@@ -710,6 +768,7 @@
   <Tune
     open={tuneOpen}
     videoEl={() => videoEl ?? null}
+    {canSync}
     syncMs={ps.syncMs}
     onSync={(ms) => ps.showSync(avSync?.set(ms) ?? 0)}
     speed={ps.speed}
@@ -725,6 +784,10 @@
   .page {
     inset: 0;
     background: #000;
+    /* touch-action isn't inherited, but hit-testing walks up to the nearest
+       non-auto ancestor — so this kills double-tap zoom for the whole player
+       without a global rule. The scrub track opts out with `none`. */
+    touch-action: manipulation;
   }
   .page.hide-ui {
     cursor: none;

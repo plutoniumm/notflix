@@ -1,4 +1,5 @@
 import { kv } from "../core/kv";
+import { GET } from "../core/api";
 import { RESUME_THRESHOLD_S, END_CUTOFF_S } from "../core/events.svelte";
 
 // WatchProgress persists playback position to the server KV store as
@@ -59,7 +60,10 @@ export default class WatchProgress {
   // threshold. Caller seeks back RESUME_THRESHOLD_S for context.
   async resume(videoParam: string): Promise<number> {
     try {
-      const res: any = await kv.get("watched:" + videoParam);
+      // Raw GET rather than kv.get so a flaky mobile network doesn't red-toast
+      // over the video. Swap back once kv.get takes ReqOpts.
+      const key = encodeURIComponent("watched:" + videoParam);
+      const res: any = await GET(`/kv/get?key=${key}`, { silent: true });
       const t = res?.value?.t;
       return t > RESUME_THRESHOLD_S ? Math.max(0, t - RESUME_THRESHOLD_S) : 0;
     } catch (err) {
