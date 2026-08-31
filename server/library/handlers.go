@@ -240,6 +240,24 @@ func DirSizes(c *gin.Context, lib *Library) {
 	c.JSON(http.StatusOK, out)
 }
 
+// filepath.Glob reads "[" as a character class and Go ships no escaper, so
+// a bracketed release name ("Movie [2020] 1080p") silently matches nothing
+// and its language sidecars get orphaned. Scan the directory instead.
+func sideVtts(base string) []string {
+	dir, prefix := filepath.Split(base)
+	entries, _ := os.ReadDir(dir)
+
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, prefix+".") && strings.HasSuffix(name, ".vtt") {
+			out = append(out, filepath.Join(dir, name))
+		}
+	}
+
+	return out
+}
+
 func Rename(c *gin.Context, lib *Library) {
 	var body struct {
 		Path    string `json:"path"`
@@ -286,8 +304,7 @@ func Rename(c *gin.Context, lib *Library) {
 			}
 		}
 
-		matches, _ := filepath.Glob(base + ".*.vtt")
-		for _, old := range matches {
+		for _, old := range sideVtts(base) {
 			suffix := strings.TrimPrefix(old, base)
 			os.Rename(old, nbase+suffix)
 		}
@@ -348,8 +365,7 @@ func VideoDelete(c *gin.Context, lib *Library) {
 		DelFile(base + suf)
 	}
 
-	matches, _ := filepath.Glob(base + ".*.vtt")
-	for _, m := range matches {
+	for _, m := range sideVtts(base) {
 		DelFile(m)
 	}
 

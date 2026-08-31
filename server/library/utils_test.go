@@ -3,6 +3,7 @@ package library
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,6 +152,60 @@ func TestRename_ConflictKeepsBoth(t *testing.T) {
 	b, _ := os.ReadFile(dst)
 	if string(b) != "bbb" {
 		t.Errorf("destination overwritten: %q", b)
+	}
+}
+
+func TestVideoDelete_BracketName(t *testing.T) {
+	root := t.TempDir()
+	name := "Movie [2020] 1080p"
+
+	vid := touch(t, filepath.Join(root, name+".mp4"))
+	eng := touch(t, filepath.Join(root, name+".eng.vtt"))
+	en := touch(t, filepath.Join(root, name+".en.vtt"))
+	plain := touch(t, filepath.Join(root, name+".vtt"))
+	srt := touch(t, filepath.Join(root, name+".srt"))
+	keep := touch(t, filepath.Join(root, "Other [2021].eng.vtt"))
+
+	lib := &Library{Roots: []string{root}}
+	w := delReq(t, lib, "/video/"+url.PathEscape(name+".mp4"))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+
+	for _, p := range []string{vid, eng, en, plain, srt} {
+		if exists(p) {
+			t.Errorf("survived deletion: %s", filepath.Base(p))
+		}
+	}
+
+	if !exists(keep) {
+		t.Error("deleted an unrelated file's sidecar")
+	}
+}
+
+func TestRename_BracketSidecars(t *testing.T) {
+	root := t.TempDir()
+	name := "Movie [2020] 1080p"
+	touch(t, filepath.Join(root, name+".mp4"))
+	touch(t, filepath.Join(root, name+".eng.vtt"))
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	lib := &Library{Roots: []string{root}}
+	r.POST("/api/rename", func(c *gin.Context) { Rename(c, lib) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/rename", strings.NewReader(`{"path":"`+name+`.mp4","name":"Clean.mp4"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+
+	if !exists(filepath.Join(root, "Clean.eng.vtt")) {
+		t.Error("bracketed sidecar was left behind by the rename")
 	}
 }
 
