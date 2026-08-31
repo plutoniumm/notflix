@@ -148,9 +148,7 @@ func main() {
 	}
 	jobs.TailscaleInit() // warm the IP→identity cache + keep it warm in bg
 
-	library.IsTorrentBusy = func(p string) bool {
-		return jobs.Aria2ActivePaths()[p]
-	}
+	library.IsTorrentBusy = jobs.Aria2Owns
 
 	recovered := library.PipelineInit()
 	for _, r := range recovered {
@@ -260,6 +258,7 @@ func main() {
 		<-sig
 		log.Println("[shutdown] stopping subprocesses")
 		jobs.Aria2Stop()
+		jobs.YTDlpStopAll()
 		library.Shutdown()
 		time.Sleep(500 * time.Millisecond)
 		os.Exit(0)

@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func touch(t *testing.T, path string) string {
+func touchAt(t *testing.T, path string) string {
 	t.Helper()
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -23,12 +23,6 @@ func touch(t *testing.T, path string) string {
 	}
 
 	return path
-}
-
-func exists(path string) bool {
-	_, err := os.Stat(path)
-
-	return err == nil
 }
 
 func delReq(t *testing.T, lib *Library, url string) *httptest.ResponseRecorder {
@@ -47,10 +41,10 @@ func delReq(t *testing.T, lib *Library, url string) *httptest.ResponseRecorder {
 func TestVideoDelete_Traversal(t *testing.T) {
 	tmp := t.TempDir()
 	root := filepath.Join(tmp, "media")
-	touch(t, filepath.Join(root, "keep.mp4"))
+	touchAt(t, filepath.Join(root, "keep.mp4"))
 
 	for _, url := range []string{"/video/../victim.txt", "/video/%2e%2e%2fvictim.txt", "/video/..%2Fvictim.txt"} {
-		victim := touch(t, filepath.Join(tmp, "victim.txt"))
+		victim := touchAt(t, filepath.Join(tmp, "victim.txt"))
 		lib := &Library{Roots: []string{root}}
 
 		w := delReq(t, lib, url)
@@ -68,10 +62,10 @@ func TestVideoDelete_OnlyResolvedRoot(t *testing.T) {
 	one := filepath.Join(tmp, "one")
 	two := filepath.Join(tmp, "two")
 
-	hit := touch(t, filepath.Join(one, "Show", "01.mp4"))
-	sub := touch(t, filepath.Join(one, "Show", "01.vtt"))
-	lang := touch(t, filepath.Join(one, "Show", "01.en.vtt"))
-	other := touch(t, filepath.Join(two, "Show", "01.mp4"))
+	hit := touchAt(t, filepath.Join(one, "Show", "01.mp4"))
+	sub := touchAt(t, filepath.Join(one, "Show", "01.vtt"))
+	lang := touchAt(t, filepath.Join(one, "Show", "01.en.vtt"))
+	other := touchAt(t, filepath.Join(two, "Show", "01.mp4"))
 
 	lib := &Library{Roots: []string{one, two}}
 	w := delReq(t, lib, "/video/Show/01.mp4")
@@ -99,7 +93,7 @@ func TestFindFile_DotsInName(t *testing.T) {
 	root := t.TempDir()
 
 	for _, name := range []string{"Movie..2020.mp4", "S01E01..mkv"} {
-		want := touch(t, filepath.Join(root, name))
+		want := touchAt(t, filepath.Join(root, name))
 		if got := FindFile(name, []string{root}); got != want {
 			t.Errorf("FindFile(%q) = %q, want %q", name, got, want)
 		}
@@ -109,9 +103,9 @@ func TestFindFile_DotsInName(t *testing.T) {
 func TestFindFile_Contained(t *testing.T) {
 	tmp := t.TempDir()
 	root := filepath.Join(tmp, "Aomine")
-	touch(t, filepath.Join(root, "ok.mp4"))
-	touch(t, filepath.Join(tmp, "AomineEvil", "x.mp4"))
-	touch(t, filepath.Join(tmp, "secret.txt"))
+	touchAt(t, filepath.Join(root, "ok.mp4"))
+	touchAt(t, filepath.Join(tmp, "AomineEvil", "x.mp4"))
+	touchAt(t, filepath.Join(tmp, "secret.txt"))
 
 	for _, rel := range []string{"../secret.txt", "/../secret.txt", "a/../../secret.txt", "../AomineEvil/x.mp4", ""} {
 		if got := FindFile(rel, []string{root}); got != "" {
@@ -159,12 +153,12 @@ func TestVideoDelete_BracketName(t *testing.T) {
 	root := t.TempDir()
 	name := "Movie [2020] 1080p"
 
-	vid := touch(t, filepath.Join(root, name+".mp4"))
-	eng := touch(t, filepath.Join(root, name+".eng.vtt"))
-	en := touch(t, filepath.Join(root, name+".en.vtt"))
-	plain := touch(t, filepath.Join(root, name+".vtt"))
-	srt := touch(t, filepath.Join(root, name+".srt"))
-	keep := touch(t, filepath.Join(root, "Other [2021].eng.vtt"))
+	vid := touchAt(t, filepath.Join(root, name+".mp4"))
+	eng := touchAt(t, filepath.Join(root, name+".eng.vtt"))
+	en := touchAt(t, filepath.Join(root, name+".en.vtt"))
+	plain := touchAt(t, filepath.Join(root, name+".vtt"))
+	srt := touchAt(t, filepath.Join(root, name+".srt"))
+	keep := touchAt(t, filepath.Join(root, "Other [2021].eng.vtt"))
 
 	lib := &Library{Roots: []string{root}}
 	w := delReq(t, lib, "/video/"+url.PathEscape(name+".mp4"))
@@ -187,8 +181,8 @@ func TestVideoDelete_BracketName(t *testing.T) {
 func TestRename_BracketSidecars(t *testing.T) {
 	root := t.TempDir()
 	name := "Movie [2020] 1080p"
-	touch(t, filepath.Join(root, name+".mp4"))
-	touch(t, filepath.Join(root, name+".eng.vtt"))
+	touchAt(t, filepath.Join(root, name+".mp4"))
+	touchAt(t, filepath.Join(root, name+".eng.vtt"))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
