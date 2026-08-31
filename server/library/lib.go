@@ -63,43 +63,39 @@ func isVid(name string) bool {
 	return ext == ".mp4" || ext == ".mkv" || ext == ".mov"
 }
 
+// AllVideos walks each root to full depth. It used to stop at two levels,
+// so anything nested deeper was invisible to LiveHashes — and CleanHLSCache
+// deletes the cache of every hash it can't see, mid-stream.
 func (l *Library) AllVideos() []VideoRef {
 	var out []VideoRef
 
 	for _, root := range l.Roots {
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			continue
-		}
-
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), ".") {
-				continue
-			}
-
-			if !e.IsDir() {
-				if isVid(e.Name()) {
-					out = append(out, VideoRef{Root: root, Rel: e.Name()})
-				}
-				continue
-			}
-
-			sub := filepath.Join(root, e.Name())
-			subEntries, err := os.ReadDir(sub)
+		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
-				continue
+				return nil
 			}
 
-			for _, se := range subEntries {
-				if se.IsDir() || strings.HasPrefix(se.Name(), ".") {
-					continue
+			if strings.HasPrefix(d.Name(), ".") && path != root {
+				if d.IsDir() {
+					return filepath.SkipDir
 				}
 
-				if isVid(se.Name()) {
-					out = append(out, VideoRef{Root: root, Rel: e.Name() + "/" + se.Name()})
-				}
+				return nil
 			}
-		}
+
+			if d.IsDir() || !isVid(d.Name()) {
+				return nil
+			}
+
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil
+			}
+
+			out = append(out, VideoRef{Root: root, Rel: filepath.ToSlash(rel)})
+
+			return nil
+		})
 	}
 
 	return out

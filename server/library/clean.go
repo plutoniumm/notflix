@@ -1,6 +1,7 @@
 package library
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -12,20 +13,31 @@ var videoExts = map[string]bool{
 	".mp4": true, ".mkv": true, ".mov": true, ".webm": true,
 	".avi": true, ".flv": true, ".wmv": true, ".m4v": true,
 	".mpg": true, ".mpeg": true, ".ts": true, ".3gp": true,
+	".m2ts": true, ".mts": true, ".vob": true, ".divx": true,
+	".ogv": true, ".rmvb": true, ".m2v": true,
 }
 
 var subExts = map[string]bool{
 	".vtt": true, ".srt": true, ".ass": true, ".ssa": true,
 }
 
-var keepExts = map[string]bool{
-	".torrent": true, ".aria2": true,
+// junkExts is a DENYLIST, and deliberately so: the sweep used to delete
+// anything missing from the known-video/sub/keep allowlist, which meant any
+// container the list hadn't heard of (a .m2ts Blu-ray remux, say) was
+// destroyed an hour after it landed. Only what is named here is removed.
+var junkExts = map[string]bool{
+	".part": true, ".!qb": true, ".crdownload": true, ".download": true,
+	".aria2__temp": true, ".tmp": true,
+	".exe": true, ".msi": true, ".bat": true, ".cmd": true, ".scr": true,
+	".lnk": true, ".url": true, ".website": true,
+	".txt": true, ".nfo": true, ".sfv": true, ".md5": true,
+	".htm": true, ".html": true,
 }
 
-// keepSuffixes are compound suffixes (multi-dot) that keepExts can't match
-// against filepath.Ext (which only returns the trailing extension). Kept
-// literally in the tree so recovery paths — .corrupt.bak from repair — are
-// never nuked by the junk sweep.
+// keepSuffixes are compound suffixes (multi-dot) that an extension lookup
+// can't match against filepath.Ext (which only returns the trailing
+// extension). Kept literally in the tree so recovery paths — .corrupt.bak
+// from repair — are never nuked by the junk sweep.
 var keepSuffixes = []string{".corrupt.bak"}
 
 func CleanAll(roots []string) {
@@ -52,26 +64,27 @@ func cleanRoot(root string) {
 			return nil
 		}
 
-		ext := strings.ToLower(filepath.Ext(d.Name()))
 		lower := strings.ToLower(d.Name())
-		kept := false
 		for _, sfx := range keepSuffixes {
 			if strings.HasSuffix(lower, sfx) {
-				kept = true
-				break
-			}
-		}
-		if !kept && !videoExts[ext] && !subExts[ext] && !keepExts[ext] {
-			// A recently-written non-video file is someone's live output (an
-			// in-flight ffmpeg .tmp — possibly from an encoder orphaned by a
-			// restart). Deleting it unlinks the path under the writer and the
-			// finished file is lost. Only sweep files that have gone quiet.
-			if fi, err := d.Info(); err == nil && time.Since(fi.ModTime()) < time.Hour {
 				return nil
 			}
-			log.Printf("[CleanAll] junk: %s", path)
-			os.Remove(path)
 		}
+
+		if !junkExts[filepath.Ext(lower)] {
+			return nil
+		}
+
+		// A recently-written file is someone's live output (an in-flight
+		// ffmpeg .tmp — possibly from an encoder orphaned by a restart).
+		// Deleting it unlinks the path under the writer and the finished
+		// file is lost. Only sweep files that have gone quiet.
+		if fi, err := d.Info(); err == nil && time.Since(fi.ModTime()) < time.Hour {
+			return nil
+		}
+
+		log.Printf("[CleanAll] junk: %s", path)
+		os.Remove(path)
 
 		return nil
 	})
@@ -148,8 +161,8 @@ func processSubdir(root, dir string) {
 	videos, subs := collect(dir)
 
 	if len(videos) == 0 {
-		log.Printf("[CleanAll] no videos, nuking: %s", filepath.Base(dir))
-		os.RemoveAll(dir)
+		pruneEmpty(dir)
+
 		return
 	}
 
@@ -183,7 +196,7 @@ func flatVol(root, dir, videoPath string, subPaths []string) {
 		}
 	}
 
-	os.RemoveAll(dir)
+	pruneEmpty(dir)
 }
 
 func flatDir(dir string, videoPaths, subPaths []string) {
@@ -193,7 +206,12 @@ func flatDir(dir string, videoPaths, subPaths []string) {
 		}
 
 		dst := safeMoveDst(dir, filepath.Base(vp))
-		os.Rename(vp, dst)
+		if err := os.Rename(vp, dst); err != nil {
+			log.Printf("[CleanAll] move failed, keeping %s: %v", vp, err)
+
+			continue
+		}
+
 		log.Printf("[CleanAll] → %s: %s", filepath.Base(dir), filepath.Base(dst))
 	}
 
@@ -211,9 +229,34 @@ func flatDir(dir string, videoPaths, subPaths []string) {
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
 		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-			os.RemoveAll(filepath.Join(dir, e.Name()))
-			log.Printf("[CleanAll] removed subdir: %s/%s", filepath.Base(dir), e.Name())
+			pruneEmpty(filepath.Join(dir, e.Name()))
 		}
+	}
+}
+
+// pruneEmpty removes dir only once nothing is left in it, depth first. It
+// replaces the RemoveAll this code used to do: "no video we recognise" is
+// not the same as "nothing of value", and a failed move leaves the file
+// sitting right where the RemoveAll would have taken it out.
+func pruneEmpty(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			pruneEmpty(filepath.Join(dir, e.Name()))
+		}
+	}
+
+	rest, err := os.ReadDir(dir)
+	if err != nil || len(rest) > 0 {
+		return
+	}
+
+	if err := os.Remove(dir); err == nil {
+		log.Printf("[CleanAll] removed empty dir: %s", dir)
 	}
 }
 
@@ -237,5 +280,13 @@ func safeMoveDst(dir, name string) string {
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(name, ext)
 
-	return filepath.Join(dir, base+"_conflict"+ext)
+	// One fixed "_conflict" slot silently overwrote the third sibling of the
+	// same name (three 01.mkv episodes flattened to two survivors), so keep
+	// counting until a name nothing owns comes free.
+	for i := 2; ; i++ {
+		dst = filepath.Join(dir, fmt.Sprintf("%s_%d%s", base, i, ext))
+		if _, err := os.Stat(dst); err != nil {
+			return dst
+		}
+	}
 }

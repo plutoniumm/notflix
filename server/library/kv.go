@@ -2,42 +2,75 @@ package library
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
+
+	"notflix/server/x/atom"
 )
 
 const kvPath = "./cache/kv.json"
 
 var kvMu sync.RWMutex
 
+// readLocked loads the store; the caller must already hold kvMu (either
+// mode). An absent file is an empty store, but a present-and-malformed one
+// is an error the caller must respect — see update.
+func readLocked() (map[string]any, error) {
+	m := map[string]any{}
+	if err := atom.LoadJSON(kvPath, &m); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return map[string]any{}, nil
+		}
+
+		return nil, err
+	}
+
+	if m == nil {
+		m = map[string]any{}
+	}
+
+	return m, nil
+}
+
 func kvRead() map[string]any {
 	kvMu.RLock()
 	defer kvMu.RUnlock()
 
-	data, err := os.ReadFile(kvPath)
+	m, err := readLocked()
 	if err != nil {
+		log.Printf("[kv] %s unreadable, serving empty: %v", kvPath, err)
+
 		return map[string]any{}
 	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return map[string]any{}
-	}
+
 	return m
 }
 
-func kvWrite(m map[string]any) error {
+// update is the ONLY write path: it holds one exclusive lock across the
+// read, the mutation and the write. Reading under RLock and writing under a
+// separate Lock (the old shape) lost every concurrent set but the last —
+// the whole store is one JSON blob. A malformed store aborts the write
+// rather than replacing thousands of keys with the one being set.
+func update(fn func(map[string]any)) error {
 	kvMu.Lock()
 	defer kvMu.Unlock()
 
-	data, err := json.MarshalIndent(m, "", "  ")
+	store, err := readLocked()
 	if err != nil {
+		log.Printf("[kv] REFUSING to write: %s is corrupt (%v) — move it aside to start fresh", kvPath, err)
+
 		return err
 	}
-	return os.WriteFile(kvPath, data, 0644)
+
+	fn(store)
+
+	return atom.SaveJSON(kvPath, store)
 }
 
 // KVGetValue is the in-process counterpart to KVGet. Returns nil if the key
@@ -46,12 +79,9 @@ func KVGetValue(key string) any {
 	return kvRead()[key]
 }
 
-// KVSetValue is the in-process counterpart to KVSet. Reads-modifies-writes
-// the whole store under the kvMu lock chain; safe under concurrent callers.
+// KVSetValue is the in-process counterpart to KVSet.
 func KVSetValue(key string, value any) error {
-	store := kvRead()
-	store[key] = value
-	return kvWrite(store)
+	return update(func(store map[string]any) { store[key] = value })
 }
 
 // DirRecency maps a library dir to the most-recent `watched:<param>.at`
@@ -134,23 +164,30 @@ func KVSet(c *gin.Context) {
 		return
 	}
 
-	store := kvRead()
-
 	var bulk []struct {
 		Key   string `json:"key"`
 		Value any    `json:"value"`
 	}
 	ip := c.ClientIP()
+
 	if json.Unmarshal(raw, &bulk) == nil && len(bulk) > 0 {
-		for _, item := range bulk {
-			store[item.Key] = item.Value
-			statsTee(item.Key, item.Value, ip)
-		}
-		if err := kvWrite(store); err != nil {
+		err := update(func(store map[string]any) {
+			for _, item := range bulk {
+				store[item.Key] = item.Value
+			}
+		})
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+
 			return
 		}
+
+		for _, item := range bulk {
+			statsTee(item.Key, item.Value, ip)
+		}
+
 		c.JSON(http.StatusOK, gin.H{"ok": true, "count": len(bulk)})
+
 		return
 	}
 
@@ -160,14 +197,16 @@ func KVSet(c *gin.Context) {
 	}
 	if err := json.Unmarshal(raw, &single); err != nil || single.Key == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "expected {key, value} or [{key, value}]"})
+
 		return
 	}
 
-	store[single.Key] = single.Value
-	statsTee(single.Key, single.Value, ip)
-	if err := kvWrite(store); err != nil {
+	if err := KVSetValue(single.Key, single.Value); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+
 		return
 	}
+
+	statsTee(single.Key, single.Value, ip)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "key": single.Key})
 }
