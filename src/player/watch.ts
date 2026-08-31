@@ -1,4 +1,5 @@
 import { kv } from "../core/kv";
+import { GET } from "../core/api";
 import { RESUME_THRESHOLD_S, END_CUTOFF_S } from "../core/events.svelte";
 
 // WatchProgress persists playback position to the server KV store as
@@ -27,9 +28,16 @@ export default class WatchProgress {
     return Number.isFinite(t) && t >= 0 && (!(d > 0) || t <= d + 1);
   }
 
+  // "Close enough to the end to count as finished". A flat END_CUTOFF_S would
+  // swallow every video shorter than it — a 4-minute clip was cleared at every
+  // position and could never resume — so short media get a relative cutoff.
+  private done(t: number, d: number): boolean {
+    return d > 0 && d - t < Math.min(END_CUTOFF_S, d * 0.1);
+  }
+
   save(videoParam: string, t: number, d: number) {
     if (!this.sane(t, d)) return;
-    if (d > 0 && d - t < END_CUTOFF_S) {
+    if (this.done(t, d)) {
       kv.set(`watched:${videoParam}`, null);
     } else if (t > RESUME_THRESHOLD_S) {
       // dur is carried so the server-side stats tee can compute completion
@@ -41,7 +49,7 @@ export default class WatchProgress {
   // Same as save but synchronous over the wire (sendBeacon). For unload.
   flushOnLeave(videoParam: string, t: number, d: number) {
     if (!this.sane(t, d)) return;
-    if (d > 0 && d - t < END_CUTOFF_S) {
+    if (this.done(t, d)) {
       kv.beacon(`watched:${videoParam}`, null);
     } else if (t > RESUME_THRESHOLD_S) {
       kv.beacon(`watched:${videoParam}`, { t, dur: d, at: Date.now() });
@@ -52,7 +60,10 @@ export default class WatchProgress {
   // threshold. Caller seeks back RESUME_THRESHOLD_S for context.
   async resume(videoParam: string): Promise<number> {
     try {
-      const res: any = await kv.get("watched:" + videoParam);
+      // Raw GET rather than kv.get so a flaky mobile network doesn't red-toast
+      // over the video. Swap back once kv.get takes ReqOpts.
+      const key = encodeURIComponent("watched:" + videoParam);
+      const res: any = await GET(`/kv/get?key=${key}`, { silent: true });
       const t = res?.value?.t;
       return t > RESUME_THRESHOLD_S ? Math.max(0, t - RESUME_THRESHOLD_S) : 0;
     } catch (err) {

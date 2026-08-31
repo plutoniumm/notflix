@@ -11,6 +11,7 @@
     onSpeedDown,
     onSpeedUp,
     onNext,
+    onPip,
     onFullscreen,
     trickplay,
   }: {
@@ -22,6 +23,7 @@
     onSpeedDown: () => void;
     onSpeedUp: () => void;
     onNext?: () => void;
+    onPip?: () => void;
     onFullscreen: () => void;
     // Renderer for the trickplay preview tile. Receives the hovered
     // timestamp in seconds, returns inline CSS for a 160-wide tile (or
@@ -37,44 +39,57 @@
     flipDir = $state(0);
   }
   const s = new Scrub();
-  let trackEl = $state<HTMLDivElement>();
+  // barEl IS the drawn bar: its box excludes the track's touch padding, so
+  // the fill width, the head offset and the click mapping share one basis.
+  let barEl = $state<HTMLDivElement>();
+  let dragged = false;
 
   const pct = $derived(ps.pct);
   const dur = $derived(ps.duration);
   const cur = $derived(ps.currentTime);
+  const headPct = $derived(
+    s.scrubbing && dur > 0 ? (s.hoverSec / dur) * 100 : pct,
+  );
 
-  function xToSec(clientX: number): number {
-    if (!trackEl || dur <= 0) return 0;
-    const rect = trackEl.getBoundingClientRect();
-    const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    return f * dur;
+  function track(e: MouseEvent): number {
+    if (!barEl || dur <= 0) return 0;
+    const r = barEl.getBoundingClientRect();
+    const x = Math.max(0, Math.min(r.width, e.clientX - r.left));
+    s.hoverX = x;
+    s.hoverSec = (x / r.width) * dur;
+
+    return s.hoverSec;
   }
 
-  function onMove(e: MouseEvent) {
-    if (!trackEl) return;
+  // Pointer events cover mouse and touch in one path; the mouse-only version
+  // left dragging dead on every touch device (a tap seeked via the synthesized
+  // compatibility click, a drag did nothing) and never showed the preview
+  // tile. Capture keeps the move stream on the track once the drag starts.
+  function onDown(e: PointerEvent) {
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    s.scrubbing = true;
     s.hovering = true;
-    const rect = trackEl.getBoundingClientRect();
-    s.hoverX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-    s.hoverSec = xToSec(e.clientX);
-    if (s.scrubbing) onSeek(s.hoverSec);
+    dragged = false;
+    onSeek(track(e));
+  }
+  function onMove(e: PointerEvent) {
+    s.hovering = true;
+    if (s.scrubbing) dragged = true;
+    track(e);
+  }
+
+  // Two seeks per drag (press + release). Seeking on every move aborts and
+  // restarts the in-flight HLS segment fetch dozens of times a second.
+  function onUp(e: PointerEvent) {
+    if (!s.scrubbing) return;
+    if (dragged) onSeek(s.hoverSec);
+    s.scrubbing = false;
+    dragged = false;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    if (e.pointerType !== "mouse") s.hovering = false;
   }
   function onLeave() {
-    s.hovering = false;
-  }
-  function onDown(e: MouseEvent) {
-    s.scrubbing = true;
-    onSeek(xToSec(e.clientX));
-    window.addEventListener("mousemove", onWinMove);
-    window.addEventListener("mouseup", onUp);
-  }
-  function onWinMove(e: MouseEvent) {
-    if (!s.scrubbing) return;
-    onMove(e);
-  }
-  function onUp() {
-    s.scrubbing = false;
-    window.removeEventListener("mousemove", onWinMove);
-    window.removeEventListener("mouseup", onUp);
+    if (!s.scrubbing) s.hovering = false;
   }
 
   function speedWheel(e: WheelEvent) {
@@ -92,9 +107,6 @@
   const tile = $derived(
     trickplay && s.hovering && dur > 0 ? trickplay(s.hoverSec) : "",
   );
-  const tipPct = $derived(
-    trackEl ? (s.hoverX / trackEl.getBoundingClientRect().width) * 100 : 0,
-  );
   const fmtSpeed = (n: number) => parseFloat(n.toFixed(2)).toString();
 </script>
 
@@ -102,29 +114,28 @@
   <div class="dock p-fix" class:hidden={ps.hideUI} style="--pct:{pct}%">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="track"
-      bind:this={trackEl}
-      onmousemove={onMove}
-      onmouseleave={onLeave}
-      onmousedown={onDown}
+      class="track ptr"
+      onpointerdown={onDown}
+      onpointermove={onMove}
+      onpointerup={onUp}
+      onpointercancel={onUp}
+      onpointerleave={onLeave}
     >
-      <div class="bar-bg"></div>
-      <div class="bar-fill" style="width:{pct}%"></div>
-      <div class="bar-head" style="left:{pct}%"></div>
+      <div class="bar" bind:this={barEl}>
+        <div class="bg"></div>
+        <div class="fill" style="width:{headPct}%"></div>
+        <div class="head" style="left:{headPct}%"></div>
 
-      {#if s.hovering}
-        <div class="scrub-line" style="left:{s.hoverX}px"></div>
-        <div
-          class="tip"
-          style="left:{tipPct}%"
-          class:withtile={!!tile}
-        >
-          {#if tile}
-            <div class="tile" style={tile}></div>
-          {/if}
-          <div class="tip-time">{fmtTime(s.hoverSec)}</div>
-        </div>
-      {/if}
+        {#if s.hovering}
+          <div class="scrub-line" style="left:{s.hoverX}px"></div>
+          <div class="tip" style="left:{s.hoverX}px" class:withtile={!!tile}>
+            {#if tile}
+              <div class="tile" style={tile}></div>
+            {/if}
+            <div class="tip-time">{fmtTime(s.hoverSec)}</div>
+          </div>
+        {/if}
+      </div>
     </div>
 
     <div class="row f al-ct g10 p20">
@@ -163,6 +174,12 @@
         </button>
       {/if}
 
+      {#if onPip}
+        <button class="ctrl ptr cc" aria-label="Picture in picture" onclick={onPip}>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2" /><rect x="12" y="11" width="8" height="7" rx="1" fill="currentColor" /></svg>
+        </button>
+      {/if}
+
       <button class="ctrl ptr cc" aria-label="Fullscreen" onclick={onFullscreen}>
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
       </button>
@@ -176,6 +193,12 @@
     left: 0;
     right: 0;
     z-index: 10;
+    /* No padding of its own, so the inset can be the padding — and it insets
+       the scrub track too, which keeps the track box and its hit-test
+       aligned. There is no --safe-l/r token, so those stay raw env(). */
+    padding-bottom: var(--safe-b, env(safe-area-inset-bottom));
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
     background: linear-gradient(
       to top,
       rgba(7, 6, 10, 0.85) 0%,
@@ -198,38 +221,41 @@
     position: relative;
     height: 18px;
     padding: 0 16px;
-    cursor: pointer;
     user-select: none;
+    touch-action: none;
   }
-  .bar-bg,
-  .bar-fill {
+  .bar {
+    position: absolute;
+    inset: 0 16px;
+  }
+  .bg,
+  .fill {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    left: 16px;
-    right: 16px;
+    left: 0;
     height: 3px;
     border-radius: 99px;
     transition: height 0.18s var(--ease-out);
   }
-  .bar-bg { background: rgba(255, 255, 255, 0.18); }
-  .bar-fill { background: var(--red); right: auto; }
-  .track:hover .bar-bg,
-  .track:hover .bar-fill { height: 6px; }
+  .bg { background: rgba(255, 255, 255, 0.18); right: 0; }
+  .fill { background: var(--red); }
+  .track:hover .bg,
+  .track:hover .fill { height: 6px; }
 
-  .bar-head {
+  .head {
     position: absolute;
     top: 50%;
     width: 12px;
     height: 12px;
     border-radius: 50%;
     background: var(--red);
-    transform: translate(calc(-50% + 16px), -50%);
+    transform: translate(-50%, -50%);
     opacity: 0;
     transition: opacity 0.18s var(--ease-out);
     box-shadow: 0 0 6px var(--red-glow);
   }
-  .track:hover .bar-head { opacity: 1; }
+  .track:hover .head { opacity: 1; }
 
   .scrub-line {
     position: absolute;
@@ -268,6 +294,7 @@
 
   .ctrl {
     background: transparent;
+    touch-action: manipulation;
     color: var(--tx-4);
     border: none;
     border-radius: var(--r-md);
