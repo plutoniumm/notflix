@@ -22,9 +22,10 @@ type OpenSubtitlesClient struct {
 	user   string
 	pass   string
 
-	mu     sync.Mutex
-	tokVal string
-	tokExp time.Time
+	mu      sync.Mutex // guards tokVal/tokExp only
+	loginMu sync.Mutex // single-flights the login POST
+	tokVal  string
+	tokExp  time.Time
 }
 
 func NewOpenSubtitlesClient() *OpenSubtitlesClient {
@@ -54,7 +55,7 @@ func (c *OpenSubtitlesClient) Search(params string, byHash bool) []SubResult {
 	req.Header.Set("User-Agent", osUA)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := subHTTP.Do(req)
 	if err != nil {
 		log.Printf("[subs] osSearch request error: %v", err)
 		return nil
@@ -108,11 +109,39 @@ func (c *OpenSubtitlesClient) Search(params string, byHash bool) []SubResult {
 
 // token returns a cached login token, or empty string if creds are missing or
 // login fails. Tokens are cached for 23 hours.
+//
+// c.mu is held only around the cached value, never across the login POST: a
+// slow login used to queue every other downloader behind it. loginMu keeps
+// that single-flight anyway, so a burst of requests still logs in once.
 func (c *OpenSubtitlesClient) token() string {
 	if c.user == "" || c.pass == "" {
 		return ""
 	}
 
+	if tok := c.cachedToken(); tok != "" {
+		return tok
+	}
+
+	c.loginMu.Lock()
+	defer c.loginMu.Unlock()
+
+	if tok := c.cachedToken(); tok != "" {
+		return tok
+	}
+
+	tok := c.login()
+	if tok == "" {
+		return ""
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tokVal, c.tokExp = tok, time.Now().Add(23*time.Hour)
+
+	return c.tokVal
+}
+
+func (c *OpenSubtitlesClient) cachedToken() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -120,6 +149,10 @@ func (c *OpenSubtitlesClient) token() string {
 		return c.tokVal
 	}
 
+	return ""
+}
+
+func (c *OpenSubtitlesClient) login() string {
 	body, _ := json.Marshal(map[string]string{"username": c.user, "password": c.pass})
 	req, err := http.NewRequest("POST", "https://api.opensubtitles.com/api/v1/login", bytes.NewReader(body))
 	if err != nil {
@@ -130,7 +163,7 @@ func (c *OpenSubtitlesClient) token() string {
 	req.Header.Set("Api-Key", c.apiKey)
 	req.Header.Set("User-Agent", osUA)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := subHTTP.Do(req)
 	if err != nil {
 		log.Printf("[subs] login request failed: %v", err)
 		return ""
@@ -152,9 +185,8 @@ func (c *OpenSubtitlesClient) token() string {
 	}
 
 	log.Printf("[subs] login ok, token acquired")
-	c.tokVal = result.Token
-	c.tokExp = time.Now().Add(23 * time.Hour)
-	return c.tokVal
+
+	return result.Token
 }
 
 // Download asks OS for a download URL for the given file_id, retrying up to 3
@@ -183,7 +215,7 @@ func (c *OpenSubtitlesClient) Download(fileID int) (link, filename, errMsg strin
 			req.Header.Set("Authorization", "Bearer "+tok)
 		}
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := subHTTP.Do(req)
 		if err != nil {
 			log.Printf("[subs] download request error (attempt %d): %v", attempt+1, err)
 			errMsg = "download request failed"

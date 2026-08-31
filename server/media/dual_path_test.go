@@ -411,6 +411,40 @@ func TestHLSPlaylist_H264NoMap(t *testing.T) {
 	}
 }
 
+// --- segment guards -----------------------------------------------------------
+
+// seg= is client-supplied: past the end of the playlist it used to be a real
+// ffmpeg spawn for media that doesn't exist, deduped only by cache key.
+func TestEnsureSegment_RejectsPastEnd(t *testing.T) {
+	chdirTemp(t)
+	root := filepath.Join(t.TempDir(), "lib")
+	src := makeMP4(t, root, "movie.mp4") // 2s → one 4s segment
+
+	if _, err := ensureSegment(src, "HASH", CodecH264, "720p", 999999, 0, segMuxed, false); err == nil {
+		t.Error("seg 999999 accepted — that's an ffmpeg spawn per bogus request")
+	}
+	if _, err := ensureSegment(src, "HASH", CodecH264, "720p", 0, 0, segMuxed, false); err != nil {
+		t.Errorf("seg 0 must still generate: %v", err)
+	}
+}
+
+// A waiter on the in-flight slot used to get (segPath, nil) when the generator
+// failed, then 500 later with a misleading message.
+func TestEnsureSegment_WaiterInheritsError(t *testing.T) {
+	chdirTemp(t)
+	_, key := segPaths("HASH", CodecH264, "720p", 3, 0, segMuxed, false)
+
+	fl := &inflight{done: make(chan struct{}), err: fmt.Errorf("generator boom")}
+	close(fl.done)
+	hlsInFlight.Store(key, fl)
+	defer hlsInFlight.Delete(key)
+
+	_, err := ensureSegment("missing.mp4", "HASH", CodecH264, "720p", 3, 0, segMuxed, false)
+	if err == nil || !strings.Contains(err.Error(), "generator boom") {
+		t.Errorf("waiter err = %v, want the generator's", err)
+	}
+}
+
 // --- E2E: real ffmpeg ---------------------------------------------------------
 
 func TestE2E_GenerateAV1Init(t *testing.T) {

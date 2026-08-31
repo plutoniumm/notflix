@@ -1,15 +1,15 @@
 package media
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"log"
 	"net/http"
-	"os/exec"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -21,9 +21,9 @@ import (
 // (theme music, recurring narration), so fingerprinting the head and tail of
 // each episode and cross-matching against a sibling finds the intro/outro
 // bounds per episode. Results persist in KV under skip:<hash> keyed exactly
-// like codec:<hash> (library-relative path), and the player turns them into
-// skip buttons. A folder needs ≥2 episodes; a match must run ≥skipMinSec so
-// stray shared lines can't trigger it.
+// like codec:<hash> (see skipKey), and the player turns them into skip
+// buttons. A folder needs ≥2 episodes; a match must run ≥skipMinSec so stray
+// shared lines can't trigger it.
 
 const (
 	skipHeadSec = 480.0 // intro must live in the first 8 minutes
@@ -32,37 +32,61 @@ const (
 	skipMaxSec  = 300.0 // longer "shared audio" than this means duplicate files, not an intro
 )
 
+// skipKey mirrors codecKey's move-proof BASENAME scheme. Marks are stamped
+// with the rel path the episode had at scan time, and CleanAll/Organize move
+// files between dirs afterwards — a dir-qualified key silently orphans the
+// mark, so the player loses its skip buttons and DetectSkips re-fingerprints
+// an episode it already scanned (57% of the live library's skip: keys were
+// orphans). The basename survives moves, so it's the canonical write key.
 func skipKey(rel string) string {
-	return "skip:" + library.Hash(rel)
+	return "skip:" + library.Hash(filepath.Base(rel))
+}
+
+// skipVal reads a mark, falling back to the basename key for the dir-qualified
+// marks written before skipKey moved.
+func skipVal(rel string) any {
+	if v := library.KVGetValue("skip:" + library.Hash(rel)); v != nil {
+		return v
+	}
+	return library.KVGetValue(skipKey(rel))
 }
 
 // extractPCM decodes a window of the first audio track to 5512 Hz mono s16le.
-// FFRun pipes stdout to /dev/null, so this runs ffmpeg directly to keep the
-// raw samples.
+// FFRun pipes stdout to /dev/null, so the samples land in a temp file rather
+// than a pipe — that keeps this on the shared runner (shutdown-cancelled,
+// timeouts, nice -n 19) instead of a bare exec that outlives Shutdown() and
+// fingerprints at the same CPU priority as a live stream.
 func extractPCM(path string, ss, dur float64) ([]int16, error) {
-	args := []string{"-nostdin", "-v", "error"}
+	tmp, err := os.CreateTemp("", "pcm*.raw")
+	if err != nil {
+		return nil, err
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+
+	var args []string
 	if ss > 0 {
 		args = append(args, "-ss", fmt.Sprintf("%.2f", ss))
 	}
 	args = append(args, "-i", path,
 		"-map", "0:a:0", "-ac", "1", "-ar", fmt.Sprint(fpRate),
 		"-t", fmt.Sprintf("%.2f", dur),
-		"-f", "s16le", "pipe:1")
+		"-f", "s16le", "-y", tmp.Name())
 
-	var out bytes.Buffer
-	errW := &library.TailWriter{Max: 4 << 10}
-	cmd := exec.Command("ffmpeg", args...)
-	cmd.Stdout = &out
-	cmd.Stderr = errW
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("pcm extract: %w — %s", err, errW.String())
+	if stderr, err := (library.FFRun{Args: args, Timeout: 10 * time.Minute, Nice: true}).Run(); err != nil {
+		return nil, fmt.Errorf("pcm extract: %w — %s", err, stderr)
 	}
 
-	raw := out.Bytes()
+	raw, err := os.ReadFile(tmp.Name())
+	if err != nil {
+		return nil, err
+	}
+
 	pcm := make([]int16, len(raw)/2)
 	for i := range pcm {
 		pcm[i] = int16(binary.LittleEndian.Uint16(raw[2*i:]))
 	}
+
 	return pcm, nil
 }
 
@@ -166,7 +190,7 @@ func DetectSkips(lib *library.Library) {
 
 		var pending []*episode
 		for _, e := range eps {
-			if library.KVGetValue(skipKey(e.ref.Rel)) == nil {
+			if skipVal(e.ref.Rel) == nil {
 				pending = append(pending, e)
 			}
 		}
@@ -219,7 +243,7 @@ func SkipInfo(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	if v, ok := library.KVGetValue(skipKey(file)).(map[string]any); ok {
+	if v, ok := skipVal(file).(map[string]any); ok {
 		c.JSON(http.StatusOK, v)
 		return
 	}

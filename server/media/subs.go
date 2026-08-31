@@ -13,12 +13,18 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/opensubtitlescli/moviehash"
 
 	"notflix/server/library"
 )
+
+// subHTTP is every outbound subtitle call (search, download link, payload).
+// http.DefaultClient has NO timeout, so a provider or CDN that accepts the
+// connection and then stalls pins the Gin handler (and its goroutine) forever.
+var subHTTP = &http.Client{Timeout: 60 * time.Second}
 
 type embedTrack struct {
 	Index    int    `json:"index"`
@@ -71,6 +77,30 @@ func whisperVTTOf(path string) string {
 	return path[:len(path)-len(ext)] + ".whisper.vtt"
 }
 
+// vttSiblings lists the "<base>.<lang>.vtt" sidecars sitting next to path.
+// filepath.Glob is unusable here: a bracket in a release name ("Movie [2020]
+// 1080p") is a character class to Glob, so every -[YTS.MX] title matched
+// nothing — with a nil error, so the player just showed no sidecar tracks.
+// Go has no glob escaper; scan the dir instead.
+func vttSiblings(path string) []localTrack {
+	prefix := filepath.Base(path[:len(path)-len(filepath.Ext(path))]) + "."
+	ents, _ := os.ReadDir(filepath.Dir(path))
+
+	var out []localTrack
+	for _, e := range ents {
+		n := e.Name()
+		if e.IsDir() || len(n) <= len(prefix)+len(".vtt") {
+			continue
+		}
+		if !strings.HasPrefix(n, prefix) || !strings.HasSuffix(n, ".vtt") {
+			continue
+		}
+		out = append(out, localTrack{File: n, Language: n[len(prefix) : len(n)-len(".vtt")]})
+	}
+
+	return out
+}
+
 func Subctx(c *gin.Context, lib *library.Library) {
 	raw := c.Query("file")
 	if raw == "" {
@@ -95,22 +125,7 @@ func Subctx(c *gin.Context, lib *library.Library) {
 		hasSRT = true
 	}
 
-	var local []localTrack
-	matches, _ := filepath.Glob(base + ".*.vtt")
-	dir := filepath.Dir(path)
-	for _, m := range matches {
-		bn := filepath.Base(m)
-		prefix := filepath.Base(base) + "."
-		suffix := ".vtt"
-		lang := strings.TrimSuffix(strings.TrimPrefix(bn, prefix), suffix)
-		if lang == bn {
-			continue
-		}
-		local = append(local, localTrack{
-			File:     strings.TrimPrefix(m, dir+string(os.PathSeparator)),
-			Language: lang,
-		})
-	}
+	local := vttSiblings(path)
 	if hasVTT {
 		local = append(local, localTrack{
 			File:     filepath.Base(base) + ".vtt",
@@ -238,7 +253,7 @@ func subdlSearch(title string) []SubResult {
 	q.Set("languages", "EN")
 	q.Set("subs_per_page", "30")
 
-	resp, err := http.Get("https://api.subdl.com/api/v1/subtitles?" + q.Encode())
+	resp, err := subHTTP.Get("https://api.subdl.com/api/v1/subtitles?" + q.Encode())
 	if err != nil {
 		log.Printf("[subs] subdl request error: %v", err)
 
@@ -341,12 +356,20 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	sr, err := http.Get(link)
+	sr, err := subHTTP.Get(link)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to download subtitle"})
 		return
 	}
 	defer sr.Body.Close()
+
+	// Unchecked, an HTML error page from the CDN gets parsed as an SRT and
+	// saved as the sidecar — a "subtitle" no player can show and nothing
+	// retries, because the file now exists.
+	if sr.StatusCode != http.StatusOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("subtitle download HTTP %d", sr.StatusCode)})
+		return
+	}
 
 	raw, err := io.ReadAll(sr.Body)
 	if err != nil {
@@ -395,7 +418,7 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 }
 
 func subdlFetch(c *gin.Context, videoPath, src string) {
-	resp, err := http.Get(src)
+	resp, err := subHTTP.Get(src)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "subdl download: " + err.Error()})
 		return

@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"notflix/server/jobs"
 	"notflix/server/library"
 )
 
@@ -39,6 +40,17 @@ const (
 )
 
 var hlsInFlight sync.Map
+
+// inflight is a single-flight slot: waiters block on done and then read err,
+// so a failed generation fails every request that waited on it.
+type inflight struct {
+	done chan struct{}
+	err  error
+}
+
+// segPool caps concurrent live segment transcodes (h264 ladder, AV1
+// fallback). Copy/remux passes are exempt — they're per-file, not per-segment.
+var segPool = jobs.NewPool(4)
 
 type hlsProfile struct {
 	h              int
@@ -111,6 +123,7 @@ type srcInfo struct {
 	aLayouts    []string    // channel_layout per audio stream (empty/unknown → unnamed)
 	aMeta       []audioMeta // language/codec/channels per audio stream
 	vPixFmt     string
+	dur         float64 // container duration, 0 if unprobed
 	kfTimes     []float64
 	bounds      []float64 // segment boundaries, keyframe-aligned
 	segBitrates []int     // bps per segment, aligned with bounds
@@ -300,6 +313,7 @@ func getSrcInfo(path string) *srcInfo {
 			log.Printf("[srcinfo] stream probe returned no video stream (will retry): %s", filepath.Base(path))
 			return si
 		}
+		si.dur = duration(path)
 		if si.vCodec != "h264" && si.vCodec != "av1" {
 			si.ready = true
 			return si
@@ -314,7 +328,7 @@ func getSrcInfo(path string) *srcInfo {
 				si.kfTimes = append(si.kfTimes, p.pts)
 			}
 		}
-		si.bounds = segmentBoundaries(si.kfTimes, duration(path))
+		si.bounds = muxerBounds(si.kfTimes, pkts[0].pts, si.dur, hlsSegDur)
 		si.segBitrates, si.peakBitrate = segmentBitrates(pkts, si.bounds)
 		si.ready = true
 	}
@@ -362,24 +376,75 @@ func probePackets(path string) ([]vpkt, error) {
 	return pkts, nil
 }
 
-// Group keyframes into segment boundaries no shorter than hlsSegDur. Returns
-// [start0, start1, ..., totalDur]; segment i runs from bounds[i] to bounds[i+1].
-func segmentBoundaries(kfs []float64, totalDur float64) []float64 {
+// muxerBounds returns the boundaries ffmpeg's hls muxer cuts a `-hls_time
+// segDur` copy pass at. Returns [start0, start1, ..., totalDur]; segment i
+// runs from bounds[i] to bounds[i+1].
+//
+// The rule is hlsenc.c's and it is ABSOLUTE, not relative: the muxer splits
+// on the first keyframe whose `pts - start_pts >= segDur * segments_written`,
+// i.e. against a fixed grid laid from the file start — NOT "the first
+// keyframe segDur after the previous cut". The two only agree when every GOP
+// is at least segDur long (the SVT-AV1 pipeline case, which is why this went
+// unnoticed). A 36s source with 3s GOPs cuts 6,3,3,6,3,3,6,3,3 here and
+// 6,6,6,6,6,6 under the relative rule — the playlist then indexes segments
+// holding a different time range and ENDLISTs 12s early.
+//
+// origin is the first packet's pts (the muxer's start_pts), which is not
+// necessarily the first keyframe's.
+func muxerBounds(kfs []float64, origin, totalDur, segDur float64) []float64 {
 	if len(kfs) == 0 {
 		return nil
 	}
 	bounds := []float64{kfs[0]}
-	last := kfs[0]
 	for _, kf := range kfs[1:] {
-		if kf-last >= hlsSegDur {
+		if kf-origin >= segDur*float64(len(bounds)) {
 			bounds = append(bounds, kf)
-			last = kf
 		}
 	}
-	if totalDur > last {
+	if last := bounds[len(bounds)-1]; totalDur > last {
 		bounds = append(bounds, totalDur)
 	}
 	return bounds
+}
+
+// audioStep is the -hls_time handed to the AV1 audio pass, and therefore the
+// grid its segments land on: an audio-only stream has no keyframes to snap
+// to, so the muxer cuts on the first frame at/after step*n — uniform, unlike
+// the video rung. Using the video grid's first segment keeps both renditions
+// cut on the same instants for the uniform-GOP sources the conversion
+// pipeline produces (the first cut is the one boundary every rule agrees on).
+// An irregular source can't be matched by any single step; the two renditions
+// then ride their own grids, which is fine — they're separate single-track
+// renditions carrying native timestamps.
+func audioStep(si *srcInfo) float64 {
+	if len(si.bounds) >= 2 {
+		return si.bounds[1] - si.bounds[0]
+	}
+	return hlsSegDur
+}
+
+// srcDur prefers the duration the probe already paid for.
+func srcDur(si *srcInfo, path string) float64 {
+	if si.dur > 0 {
+		return si.dur
+	}
+	return duration(path)
+}
+
+// uniformDurs is the EXTINF list for a uniform grid: full steps plus a short
+// tail. Deliberately floor-ish — ffmpeg can emit a sub-frame runt past the
+// declared end, and an unreferenced extra file is harmless where a referenced
+// missing one stalls the player.
+func uniformDurs(dur, step float64) []float64 {
+	var ds []float64
+	for i := 0; i < int(math.Ceil(dur/step)); i++ {
+		d := step
+		if rem := dur - float64(i)*step; rem < step {
+			d = rem
+		}
+		ds = append(ds, d)
+	}
+	return ds
 }
 
 // Returns per-segment video bitrate (bps) and the peak across all segments.
@@ -771,10 +836,13 @@ func HLSPlaylist(c *gin.Context, lib *library.Library) {
 	copyMode := false
 	si := getSrcInfo(path)
 	if codec == CodecAV1 {
-		// Both the AV1 video rung (q=src) and its AAC audio rendition
-		// (q=audio) are cut on the SAME keyframe-aligned boundaries, so
-		// demuxed fMP4 segment i covers the same presentation interval in
-		// each — a hard CMAF requirement for hls.js to sync the two.
+		// Each demuxed rendition is declared on the grid its own continuous
+		// pass actually writes: the video rung on the muxer's keyframe grid,
+		// the AAC rendition on the uniform audioStep grid. For the
+		// uniform-GOP sources the pipeline produces those coincide, which is
+		// the CMAF alignment hls.js likes; when they can't (irregular GOPs)
+		// each playlist still describes its own media exactly, which is the
+		// part that must never be wrong.
 		if !canCopyAV1(si) || len(si.bounds) < 2 {
 			c.String(http.StatusInternalServerError, "av1 source not copy-eligible")
 			return
@@ -783,22 +851,16 @@ func HLSPlaylist(c *gin.Context, lib *library.Library) {
 	} else if !audioOnly && canCopyVideo(si, profile) && len(si.bounds) >= 2 {
 		copyMode = true
 	}
-	if copyMode {
+	switch {
+	case copyMode && audioOnly:
+		segDurs = uniformDurs(dur, audioStep(si))
+	case copyMode:
 		for i := 0; i < len(si.bounds)-1; i++ {
 			segDurs = append(segDurs, si.bounds[i+1]-si.bounds[i])
 		}
-		if !audioOnly {
-			segBitrates = si.segBitrates // bitrate hint is video-only
-		}
-	} else {
-		numSegs := int(math.Ceil(dur / hlsSegDur))
-		for i := 0; i < numSegs; i++ {
-			d := hlsSegDur
-			if remaining := dur - float64(i)*hlsSegDur; remaining < hlsSegDur {
-				d = remaining
-			}
-			segDurs = append(segDurs, d)
-		}
+		segBitrates = si.segBitrates // bitrate hint is video-only
+	default:
+		segDurs = uniformDurs(dur, hlsSegDur)
 	}
 
 	target := int(hlsSegDur)
@@ -920,27 +982,31 @@ func initPath(hash, q string, audioIdx int, useCopy bool) string {
 
 // ensureSegment guarantees a segment exists on disk at segPath. Cache hits
 // return immediately; in-flight requests for the same segment wait on a shared
-// channel so we never run two ffmpegs for the same key.
-func ensureSegment(srcPath, hash, codec, q string, segNum, audioIdx, mode int, useCopy bool) (string, error) {
+// channel so we never run two ffmpegs for the same key — and inherit the
+// generator's error, because a waiter that returns nil for a segment that was
+// never written 500s later with a bogus message.
+func ensureSegment(srcPath, hash, codec, q string, segNum, audioIdx, mode int, useCopy bool) (segPath string, err error) {
 	segPath, cacheKey := segPaths(hash, codec, q, segNum, audioIdx, mode, useCopy)
 
 	if _, err := os.Stat(segPath); err == nil {
 		return segPath, nil
 	}
 
-	ch := make(chan struct{})
-	if actual, loaded := hlsInFlight.LoadOrStore(cacheKey, ch); loaded {
+	fl := &inflight{done: make(chan struct{})}
+	if actual, loaded := hlsInFlight.LoadOrStore(cacheKey, fl); loaded {
+		other := actual.(*inflight)
 		select {
-		case <-actual.(chan struct{}):
-			return segPath, nil
+		case <-other.done:
+			return segPath, other.err
 		case <-time.After(90 * time.Second):
 			return segPath, fmt.Errorf("segment generation timed out")
 		}
 	}
 
 	defer func() {
+		fl.err = err
 		hlsInFlight.Delete(cacheKey)
-		close(ch)
+		close(fl.done)
 	}()
 
 	// AV1 copy-passthrough (q=qSrc) needs no profile — it's a remux, no encode.
@@ -959,22 +1025,34 @@ func ensureSegment(srcPath, hash, codec, q string, segNum, audioIdx, mode int, u
 		}
 	}
 
+	si := getSrcInfo(srcPath)
 	start := float64(segNum) * hlsSegDur
 	segDur := hlsSegDur
-	// Copy-passthrough segments ride keyframe-aligned bounds. The AV1 audio
-	// rendition (avCopy + segAudioOnly) MUST use the same bounds as the video
-	// rung so the demuxed renditions stay segment-aligned; h264's TS audio
-	// stays on the uniform grid.
-	if useCopy && (mode != segAudioOnly || avCopy) {
-		si := getSrcInfo(srcPath)
+	switch {
+	case avCopy && mode == segAudioOnly:
+		// The AV1 audio rendition rides its own uniform grid (audioStep), not
+		// the video rung's keyframe grid — indexing si.bounds here would hand
+		// the continuous pass a different -hls_time depending on which segment
+		// was asked for first, i.e. a whole track cut on the wrong grid.
+		segDur = audioStep(si)
+		if segNum >= len(uniformDurs(srcDur(si, srcPath), segDur)) {
+			return segPath, fmt.Errorf("segment %d out of range", segNum)
+		}
+	case useCopy && mode != segAudioOnly:
 		if segNum >= len(si.bounds)-1 {
 			return segPath, fmt.Errorf("segment %d out of range", segNum)
 		}
 		start = si.bounds[segNum]
 		segDur = si.bounds[segNum+1] - si.bounds[segNum]
+	default:
+		// Transcode rungs are generated on demand, so an out-of-range seg is a
+		// real ffmpeg spawn for media that doesn't exist — cap it at the
+		// playlist's own segment count.
+		if n := len(uniformDurs(srcDur(si, srcPath), hlsSegDur)); n > 0 && segNum >= n {
+			return segPath, fmt.Errorf("segment %d out of range", segNum)
+		}
 	}
 
-	var err error
 	if avCopy && mode == segAudioOnly {
 		// Audio: one continuous pass for the whole track (gapless, no
 		// per-segment AAC priming/overlap, no mid-file decode failures —
@@ -994,10 +1072,20 @@ func ensureSegment(srcPath, hash, codec, q string, segNum, audioIdx, mode int, u
 		if err == nil {
 			err = waitForFile(segPath, 120*time.Second)
 		}
-	} else if codec == CodecAV1 && mode != segAudioOnly {
-		err = generateAV1Segment(srcPath, segPath, start, segDur, p, audioIdx, mode)
 	} else {
-		err = generateSegment(srcPath, segPath, start, segDur, p, audioIdx, mode, useCopy)
+		// Live transcodes only. The copy passes above are already one ffmpeg
+		// per file and finish in seconds; these are one ffmpeg per SEGMENT and
+		// a seek fans out a burst of them, so they queue — past a handful of
+		// concurrent encodes nothing lands on time instead of the first few
+		// landing immediately.
+		segPool.Acquire()
+		defer segPool.Release()
+
+		if codec == CodecAV1 && mode != segAudioOnly {
+			err = generateAV1Segment(srcPath, segPath, start, segDur, p, audioIdx, mode)
+		} else {
+			err = generateSegment(srcPath, segPath, start, segDur, p, audioIdx, mode, useCopy)
+		}
 	}
 	if err != nil {
 		log.Printf("HLS segment error [%s codec=%s q=%s seg=%d audio=%d mode=%d copy=%v]: %v", filepath.Base(srcPath), codec, q, segNum, audioIdx, mode, useCopy, err)
@@ -1080,11 +1168,7 @@ func Prewarm(file, path string, srcHeight int, aTracks []audioMeta, defAudio int
 		// -c:v copy) now. Each flushes init + segments far ahead of playback,
 		// so by the time hls.js asks the cache is already populated. The video
 		// rung is audio-independent (the player's video MAP has no audio).
-		segDur := hlsSegDur
-		if si := getSrcInfo(path); len(si.bounds) >= 2 {
-			segDur = si.bounds[1] - si.bounds[0]
-		}
-		go ensureAV1Audio(path, hash, defAudio, segDur)
+		go ensureAV1Audio(path, hash, defAudio, audioStep(getSrcInfo(path)))
 		go ensureAV1Video(path, hash, hlsSegDur)
 		return
 	}
@@ -1400,10 +1484,11 @@ var av1VideoInFlight sync.Map // video dir -> chan struct{}
 // every seam (Superbad: seg N decoded to source bounds[N-1]). A single muxer
 // instance keeps a running decode clock, so the hls/fmp4 muxer writes correct
 // cumulative tfdt natively and cuts only at real source keyframes — no -ss,
-// no tfdt patch, no off-by-one. `-hls_time hlsSegDur` reproduces
-// segmentBoundaries' rule exactly, so the on-disk segments line up with the
-// playlist's si.bounds EXTINFs. Copy is a pure remux so it outruns playback
-// just like the audio pass. Same idempotent .done / in-flight contract.
+// no tfdt patch, no off-by-one. The playlist's EXTINFs come from muxerBounds,
+// which replicates the muxer's own absolute-grid rule for this exact segDur —
+// keep the two in step (TestE2E_AV1GridMatchesFFmpeg pins it). Copy is a
+// pure remux so it outruns playback just like the audio pass. Same idempotent
+// .done / in-flight contract.
 func ensureAV1Video(srcPath, hash string, segDur float64) error {
 	seg0, _ := segPaths(hash, CodecAV1, qSrc, 0, 0, segVideoOnly, true)
 	dir := filepath.Dir(seg0)
@@ -1470,25 +1555,27 @@ func waitForFile(path string, timeout time.Duration) error {
 
 var initInFlight sync.Map
 
-func ensureInit(srcPath, hash, q string, audioIdx int, useCopy bool) (string, error) {
-	out := initPath(hash, q, audioIdx, useCopy)
+func ensureInit(srcPath, hash, q string, audioIdx int, useCopy bool) (out string, err error) {
+	out = initPath(hash, q, audioIdx, useCopy)
 	if _, err := os.Stat(out); err == nil {
 		return out, nil
 	}
 
 	cacheKey := fmt.Sprintf("init:%s:%s:%d:%v", hash, q, audioIdx, useCopy)
-	ch := make(chan struct{})
-	if actual, loaded := initInFlight.LoadOrStore(cacheKey, ch); loaded {
+	fl := &inflight{done: make(chan struct{})}
+	if actual, loaded := initInFlight.LoadOrStore(cacheKey, fl); loaded {
+		other := actual.(*inflight)
 		select {
-		case <-actual.(chan struct{}):
-			return out, nil
+		case <-other.done:
+			return out, other.err
 		case <-time.After(2 * time.Minute):
 			return out, fmt.Errorf("init generation timed out")
 		}
 	}
 	defer func() {
+		fl.err = err
 		initInFlight.Delete(cacheKey)
-		close(ch)
+		close(fl.done)
 	}()
 
 	if useCopy {
@@ -1498,11 +1585,7 @@ func ensureInit(srcPath, hash, q string, audioIdx int, useCopy bool) (string, er
 		if q == "audio" {
 			// The audio init.m4s is emitted by the single continuous pass
 			// (same encoder that writes the segments → matching esds).
-			segDur := hlsSegDur
-			if si := getSrcInfo(srcPath); len(si.bounds) >= 2 {
-				segDur = si.bounds[1] - si.bounds[0]
-			}
-			if err := ensureAV1Audio(srcPath, hash, audioIdx, segDur); err != nil {
+			if err := ensureAV1Audio(srcPath, hash, audioIdx, audioStep(getSrcInfo(srcPath))); err != nil {
 				return out, err
 			}
 			if err := waitForFile(out, 120*time.Second); err != nil {
