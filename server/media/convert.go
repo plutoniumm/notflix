@@ -438,7 +438,22 @@ func remuxAudio(srcPath string) error {
 		return err
 	}
 
-	return os.Rename(tmp, srcPath)
+	if err := os.Rename(tmp, srcPath); err != nil {
+		return err
+	}
+	srcInfoMap.Delete(srcPath) // rewritten in place; the probe cache is now stale
+
+	// `-c:v copy` kept the source's AV1 video, so the file on disk really is
+	// AV1 — and without the mark MediaCodec answers h264, which makes HLS
+	// decode AV1 and re-encode H.264 per segment: exactly the live transcode
+	// the AV1 path exists to avoid. toMP4 stamps its output the same way.
+	if vc == "av1" {
+		if err := SetMediaCodec(srcPath, CodecAV1); err != nil {
+			log.Printf("[convert] codec mark failed for %s: %v", name, err)
+		}
+	}
+
+	return nil
 }
 
 // fresh reports whether path exists and was modified in the last 10 minutes —

@@ -78,6 +78,9 @@ func GenerateThumbnails(dir string) {
 
 		ext := strings.ToLower(filepath.Ext(d.Name()))
 		if ext == ".mp4" {
+			if library.IsBusy(path) {
+				return nil
+			}
 			if library.IsCorrupt(path) {
 				skipped++
 				return nil

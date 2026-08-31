@@ -263,7 +263,7 @@ func TestHLSMaster_AV1MarkedFile(t *testing.T) {
 	r := setupRouter(lib)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/hls/master?file=movie.mp4", nil)
+	req := httptest.NewRequest("GET", "/api/hls/master?file=movie.mp4&av1=1", nil)
 	r.ServeHTTP(w, req)
 
 	body := w.Body.String()
@@ -292,6 +292,74 @@ func TestHLSMaster_AV1MarkedFile(t *testing.T) {
 	}
 	if strings.Count(body, "#EXT-X-STREAM-INF") != 1 {
 		t.Errorf("av1 master must be a single video rung (no ladder): %s", body)
+	}
+}
+
+// The AV1 master is a single av01 rung with NO h264 alternate, and iOS plays
+// HLS natively (no MSE negotiation), so a device without an AV1 decoder gets
+// MEDIA_ERR_SRC_NOT_SUPPORTED and a black screen for every converted title.
+// The player states its capability with &av1=0/1; without the param the UA
+// decides, and unsure means h264 — which always plays.
+func TestHLSMaster_AV1CapabilityGate(t *testing.T) {
+	chdirTemp(t)
+	root := filepath.Join(t.TempDir(), "lib")
+	makeAV1MP4(t, root, "movie.mp4")
+
+	if err := SetMediaCodec("movie.mp4", CodecAV1); err != nil {
+		t.Fatal(err)
+	}
+	r := setupRouter(&library.Library{Roots: []string{root}})
+
+	const (
+		iosUA    = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+		chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+		safariUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+	)
+
+	for _, tc := range []struct {
+		name, url, ua string
+		wantAV1       bool
+	}{
+		{"param says no", "/api/hls/master?file=movie.mp4&av1=0", chromeUA, false},
+		{"param says yes", "/api/hls/master?file=movie.mp4&av1=1", iosUA, true},
+		{"no param, ios", "/api/hls/master?file=movie.mp4", iosUA, false},
+		{"no param, desktop chrome", "/api/hls/master?file=movie.mp4", chromeUA, true},
+		{"no param, desktop safari", "/api/hls/master?file=movie.mp4", safariUA, false},
+		{"no param, no ua", "/api/hls/master?file=movie.mp4", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", tc.url, nil)
+			req.Header.Set("User-Agent", tc.ua)
+			r.ServeHTTP(w, req)
+
+			body := w.Body.String()
+			if w.Code != http.StatusOK {
+				t.Fatalf("status %d body %s", w.Code, body)
+			}
+
+			gotAV1 := strings.Contains(body, "av01.")
+			if gotAV1 != tc.wantAV1 {
+				t.Fatalf("av1 master = %v, want %v: %s", gotAV1, tc.wantAV1, body)
+			}
+			if tc.wantAV1 {
+				if !strings.Contains(body, "GROUP-ID=\"aud\"") {
+					t.Errorf("capable client must get the demuxed CMAF master: %s", body)
+				}
+				return
+			}
+			// Downgraded clients take the existing h264 ladder — the same URLs
+			// (no codec param) every h264 client gets, so the cache is shared.
+			if !strings.Contains(body, "avc1.") {
+				t.Errorf("downgraded client must get the h264 ladder: %s", body)
+			}
+			if strings.Contains(body, "codec=av1") {
+				t.Errorf("downgraded client must not be pointed at av1 renditions: %s", body)
+			}
+			if strings.Count(body, "#EXT-X-STREAM-INF") < 2 {
+				t.Errorf("h264 fallback must be the full ladder: %s", body)
+			}
+		})
 	}
 }
 
@@ -408,6 +476,40 @@ func TestHLSPlaylist_H264NoMap(t *testing.T) {
 	}
 	if !strings.Contains(body, "#EXT-X-VERSION:3") {
 		t.Errorf("h264 playlist stays at version 3: %s", body)
+	}
+}
+
+// --- segment guards -----------------------------------------------------------
+
+// seg= is client-supplied: past the end of the playlist it used to be a real
+// ffmpeg spawn for media that doesn't exist, deduped only by cache key.
+func TestEnsureSegment_RejectsPastEnd(t *testing.T) {
+	chdirTemp(t)
+	root := filepath.Join(t.TempDir(), "lib")
+	src := makeMP4(t, root, "movie.mp4") // 2s → one 4s segment
+
+	if _, err := ensureSegment(src, "HASH", CodecH264, "720p", 999999, 0, segMuxed, false); err == nil {
+		t.Error("seg 999999 accepted — that's an ffmpeg spawn per bogus request")
+	}
+	if _, err := ensureSegment(src, "HASH", CodecH264, "720p", 0, 0, segMuxed, false); err != nil {
+		t.Errorf("seg 0 must still generate: %v", err)
+	}
+}
+
+// A waiter on the in-flight slot used to get (segPath, nil) when the generator
+// failed, then 500 later with a misleading message.
+func TestEnsureSegment_WaiterInheritsError(t *testing.T) {
+	chdirTemp(t)
+	_, key := segPaths("HASH", CodecH264, "720p", 3, 0, segMuxed, false)
+
+	fl := &inflight{done: make(chan struct{}), err: fmt.Errorf("generator boom")}
+	close(fl.done)
+	hlsInFlight.Store(key, fl)
+	defer hlsInFlight.Delete(key)
+
+	_, err := ensureSegment("missing.mp4", "HASH", CodecH264, "720p", 3, 0, segMuxed, false)
+	if err == nil || !strings.Contains(err.Error(), "generator boom") {
+		t.Errorf("waiter err = %v, want the generator's", err)
 	}
 }
 

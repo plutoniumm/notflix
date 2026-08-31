@@ -117,6 +117,26 @@ func makeEpisode(t *testing.T, path string, segments ...string) {
 	os.Chtimes(path, old, old)
 }
 
+// Marks are keyed by basename so a moved episode keeps them; marks written
+// before that are still read at their old dir-qualified key.
+func TestSkipVal_SurvivesMove(t *testing.T) {
+	chdirTemp(t)
+
+	if err := library.KVSetValue(skipKey("Show/ep1.mp4"), map[string]any{"v": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if skipVal("Sorted/S01/ep1.mp4") == nil {
+		t.Error("skip mark lost when the episode moved dirs")
+	}
+
+	if err := library.KVSetValue("skip:"+library.Hash("Show/ep2.mp4"), map[string]any{"v": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if skipVal("Show/ep2.mp4") == nil {
+		t.Error("legacy dir-qualified mark no longer readable")
+	}
+}
+
 func TestE2E_DetectSkips(t *testing.T) {
 	if testing.Short() {
 		t.Skip("e2e ffmpeg test")

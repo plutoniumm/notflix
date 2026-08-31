@@ -76,7 +76,7 @@ func TestHLSMaster_HDR_AV1_AdvertisesTenBit(t *testing.T) {
 	lib := &library.Library{Roots: []string{root}}
 	r := setupRouter(lib)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/hls/master?file=hdr.mp4", nil))
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/hls/master?file=hdr.mp4&av1=1", nil))
 
 	body := w.Body.String()
 	if w.Code != http.StatusOK {
