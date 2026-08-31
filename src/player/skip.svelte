@@ -57,7 +57,7 @@
     /* Offsets, not padding: this is pinned by right/bottom, so the inset has
        to move the button rather than inflate it. env() is 0 without a notch. */
     right: calc(28px + env(safe-area-inset-right));
-    bottom: calc(110px + env(safe-area-inset-bottom));
+    bottom: calc(110px + var(--safe-b, env(safe-area-inset-bottom)));
     z-index: 12;
     display: flex;
     align-items: center;

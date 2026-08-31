@@ -193,9 +193,10 @@
     left: 0;
     right: 0;
     z-index: 10;
-    /* No padding of its own, so a bare env() is safe — and it insets the
-       scrub track too, which keeps the track box and its hit-test aligned. */
-    padding-bottom: env(safe-area-inset-bottom);
+    /* No padding of its own, so the inset can be the padding — and it insets
+       the scrub track too, which keeps the track box and its hit-test
+       aligned. There is no --safe-l/r token, so those stay raw env(). */
+    padding-bottom: var(--safe-b, env(safe-area-inset-bottom));
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
     background: linear-gradient(

@@ -28,7 +28,7 @@
   import Subs from "./subs";
   import WatchProgress from "./watch";
   import { Down, isSupported } from "../library/dl";
-  import { Touch, Hotkeys, togglePip, pipOk } from "./ux";
+  import { Touch, Hotkeys, togglePip, pipOk, av1Ok } from "./ux";
   import { SAVE_INTERVAL_MS } from "../core/events.svelte";
   import { AVSync } from "./avsync";
   import { PlayerView } from "./view.svelte";
@@ -45,8 +45,12 @@
   // Any extension the server calls playable (.mp4/.mkv/.mov) reaches here, so
   // swap whatever is present — matching the server's own `base` computation.
   const sub = $derived(videoParam.replace(/\.[^./]+$/, ".vtt"));
+  // Probed once per mount — it's a UA capability, not element state. Sent so
+  // the server can pick the h264 ladder over the AV1-only master rather than
+  // guessing from the User-Agent.
+  const av1 = av1Ok() ? 1 : 0;
   const masterSrc = $derived(
-    `/api/hls/master?file=${encodeURIComponent(videoParam)}`,
+    `/api/hls/master?file=${encodeURIComponent(videoParam)}&av1=${av1}`,
   );
   const fileSrc = $derived(`/video/${videoParam}`);
   let autoplay =

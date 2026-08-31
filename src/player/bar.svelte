@@ -113,7 +113,7 @@
     /* viewport-fit=cover puts the page under the notch; max() keeps the real
        padding on devices where the inset resolves to 0. */
     padding: 12px 16px;
-    padding-top: max(12px, env(safe-area-inset-top));
+    padding-top: max(12px, var(--safe-t, env(safe-area-inset-top)));
     padding-left: max(16px, env(safe-area-inset-left));
     padding-right: max(16px, env(safe-area-inset-right));
     background: linear-gradient(

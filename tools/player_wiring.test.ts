@@ -3,7 +3,32 @@
 // .ts files) — none of it can exercise a real touchscreen, so it guards the
 // wiring, not the behaviour. Run: node tools/player_wiring.test.ts
 import { readFileSync } from "node:fs";
+import { register } from "node:module";
 import { compile } from "svelte/compiler";
+
+// Source imports are extensionless (Vite bundler resolution); teach Node to
+// retry with .ts so the real modules load unmodified.
+register(
+  "data:text/javascript," +
+    encodeURIComponent(`
+      export async function resolve(spec, ctx, next) {
+        try {
+          return await next(spec, ctx);
+        } catch (e) {
+          if (spec.startsWith(".")) return await next(spec + ".ts", ctx);
+          throw e;
+        }
+      }
+    `),
+  import.meta.url,
+);
+
+// Runes are compile-time in Svelte but plain calls syntactically, so an
+// identity shim lets the real modules import under bare Node.
+(globalThis as any).$state = Object.assign((v: any) => v, {
+  snapshot: (v: any) => v,
+});
+(globalThis as any).$derived = (v: any) => v;
 
 let failed = 0;
 function check(name: string, ok: boolean) {
@@ -89,6 +114,43 @@ check("avsync is gated off Safari", avsync.includes("IS_ANY_SAFARI"));
 check("avsync is gated off iOS", avsync.includes("IS_IOS"));
 check("avsync exposes availability", avsync.includes("get on()"));
 check("avsync resumes on playing", avsync.includes('addEventListener("playing"'));
+
+// --- AV1 capability hint on the master request ---
+check("master URL carries the av1 hint", /master\?file=\$\{[^}]+\}&av1=\$\{av1\}/.test(player.source));
+// The server recognises only the literal "1"/"0" — anything else (including a
+// stringified boolean) falls through to its User-Agent heuristic.
+check("hint is a literal 1 or 0", player.source.includes("const av1 = av1Ok() ? 1 : 0"));
+// Master only: it hands out URLs for whichever codec it resolved, so the
+// choice propagates to variant/segment/init on its own.
+check("hint is on the master request only", (player.source.match(/av1=/g) ?? []).length === 1);
+
+const AV1 = 'video/mp4; codecs="av01.0.05M.08"';
+const { av1Ok } = await import("../src/player/ux.ts");
+
+// canPlayType answers "", "maybe" or "probably" — only "" means no. The
+// undeterminable cases must answer 0, since h264 always plays but a wrong
+// yes is a black screen.
+function probe(mse: unknown, canPlay: unknown): boolean {
+  (globalThis as any).window =
+    mse === "absent" ? {} : { MediaSource: { isTypeSupported: () => mse } };
+  (globalThis as any).document = {
+    createElement: () => {
+      if (canPlay === "throws") throw new Error("no video element");
+
+      return { canPlayType: (t: string) => (t === AV1 ? canPlay : "") };
+    },
+  };
+
+  return av1Ok();
+}
+
+check("MSE says yes", probe(true, "") === true);
+// The trap `||` would fall through here and consult canPlayType instead.
+check("MSE says no beats canPlayType", probe(false, "probably") === false);
+check("no MSE, canPlayType probably", probe("absent", "probably") === true);
+check("no MSE, canPlayType maybe", probe("absent", "maybe") === true);
+check("no MSE, canPlayType empty", probe("absent", "") === false);
+check("nothing determinable", probe("absent", "throws") === false);
 
 console.log(failed ? `${failed} failure(s)` : "ok — player wiring");
 process.exit(failed ? 1 : 0);

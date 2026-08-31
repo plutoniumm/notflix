@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { isSupported, Down } from "../library/dl";
+  import { usePoll } from "../core/poll";
   import ProgressBar from "../components/ProgressBar.svelte";
   import Icon from "../components/Icon.svelte";
 
@@ -28,8 +29,13 @@
 
   let state = $state<State>("idle");
   let progress = $state(0);
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let stopPoll: (() => void) | null = null;
   let unsub: (() => void) | null = null;
+
+  function endPoll() {
+    stopPoll?.();
+    stopPoll = null;
+  }
 
   async function init(vp: string) {
     if (!bgfetch) return;
@@ -42,7 +48,9 @@
           ? "error"
           : "downloading";
     if (state === "downloading" && record.bgFetchId) {
-      pollTimer = setInterval(async () => {
+      // usePoll skips ticks while the tab is hidden — this used to hit
+      // IndexedDB every 500ms in a backgrounded tab forever.
+      stopPoll = usePoll(async () => {
         // Down.progress is NaN while BackgroundFetch has no downloadTotal yet.
         const p = await Down.progress(record.bgFetchId!);
         progress = Number.isFinite(p) ? p : 0;
@@ -51,10 +59,7 @@
   }
 
   async function remove() {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
+    endPoll();
     await Down.del(videoParam);
     state = "idle";
     progress = 0;
@@ -68,27 +73,19 @@
     progress = 0;
     init(vp);
 
-    return () => {
-      if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-      }
-    };
+    return endPoll;
   });
 
   onMount(() => {
     unsub = Down.on((vp, record) => {
       if (vp !== videoParam) return;
-      if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-      }
+      endPoll();
       state = record ? (record.status === "done" ? "done" : "error") : "idle";
     });
   });
 
   onDestroy(() => {
-    if (pollTimer) clearInterval(pollTimer);
+    endPoll();
     unsub?.();
   });
 </script>
