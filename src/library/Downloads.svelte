@@ -1,15 +1,14 @@
 <script lang="ts">
   import ProgressBar from "../components/ProgressBar.svelte";
+  import { rate } from "../core/fmt";
 
   let {
     jobs,
-    fmtBytes,
     onRemove,
     onPause,
     onResume,
   }: {
     jobs: Downjob[];
-    fmtBytes: (b: number) => string;
     onRemove: (gid: string) => void;
     onPause: (gid: string) => void;
     onResume: (gid: string) => void;
@@ -35,7 +34,7 @@
               />
             </div>
             <span class="fs-xs tx-1">
-              {j.status === "paused" ? "paused" : `${fmtBytes(j.speed)}/s`}
+              {j.status === "paused" ? "paused" : rate(j.speed)}
             </span>
           </div>
         </div>

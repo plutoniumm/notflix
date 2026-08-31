@@ -3,10 +3,11 @@
   import { api } from "../core/api";
   import { kv } from "../core/kv";
   import { toast } from "../core/toast.svelte";
-  import { JOBS_POLL_MS, DL_POLL_MS, PWA_POLL_MS } from "../core/events.svelte";
+  import { ARM_MS, JOBS_POLL_MS, DL_POLL_MS, PWA_POLL_MS } from "../core/events.svelte";
   import { usePoll } from "../core/poll";
   import { Down, isSupported } from "./dl";
   import { clean } from "../core/video";
+  import { join } from "../core/path";
 
   import Header from "./Header.svelte";
   import Magnet from "./Magnet.svelte";
@@ -14,7 +15,8 @@
   import FolderRow from "./FolderRow.svelte";
   import Organize from "./Organize.svelte";
   import ProgressBar from "../components/ProgressBar.svelte";
-  import ProcessStatus from "./ProcessStatus.svelte";
+  import DeleteBtn from "../components/DeleteBtn.svelte";
+  import ProcessStatusPanel from "./ProcessStatus.svelte";
 
   declare const __BUILD_TIME__: string;
   const frontendBuild = __BUILD_TIME__;
@@ -41,6 +43,9 @@
   >([]);
   let dirSizes = $state<Record<string, { bytes: number; root: string }>>({});
 
+  let armed = $state<string | null>(null);
+  let armTimer: ReturnType<typeof setTimeout> | undefined;
+
   let pollers: (() => void)[] = [];
   let pwaUnsub: (() => void) | null = null;
   let wasProcessing = false;
@@ -48,7 +53,22 @@
   onDestroy(() => {
     pollers.forEach((stop) => stop());
     pwaUnsub?.();
+    clearTimeout(armTimer);
   });
+
+  // Deletes are two-step: the first tap arms, a second within ARM_MS commits.
+  // These buttons sit inches apart in a dense list on a phone, and the server
+  // deletes off the disk.
+  function arm(key: string) {
+    armed = key;
+    clearTimeout(armTimer);
+    armTimer = setTimeout(() => (armed = null), ARM_MS);
+  }
+
+  function disarm() {
+    armed = null;
+    clearTimeout(armTimer);
+  }
 
   async function pollPwaDownloads() {
     let records: DownloadRecord[];
@@ -158,12 +178,6 @@
     if (d) data = d;
   }
 
-  function fmtBytes(b: number): string {
-    if (b >= 1e12) return (b / 1e12).toFixed(1) + " TB";
-    if (b >= 1e9) return (b / 1e9).toFixed(1) + " GB";
-    return (b / 1e6).toFixed(0) + " MB";
-  }
-
   function startEdit(path: string, name: string) {
     editing = path;
     val = name;
@@ -192,10 +206,17 @@
   }
 
   async function delFile(dir: string, f: string) {
-    const rel = dir === "." ? f : `${dir}/${f}`;
-    const res = await api.deleteVideo(rel);
-    if (res === null) {
-      toast.err(`Delete failed: ${rel}`);
+    const rel = join(dir, f);
+    if (armed !== rel) {
+      arm(rel);
+      return;
+    }
+    disarm();
+
+    const res = await api.deleteVideo(rel, { tag: `Delete ${f}` });
+    if (res === null) return;
+    if (res.ok === false) {
+      toast.err(`Delete failed: ${res.error ?? rel}`);
       return;
     }
 
@@ -204,9 +225,16 @@
   }
 
   async function delDir(dir: string) {
-    const res = await api.deleteDir(dir);
-    if (!res?.ok) {
-      toast.err("Delete failed: " + (res?.error ?? "unknown"));
+    if (armed !== dir) {
+      arm(dir);
+      return;
+    }
+    disarm();
+
+    const res = await api.deleteDir(dir, { tag: `Delete ${dir}` });
+    if (res === null) return;
+    if (res.ok === false) {
+      toast.err(`Delete failed: ${res.error ?? dir}`);
       return;
     }
 
@@ -220,23 +248,9 @@
   }
 
   async function addTorrentFile(file: File, dir: string) {
-    try {
-      const form = new FormData();
-      form.append("torrent", file);
-      form.append("dir", dir);
-      const r = await fetch("/api/aria2/add-torrent", {
-        method: "POST",
-        body: form,
-      });
-      if (!r.ok) {
-        const text = await r.text().catch(() => "");
-        toast.err(`Torrent upload failed: HTTP ${r.status} ${text.slice(0, 80)}`);
-        return;
-      }
-      toast.ok(`Torrent uploaded: ${file.name}`);
-    } catch (err: any) {
-      toast.err(`Torrent upload failed: ${err?.message ?? err}`);
-    }
+    const res = await api.aria2.addTorrent(file, dir, { tag: "Torrent upload" });
+    if (res === null) return;
+    toast.ok(`Torrent uploaded: ${file.name}`);
   }
 
   async function removeDownload(gid: string) {
@@ -293,24 +307,18 @@
   );
 </script>
 
-<div style="min-height:100vh">
+<div style="min-height:100vh; min-height:100dvh">
   <Header
     {rows}
     {total}
     {disks}
-    {fmtBytes}
     processing={processingLib}
     onProcess={processLibrary}
   />
-  <Magnet
-    {disks}
-    {fmtBytes}
-    onAdd={addDownload}
-    onAddTorrent={addTorrentFile}
-  />
+  <Magnet {disks} onAdd={addDownload} onAddTorrent={addTorrentFile} />
 
   <main>
-    <ProcessStatus status={procStatus} {jobs} />
+    <ProcessStatusPanel status={procStatus} {jobs} />
 
     {#if corruptFiles.length > 0}
       <section class="corrupt surface flow-h">
@@ -328,13 +336,11 @@
                 {cf.dir === "." ? "Root" : cf.dir} · {cf.root}
               </span>
             </div>
-            <button
-              class="btn-icon danger sh-0"
+            <DeleteBtn
+              armed={armed === join(cf.dir, cf.name)}
               title="Delete file"
               onclick={() => delFile(cf.dir, cf.name)}
-            >
-              🗑
-            </button>
+            />
           </div>
         {/each}
       </section>
@@ -344,7 +350,6 @@
 
     <Downloads
       jobs={dlJobs}
-      {fmtBytes}
       onRemove={removeDownload}
       onPause={pauseDownload}
       onResume={resumeDownload}
@@ -392,7 +397,7 @@
           diskTotal={disk?.total ?? 0}
           hidden={hiddenSet.has(dir)}
           onToggleHidden={() => toggleHidden(dir)}
-          {fmtBytes}
+          {armed}
         />
       {/each}
     {/if}

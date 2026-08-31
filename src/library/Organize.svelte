@@ -3,6 +3,8 @@
   import { api } from "../core/api";
   import { toast } from "../core/toast.svelte";
   import { clean } from "../core/video";
+  import { ORGANIZE_POLL_MS } from "../core/events.svelte";
+  import { usePoll } from "../core/poll";
 
   type Move = { file: string; root: string; folder: string };
   type Plan = {
@@ -23,7 +25,7 @@
   let excluded = $state(new Set<string>());
   let note = $state("");
   let stage = $state("");
-  let poll: ReturnType<typeof setInterval> | null = null;
+  let stop: (() => void) | null = null;
 
   const key = (m: Move) => `${m.root}/${m.file}`;
 
@@ -48,8 +50,8 @@
           : "classifying…";
 
   function stopPoll() {
-    if (poll) clearInterval(poll);
-    poll = null;
+    stop?.();
+    stop = null;
   }
 
   function finish(s: Plan) {
@@ -81,7 +83,7 @@
   function startPoll() {
     loading = true;
     stopPoll();
-    poll = setInterval(check, 2000);
+    stop = usePoll(check, ORGANIZE_POLL_MS);
   }
 
   async function suggest() {

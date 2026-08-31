@@ -3,7 +3,7 @@
 // to be called inside onMount and the dispose returned (or pushed onto a
 // cleanup list).
 export function usePoll(
-  fn: () => void | Promise<void>,
+  fn: () => unknown,
   intervalMs: number,
   opts: { immediate?: boolean } = {},
 ): () => void {

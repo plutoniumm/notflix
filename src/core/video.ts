@@ -1,3 +1,5 @@
+import { join } from "./path";
+
 const REMOVES = [
   "nflx",
   "amzn",
@@ -85,9 +87,16 @@ export function nextVid(
 }
 
 export function vidURL(dir: string, name: string, autoplay = false): string {
-  const raw = dir === "." ? name : `${dir}/${name}`;
+  return `/?video=${encodeURIComponent(join(dir, name))}` + (autoplay ? "&autoplay=1" : "");
+}
 
-  return `/?video=${encodeURIComponent(raw)}` + (autoplay ? "&autoplay=1" : "");
+// A thumbnail only exists once the thumbs phase has run, so a miss is routine
+// — swap in the logo instead of the browser's broken-image glyph.
+export function thumbFail(e: Event) {
+  const img = e.currentTarget as HTMLImageElement;
+
+  img.src = "/assets/tight.svg";
+  img.onerror = null;
 }
 
 export function parseRaw(raw: string): { dir: string; name: string } {

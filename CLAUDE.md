@@ -15,6 +15,8 @@ pnpm run build    # frontend production build → public/assets/
 
 Tests live in `server/media/dual_path_test.go` and cover the codec selector, segPaths layout, master/playlist generation, and an ffmpeg-driven AV1 init/segment round-trip. Run with `go test ./server/media/`. The e2e tests skip cleanly if `libsvtav1` isn't in the local ffmpeg build (`testing.Short()` also skips them).
 
+Frontend: `pnpm run build && node --test tools/*.test.ts` (node strips the types itself; no runner dependency). `fmt.test.ts` pins the edge cases the old per-component formatters got wrong — hour tiers, sub-MB byte tiers, NaN and negatives. `mobile.test.ts` asserts on the compiled bundle for the touch/PWA rules that can't be exercised without a device: every hover-revealed control also reveals under `@media (hover: none)` (an opacity-0 button still takes taps), 44px touch targets, 16px fields (iOS zooms in below that and never back out), safe-area insets, `100dvh`.
+
 ## Architecture
 
 **Go backend (Gin)** serves both the API and the static frontend assets from `public/`. The backend lives in three sub-packages, each owning a domain:
@@ -29,7 +31,8 @@ Package dependencies: `library` is standalone. `jobs` imports `library` (for `Fi
 
 **Svelte 5 frontend** compiled by Vite into `public/assets/`. Entry: `src/main.ts` → `src/App.svelte`. The tree mirrors the backend:
 
-- `src/core/` — shared primitives: `api.ts` (raw `GET/POST/DEL` + typed `api.*` namespace), `kv.ts` (typed KV helpers), `events.svelte.ts` (`PlayerState` class + timing constants), `toast.svelte.ts` + `ToastHost.svelte` (app-wide toast bus, mounted once in `App.svelte`), `idb.ts`, `clickOutside.ts`, `video.ts` utilities.
+- `src/core/` — shared primitives: `api.ts` (raw `GET/POST/DEL/POSTForm/head` + typed `api.*` namespace), `fmt.ts` (**every** number→string: `dur`/`durWords`/`bytes`/`rate`/`ago`/`pct` — never hand-roll a formatter in a component again), `path.ts` (`join(dir, name)`, which knows `dir === "."` means the root), `store.ts` (`local(key, fallback)` — localStorage throws when site data is blocked, so never call it directly), `kv.ts` (typed KV helpers), `poll.ts` (`usePoll` — hidden-tab-aware interval; use it instead of `setInterval`), `events.svelte.ts` (`PlayerState` class + timing constants; re-exports `fmtTime`/`fmtAgo` from `fmt.ts`), `toast.svelte.ts` + `ToastHost.svelte` (app-wide toast bus, mounted once in `App.svelte`), `idb.ts`, `clickOutside.ts`, `video.ts` utilities (`clean`, `vidURL`, `thumbFail`).
+- `src/components/` — presentational shared bits: `MediaCard.svelte` (the one video tile — owns the `/images/<key>.jpg` → `/assets/tight.svg` fallback; `overlay`/`footer` snippets for per-screen extras), `ScrollRow.svelte` (arrow chrome around a caller-supplied `.cards` strip), `ProgressBar`, `Badge`, `EmptyState`, `Icon`, `BackLink`.
 - `src/library/` — Home, Manage, and their components (FileRow, FolderRow, Header, Magnet, Downloads) plus `dl.ts` (BackgroundFetch + IndexedDB download manager).
 - `src/player/` — Player, Subs, AudioPicker, Dropdown, all player subcomponents (bar, progress, volume, sync, whisper, related, Download), plus `subs.ts`, `ux.ts`, `avsync.ts`, `tracker.ts`, `view.svelte.ts` (`PlayerView` composing `PlayerState + SubsManager + AudioManager`).
 

@@ -7,26 +7,13 @@ export const SW_POLL_MS = 60_000;
 export const JOBS_POLL_MS = 2000;
 export const DL_POLL_MS = 2000;
 export const PWA_POLL_MS = 1000;
+export const ORGANIZE_POLL_MS = 2000;
+export const TICK_MS = 1000;
+export const ARM_MS = 3000;
 
-export function fmtTime(s: number): string {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = Math.floor(s % 60);
-  if (h > 0)
-    return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-  return `${m}:${String(sec).padStart(2, "0")}`;
-}
-
-// Relative time from a past wall-clock ms to "now": "just now", "Xm ago",
-// "Xh ago", "Xd ago", "Xmo ago". Clamps negatives (clock skew) to "just now".
-export function fmtAgo(atMs: number): string {
-  const s = Math.max(0, (Date.now() - atMs) / 1000);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  if (s < 86400 * 30) return `${Math.floor(s / 86400)}d ago`;
-  return `${Math.floor(s / (86400 * 30))}mo ago`;
-}
+// Formatters live in core/fmt; re-exported under their historical names so
+// player callers keep one import site.
+export { dur as fmtTime, ago as fmtAgo } from "./fmt";
 
 export class PlayerState {
   paused = $state(true);

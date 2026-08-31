@@ -1,5 +1,7 @@
 <script lang="ts">
   import { clean } from "../core/video";
+  import { bytes, pct } from "../core/fmt";
+  import DeleteBtn from "../components/DeleteBtn.svelte";
   import FileRow from "./FileRow.svelte";
 
   type FileEntry = { name: string; root: string; corrupt?: boolean };
@@ -20,7 +22,7 @@
     diskTotal = 0,
     hidden = false,
     onToggleHidden,
-    fmtBytes,
+    armed = null,
   }: {
     dir: string;
     files: FileEntry[];
@@ -37,10 +39,10 @@
     diskTotal?: number;
     hidden?: boolean;
     onToggleHidden?: () => void;
-    fmtBytes?: (b: number) => string;
+    armed?: string | null;
   } = $props();
 
-  const pct = $derived(diskTotal > 0 ? (sizeBytes / diskTotal) * 100 : 0);
+  const share = $derived(diskTotal > 0 ? (sizeBytes / diskTotal) * 100 : 0);
 
   const converting = $derived(
     jobs.some((j) => files.some((f) => f.name === j.name)),
@@ -76,7 +78,7 @@
         onclick={(e) => e.stopPropagation()}
       >
         <input
-          class="rename-input fs-sm"
+          class="field rename-input"
           bind:value={val}
           onkeydown={(e) => e.key === "Escape" && cancelEdit()}
           onblur={confirmEdit}
@@ -92,8 +94,8 @@
         >
       {/if}
       <span class="fs-sm tx-1 sh-0" style="margin-left:auto">
-        {#if sizeBytes > 0 && fmtBytes}
-          {fmtBytes(sizeBytes)} · {pct.toFixed(1)}% of disk ·
+        {#if sizeBytes > 0}
+          {bytes(sizeBytes)} · {pct(share, 1)} of disk ·
         {/if}
         {files.length} files
       </span>
@@ -122,16 +124,14 @@
         >
           ✏️
         </button>
-        <button
-          class="btn-icon danger"
+        <DeleteBtn
+          armed={armed === dir}
           title="Delete folder"
           onclick={(e) => {
             e.stopPropagation();
             onDelDir();
           }}
-        >
-          🗑
-        </button>
+        />
       {:else}
         <div style="width:32px">&nbsp;</div>
       {/if}
@@ -142,6 +142,7 @@
     {#each files as f (f.name + "@" + f.root)}
       <FileRow
         {dir}
+        {armed}
         f={f.name}
         root={uniformRoot ? null : f.root}
         corrupt={f.corrupt}
@@ -247,12 +248,7 @@
   .rename-input {
     flex: 1;
     width: 100%;
-    background: var(--bg-2);
-    border: 1px solid var(--red);
-    color: var(--tx-5);
-    padding: 5px 12px;
-    border-radius: var(--r-md);
-    font-family: inherit;
+    border-color: var(--red);
     box-shadow: 0 0 0 4px var(--red-soft);
   }
 </style>
