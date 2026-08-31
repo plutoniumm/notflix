@@ -658,6 +658,45 @@ func HLSAVOffset(c *gin.Context, lib *library.Library) {
 	c.JSON(http.StatusOK, gin.H{"offset_ms": offsetMs})
 }
 
+// av1Client reports whether the requesting client can decode AV1.
+//
+// The player answers authoritatively with `&av1=1` / `&av1=0` (from
+// MediaSource.isTypeSupported, or video.canPlayType where MSE is missing).
+// Without the param we guess from the User-Agent, and the guess is
+// deliberately lopsided: h264 always plays, while AV1 handed to a device that
+// can't decode it is MEDIA_ERR_SRC_NOT_SUPPORTED and a bare error overlay.
+// Nothing downstream negotiates it either — iOS plays HLS NATIVELY (video.js
+// leaves overrideNative false on Safari), so there is no MSE-level capability
+// check to catch a codec the device lacks.
+//
+// Anything Apple therefore defaults to h264: no iPhone before the 15 Pro and
+// no pre-M-series iPad has an AV1 decoder, and AVFoundation won't software
+// decode it. Only the engines that ship dav1d on every desktop platform
+// (Chromium and Firefox — but NOT their iOS builds, which are WebKit
+// underneath) are assumed capable. A capable Safari still gets AV1: it sends
+// the param.
+func av1Client(c *gin.Context) bool {
+	switch c.Query("av1") {
+	case "1":
+		return true
+	case "0":
+		return false
+	}
+
+	ua := strings.ToLower(c.GetHeader("User-Agent"))
+	if strings.Contains(ua, "iphone") || strings.Contains(ua, "ipad") || strings.Contains(ua, "ipod") {
+		return false
+	}
+
+	for _, engine := range []string{"chrome", "chromium", "firefox", "edg/"} {
+		if strings.Contains(ua, engine) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func HLSMaster(c *gin.Context, lib *library.Library) {
 	file := c.Query("file")
 	path := lib.FindFile(file)
@@ -677,6 +716,14 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 	multiAudio := len(aTracks) > 1
 
 	codec := MediaCodec(file)
+	// Client capability. This is the ONLY per-client dimension of the master;
+	// everything it points at (variant playlists, segments, inits) is
+	// content-addressed by hash/codec/rung, so a downgraded client just takes
+	// the existing h264 ladder URLs and shares that cache with every other
+	// h264 client. Nothing per-client is written.
+	if codec == CodecAV1 && !av1Client(c) {
+		codec = CodecH264
+	}
 	// Multi-audio AV1 not supported in this round (would need fMP4 audio
 	// renditions to keep the master's segment-type uniform). Fall back.
 	if codec == CodecAV1 && multiAudio {
@@ -785,9 +832,10 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 	}
 
 	c.Header("Cache-Control", "no-cache")
+	c.Header("Vary", "User-Agent") // the master's codec choice depends on it
 	c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(sb.String()))
 
-	go Prewarm(file, path, srcHeight, aTracks, defIdx)
+	go Prewarm(file, path, codec, srcHeight, aTracks, defIdx)
 }
 
 func HLSPlaylist(c *gin.Context, lib *library.Library) {
@@ -1143,10 +1191,11 @@ func HLSSegment(c *gin.Context, lib *library.Library) {
 
 // Prewarm fires off ffmpeg jobs for the first N segments of the source-height
 // rung (copy mode if eligible) plus a few audio segments, so VHS's initial
-// fetches hit a populated cache instead of waiting on cold ffmpegs.
-func Prewarm(file, path string, srcHeight int, aTracks []audioMeta, defAudio int) {
+// fetches hit a populated cache instead of waiting on cold ffmpegs. codec is
+// the one the master just served THIS client — warming AV1 for a client the
+// capability gate downgraded heats a cache it will never read.
+func Prewarm(file, path, codec string, srcHeight int, aTracks []audioMeta, defAudio int) {
 	const N = 10
-	codec := MediaCodec(file)
 	multiAudio := len(aTracks) > 1
 	// AV1 multi-audio isn't supported in this round; fall back to h264 prewarm.
 	if codec == CodecAV1 && multiAudio {
