@@ -105,3 +105,35 @@ func TestKVWriteIsAtomic(t *testing.T) {
 		t.Fatalf("key missing from store: %v", m)
 	}
 }
+
+func TestKVPrefix(t *testing.T) {
+	kvTemp(t)
+
+	for k, v := range map[string]any{
+		"blurb:0000001": "a description",
+		"blurb:0000002": "",
+		"codec:0000001": "av1",
+		"blurb":         "not prefixed by the colon form",
+	} {
+		if err := KVSetValue(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := KVPrefix("blurb:")
+	if len(got) != 2 {
+		t.Fatalf("want 2 entries, got %d: %v", len(got), got)
+	}
+	if got["0000001"] != "a description" {
+		t.Errorf("prefix not trimmed from key: %v", got)
+	}
+	// Presence is what marks a title done, so an empty value must survive
+	// the scan even though the handler filters it out of the wire payload.
+	if _, ok := got["0000002"]; !ok {
+		t.Error("empty value dropped")
+	}
+
+	if n := len(KVPrefix("nothing:")); n != 0 {
+		t.Errorf("want empty map, got %d", n)
+	}
+}

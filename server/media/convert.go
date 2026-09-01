@@ -50,7 +50,7 @@ func ProcessAll(lib *library.Library) {
 	// (sprite/thumb/whisper) per-file as each conversion completes — so a
 	// file can gain its thumbnail while the next file is still transcoding.
 	var wg sync.WaitGroup
-	wg.Add(6)
+	wg.Add(7)
 	go func() {
 		defer wg.Done()
 		PhaseStart("convert")
@@ -84,6 +84,16 @@ func ProcessAll(lib *library.Library) {
 		PhaseStart("whisper")
 		jobs.BackfillWhisper(lib)
 		PhaseEnd("whisper")
+	}()
+	// Blurbs read the .vtt sidecars whisper is still writing in the lane
+	// beside this one, so a title transcribed during this sweep gets its
+	// blurb on the next one. Deliberate: waiting on whisper would make an
+	// optional, network-bound phase hold the sweep open for hours.
+	go func() {
+		defer wg.Done()
+		PhaseStart("blurbs")
+		jobs.BackfillBlurbs(lib, func(total, done int) { PhaseSet("blurbs", total, done) })
+		PhaseEnd("blurbs")
 	}()
 	go func() {
 		defer wg.Done()
