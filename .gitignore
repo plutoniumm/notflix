@@ -153,4 +153,4 @@ dist
 .yarn/install-state.gz
 .pnp.*
 models/
-.claude/worktrees/
+.claude/
