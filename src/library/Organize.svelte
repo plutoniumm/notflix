@@ -138,78 +138,159 @@
   }
 </script>
 
-<section class="organize surface flow-h">
-  <h3 class="m0 p10 fs-sm fw6 f al-ct g10">
-    <span>✨ Organize with AI</span>
-    <span class="fs-xs tx-1" style="margin-left:auto">
+<section class="panel surface flow-h">
+  <h3 class="phead m0 f al-ct g10">
+    <span class="plabel">Organize with AI</span>
+    <span class="pnote fs-xs tx-1">
       groups loose movies into folders — nothing moves until you apply
     </span>
   </h3>
 
   {#if moves === null}
-    <div class="p10 f al-ct g10">
-      <button class="act rx5 ptr fs-sm" onclick={suggest} disabled={loading}>
+    <div class="bar f al-ct g10">
+      <button class="act ptr fs-sm" onclick={suggest} disabled={loading}>
         {loading ? "Asking the model…" : "Suggest organization"}
       </button>
       {#if loading}
-        <span class="fs-xs tx-1">{stage || "starting…"}</span>
+        <span class="stage fs-xs tx-1 f al-ct g5">
+          <span class="spin"></span>{stage || "starting…"}
+        </span>
       {:else if note}
         <span class="fs-xs tx-1">{note}</span>
       {/if}
     </div>
   {:else if moves.length > 0}
-    {#each groups as [folder, files] (folder)}
-      <div class="group">
-        <div class="fs-sm fw6 tx-4 p10 pb0">📁 {folder}</div>
-        {#each files as m (key(m))}
-          <label class="item f al-ct g10 ptr">
-            <input
-              type="checkbox"
-              checked={!excluded.has(key(m))}
-              onchange={() => toggle(m)}
-            />
-            <span class="fs-sm tx-4 trunc">{clean(m.file)}</span>
-            <span class="fs-xs tx-1" style="margin-left:auto">{m.root}</span>
-          </label>
-        {/each}
-      </div>
-    {/each}
-    <div class="p10 f al-ct g10">
+    <div class="plan">
+      {#each groups as [folder, files] (folder)}
+        <div class="group">
+          <div class="gname fs-xs f al-ct g5">
+            <span class="arrow">→</span>{folder}
+            <span class="gcount">{files.length}</span>
+          </div>
+          {#each files as m (key(m))}
+            <label class="item f al-ct g10 ptr" class:off={excluded.has(key(m))}>
+              <input
+                type="checkbox"
+                checked={!excluded.has(key(m))}
+                onchange={() => toggle(m)}
+              />
+              <span class="fs-sm tx-4 trunc">{clean(m.file)}</span>
+              <span class="fs-xs tx-1 root">{m.root}</span>
+            </label>
+          {/each}
+        </div>
+      {/each}
+    </div>
+    <div class="bar f al-ct g10">
       <button
-        class="act rx5 ptr fs-sm"
+        class="act ptr fs-sm"
         onclick={apply}
         disabled={applying || !selected.length}
       >
         {applying ? "Moving…" : `Apply ${selected.length} moves`}
       </button>
-      <button class="ghost rx5 ptr fs-sm" onclick={() => (moves = null)}>
+      <button class="ghost ptr fs-sm" onclick={() => (moves = null)}>
         Discard
       </button>
+      <span class="fs-xs tx-1 count">
+        {selected.length} of {moves.length} selected
+      </span>
     </div>
   {/if}
 </section>
 
 <style>
-  .organize {
-    margin-bottom: 24px;
+  .panel {
+    margin-bottom: 20px;
+    transition:
+      opacity var(--motion, 0.32s) var(--ease-out),
+      translate var(--motion, 0.32s) var(--ease-out);
   }
-  .organize h3 {
-    background: rgba(255, 255, 255, 0.02);
-    color: var(--tx-4);
+  @starting-style {
+    .panel {
+      opacity: 0;
+      translate: 0 10px;
+    }
+  }
+  .phead {
+    padding: 10px 16px;
+    background: rgb(255 255 255 / 0.02);
     border-bottom: 1px solid var(--glass-bd);
   }
-
-  .group {
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+  .plabel {
+    color: var(--tx-3);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
   }
-  .pb0 {
-    padding-bottom: 0;
+  .pnote {
+    margin-left: auto;
+    text-align: right;
+  }
+
+  .bar {
+    padding: 12px 16px;
+  }
+  .stage {
+    font-variant-numeric: tabular-nums;
+  }
+  .spin {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1.5px solid var(--glass-bd);
+    border-top-color: var(--red);
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      rotate: 360deg;
+    }
+  }
+
+  /* The plan is a proposal, so it reads as a set of destinations with their
+     contents indented under them, not as a flat list of checkboxes. */
+  .plan {
+    max-height: 46vh;
+    overflow-y: auto;
+  }
+  .group {
+    border-top: 1px solid rgb(255 255 255 / 0.04);
+  }
+  .gname {
+    padding: 10px 16px 4px;
+    color: var(--tx-4);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .arrow {
+    color: var(--tx-1);
+  }
+  .gcount {
+    margin-left: auto;
+    color: var(--tx-1);
+    font-variant-numeric: tabular-nums;
   }
   .item {
-    padding: 6px 16px 6px 24px;
+    padding: 5px 16px 5px 30px;
+    transition:
+      background var(--motion-fast, 0.15s) var(--ease-out),
+      opacity var(--motion-fast, 0.18s) var(--ease-out);
   }
   .item:hover {
     background: var(--glass);
+  }
+  .item.off {
+    opacity: 0.35;
+  }
+  .item input {
+    accent-color: var(--red);
+    flex-shrink: 0;
+  }
+  .root {
+    margin-left: auto;
+    flex-shrink: 0;
   }
 
   .act {
@@ -217,9 +298,20 @@
     color: var(--tx-5);
     border: 1px solid var(--glass-bd);
     padding: 8px 16px;
+    border-radius: var(--r-md);
+    transition:
+      background var(--motion-fast, 0.18s) var(--ease-out),
+      scale var(--motion-fast, 0.16s) var(--ease-snap);
+  }
+  .act:hover:not(:disabled) {
+    background: var(--red);
+    border-color: var(--red);
+  }
+  .act:active:not(:disabled) {
+    scale: 0.97;
   }
   .act:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: default;
   }
   .ghost {
@@ -227,5 +319,23 @@
     color: var(--tx-1);
     border: 1px solid var(--glass-bd);
     padding: 8px 16px;
+    border-radius: var(--r-md);
+  }
+  .ghost:hover {
+    color: var(--tx-4);
+  }
+  .count {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .panel,
+    .item {
+      transition-duration: 1ms;
+    }
+    .spin {
+      animation: none;
+    }
   }
 </style>

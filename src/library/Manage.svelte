@@ -321,16 +321,15 @@
     <ProcessStatusPanel status={procStatus} {jobs} />
 
     {#if corruptFiles.length > 0}
-      <section class="corrupt surface flow-h">
-        <h3 class="m0 p10 fs-sm fw6 f al-ct g10">
-          <span>⚠️ Corrupt / unplayable ({corruptFiles.length})</span>
-          <span class="fs-xs tx-1" style="margin-left:auto">
-            re-scanned on every library process
-          </span>
+      <section class="panel bad surface flow-h">
+        <h3 class="phead m0 f al-ct g10">
+          <span class="plabel">Corrupt / unplayable</span>
+          <span class="pcount fs-xs">{corruptFiles.length}</span>
+          <span class="pnote fs-xs tx-1">re-scanned on every library process</span>
         </h3>
         {#each corruptFiles as cf (cf.dir + "/" + cf.name)}
-          <div class="corrupt-item f al-ct g10">
-            <div class="corrupt-info">
+          <div class="item f al-ct g10">
+            <div class="info">
               <span class="d-b fs-sm tx-4 trunc">{clean(cf.name)}</span>
               <span class="d-b fs-xs tx-1 trunc">
                 {cf.dir === "." ? "Root" : cf.dir} · {cf.root}
@@ -356,13 +355,14 @@
     />
 
     {#if pwaDownloads.length > 0}
-      <section class="pwa-dl surface flow-h">
-        <h3 class="m0 p10 fs-sm fw6">
-          Offline Downloads ({pwaDownloads.length})
+      <section class="panel surface flow-h">
+        <h3 class="phead m0 f al-ct g10">
+          <span class="plabel">Offline downloads</span>
+          <span class="pcount fs-xs">{pwaDownloads.length}</span>
         </h3>
         {#each pwaDownloads as dl (dl.videoParam)}
-          <div class="pwa-item f al-ct g10">
-            <div class="pwa-info">
+          <div class="item f al-ct g10">
+            <div class="info">
               <span class="d-b fs-sm tx-4 trunc"
                 >{clean(dl.title || dl.videoParam)}</span
               >
@@ -376,7 +376,11 @@
     {/if}
 
     {#if loading}
-      <div class="tx-1 p20">Loading…</div>
+      <div class="skel f-col g10" aria-hidden="true">
+        {#each Array(7) as _, i}
+          <div class="skel-row" style="--i:{i}"></div>
+        {/each}
+      </div>
     {:else}
       {#each rows as [dir, files], idx}
         {@const ds = dirSizes[dir]}
@@ -420,46 +424,83 @@
 <style>
   main {
     padding: 24px 40px 60px;
-    max-width: 960px;
+    max-width: 980px;
     --i: 0;
     position: relative;
     z-index: 1;
   }
 
-  .corrupt {
-    margin-bottom: 24px;
-    border: 1px solid var(--red);
-    box-shadow: 0 0 0 1px var(--red-soft);
+  .panel {
+    margin-bottom: 20px;
+    transition:
+      opacity var(--motion, 0.32s) var(--ease-out),
+      translate var(--motion, 0.32s) var(--ease-out);
   }
-  .corrupt h3 {
-    background: var(--red-soft);
-    color: var(--red);
-    border-bottom: 1px solid var(--red-soft);
+  @starting-style {
+    .panel {
+      opacity: 0;
+      translate: 0 10px;
+    }
   }
-  .corrupt-item {
+  .phead {
     padding: 10px 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgb(255 255 255 / 0.02);
+    border-bottom: 1px solid var(--glass-bd);
   }
-  .corrupt-info {
+  .plabel {
+    color: var(--tx-3);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .pcount {
+    color: var(--tx-1);
+    font-variant-numeric: tabular-nums;
+  }
+  .pnote {
+    margin-left: auto;
+    text-align: right;
+  }
+
+  /* One severity treatment, applied at the panel edge — the header does not
+     also turn red, so the file names stay the loudest thing in the block. */
+  .panel.bad {
+    border-color: color-mix(in oklab, var(--red) 45%, transparent);
+    box-shadow: inset 2px 0 0 var(--red);
+  }
+  .panel.bad .plabel {
+    color: var(--red);
+  }
+
+  .item {
+    padding: 10px 16px;
+    border-top: 1px solid rgb(255 255 255 / 0.04);
+  }
+  .item:first-of-type {
+    border-top: none;
+  }
+  .info {
     flex: 1;
     min-width: 0;
   }
-
-  .pwa-dl {
-    margin-bottom: 24px;
-  }
-  .pwa-dl h3 {
-    background: rgba(255, 255, 255, 0.02);
-    color: var(--tx-4);
-    border-bottom: 1px solid var(--glass-bd);
-  }
-  .pwa-item {
-    padding: 12px 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
-  }
-  .pwa-info { flex: 1; min-width: 0; }
   .pwa-bar {
     margin-top: 6px;
+  }
+
+  .skel-row {
+    height: 46px;
+    border-radius: var(--r-lg);
+    background: linear-gradient(
+      90deg,
+      var(--bg-3) 0%,
+      var(--bg-4) 45%,
+      var(--bg-3) 90%
+    );
+    background-size: 420px 100%;
+    animation: shimmer 1.7s linear infinite;
+    animation-delay: calc(var(--i) * -160ms);
+    opacity: calc(1 - var(--i) * 0.1);
   }
 
   .build-info {
@@ -469,7 +510,22 @@
     text-align: center;
     color: var(--tx-1);
     font-family: var(--font-display);
-    letter-spacing: 0.04em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
+  }
+
+  @media (max-width: 640px) {
+    main {
+      padding: 16px 12px 48px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .panel {
+      transition-duration: 1ms;
+    }
+    .skel-row {
+      animation: none;
+    }
   }
 </style>

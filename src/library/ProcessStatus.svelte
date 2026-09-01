@@ -23,12 +23,6 @@
     whisper: "Subtitles (Whisper)",
   };
 
-  const icons: Record<PhaseState, string> = {
-    pending: "○",
-    running: "●",
-    done: "✓",
-  };
-
   const elapsed = (ms: number) => (ms < 1000 ? "<1s" : durWords(ms / 1000));
 
   function phaseElapsed(p: PhaseInfo, now: number): string {
@@ -51,21 +45,21 @@
 </script>
 
 {#if status && visible}
-  <section class="ps surface flow-h">
-    <h3 class="m0 p10 fs-sm fw6 f al-ct g10">
-      <span>
-        {status.running ? "◐ Processing library" : "✓ Last run"}
+  <section class="panel surface flow-h" class:live={status.running}>
+    <h3 class="phead m0 f al-ct g10">
+      <span class="plabel">
+        {status.running ? "Processing library" : "Last run"}
       </span>
       {#if totalElapsed}
-        <span class="fs-xs tx-1">· {totalElapsed}</span>
+        <span class="pcount fs-xs">{totalElapsed}</span>
       {/if}
     </h3>
 
     <div class="phases">
       {#each status.phases as p (p.name)}
         <div class="phase f al-ct g10 st-{p.state}">
-          <span class="ic fs-sm sh-0">{icons[p.state]}</span>
-          <span class="lbl fs-sm sh-0">{labels[p.name] ?? p.name}</span>
+          <span class="mark sh-0 cc"></span>
+          <span class="lbl fs-sm sh-0 trunc">{labels[p.name] ?? p.name}</span>
 
           <div class="mid">
             {#if p.state === "running" || p.state === "done"}
@@ -75,6 +69,7 @@
                     value={(p.done / p.total) * 100}
                     variant={p.state === "running" ? "striped" : "default"}
                     label={false}
+                    height="4px"
                   />
                 </div>
               {/if}
@@ -98,12 +93,12 @@
 
     {#if convertActive && jobs.length > 0}
       <div class="jobs">
-        <div class="jobs-hd fs-xs tx-1 p10">Active conversions ({jobs.length})</div>
+        <div class="jobs-hd fs-xs tx-1">Active conversions ({jobs.length})</div>
         {#each jobs as j (j.name)}
           <div class="job f al-ct g10">
             <span class="jn fs-xs tx-4 trunc">{clean(j.name)}</span>
             <div class="jb">
-              <ProgressBar value={j.percent} variant="striped" label={false} />
+              <ProgressBar value={j.percent} variant="striped" label={false} height="4px" />
             </div>
             <span class="jp fs-xs tx-1 sh-0">{pct(j.percent)}</span>
           </div>
@@ -114,36 +109,159 @@
 {/if}
 
 <style>
-  .ps { margin-bottom: 24px; }
-  .ps h3 {
-    background: rgba(255, 255, 255, 0.02);
-    color: var(--tx-4);
+  .panel {
+    margin-bottom: 20px;
+    transition:
+      opacity var(--motion, 0.32s) var(--ease-out),
+      translate var(--motion, 0.32s) var(--ease-out);
+  }
+  @starting-style {
+    .panel {
+      opacity: 0;
+      translate: 0 10px;
+    }
+  }
+  .panel.live {
+    border-color: color-mix(in oklab, var(--red) 32%, transparent);
+  }
+  .phead {
+    padding: 10px 16px;
+    background: rgb(255 255 255 / 0.02);
     border-bottom: 1px solid var(--glass-bd);
   }
-  .phases { padding: 6px 10px; }
-  .phase { padding: 6px 6px; border-top: 1px solid rgba(255,255,255,0.03); }
-  .phase:first-child { border-top: none; }
-  .ic { width: 16px; text-align: center; }
-  .st-pending .ic { color: var(--tx-1); }
-  .st-running .ic { color: var(--accent, #4a9eff); animation: pulse 1.2s ease-in-out infinite; }
-  .st-done .ic { color: var(--green, #4ade80); }
-  .st-pending .lbl { color: var(--tx-1); }
-  .lbl { min-width: 160px; }
-  .mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-  .bar { width: 100%; }
-  .note { display: block; }
-  .cnt { min-width: 60px; text-align: right; font-variant-numeric: tabular-nums; }
-  .el { min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+  .plabel {
+    color: var(--tx-3);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .pcount {
+    color: var(--tx-1);
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+  }
 
-  .jobs { border-top: 1px solid var(--glass-bd); }
-  .jobs-hd { text-transform: uppercase; letter-spacing: 0.04em; }
-  .job { padding: 4px 10px; }
-  .jn { flex: 1; min-width: 0; }
-  .jb { width: 120px; flex-shrink: 0; }
-  .jp { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+  .phases {
+    padding: 8px 16px 10px;
+  }
+  /* A stepper, not seven independent rows: one rail runs behind the markers so
+     the order of the pipeline is visible even when nothing is moving. */
+  .phase {
+    padding: 5px 0;
+    position: relative;
+  }
+  .phase::before {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--glass-bd);
+  }
+  .phase:first-child::before {
+    top: 50%;
+  }
+  .phase:last-child::before {
+    bottom: 50%;
+  }
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
+  .mark {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 1px solid var(--bg-5);
+    background: var(--bg-2);
+    z-index: 1;
+  }
+  .st-running .mark {
+    border-color: var(--red);
+    background: var(--red);
+    box-shadow: 0 0 0 4px var(--red-soft);
+    animation: breathe 1.4s ease-in-out infinite;
+  }
+  .st-done .mark {
+    border-color: var(--grn);
+    background: color-mix(in oklab, var(--grn) 70%, transparent);
+  }
+
+  .lbl {
+    min-width: 150px;
+    color: var(--tx-4);
+  }
+  .st-pending .lbl {
+    color: var(--tx-1);
+  }
+  .mid {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .bar {
+    width: 100%;
+  }
+  .note {
+    display: block;
+  }
+  .cnt {
+    min-width: 62px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .el {
+    min-width: 48px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .jobs {
+    border-top: 1px solid var(--glass-bd);
+    padding-bottom: 6px;
+  }
+  .jobs-hd {
+    padding: 8px 16px 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+  }
+  .job {
+    padding: 3px 16px;
+  }
+  .jn {
+    flex: 1;
+    min-width: 0;
+  }
+  .jb {
+    width: 120px;
+    flex-shrink: 0;
+  }
+  .jp {
+    min-width: 36px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 640px) {
+    .lbl {
+      min-width: 0;
+      flex: 1;
+    }
+    .mid {
+      display: none;
+    }
+    .phases {
+      padding: 8px 10px 10px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .panel,
+    .st-running .mark {
+      animation: none;
+      transition-duration: 1ms;
+    }
   }
 </style>

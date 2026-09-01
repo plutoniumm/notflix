@@ -19,6 +19,3 @@
 {/if}
 
 <Toast />
-
-<style lang="scss">
-</style>

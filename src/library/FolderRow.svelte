@@ -48,6 +48,8 @@
     jobs.some((j) => files.some((f) => f.name === j.name)),
   );
 
+  const broken = $derived(files.filter((f) => f.corrupt).length);
+
   const uniformRoot = $derived.by(() => {
     if (!files.length) return null;
     const r = files[0].root;
@@ -60,14 +62,15 @@
   }
 </script>
 
-<details class="folder rx5 flow-h" class:is-hidden={hidden} style="--i:{idx}">
+<details
+  class="folder flow-h"
+  class:is-hidden={hidden}
+  class:converting
+  class:broken={broken > 0}
+  style="--i:{idx}"
+>
   <summary class="folder-hd f al-ct g10 ptr">
-    <span class="folder-icon p-rel">
-      📁
-      {#if converting}
-        <span class="conv-dot p-abs"></span>
-      {/if}
-    </span>
+    <span class="caret fs-xs sh-0 dead">▸</span>
 
     {#if editing === dir}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -86,18 +89,30 @@
         />
       </form>
     {:else}
-      <span class="fw5 fs-md">
+      <span class="fw5 fs-md name trunc">
         {dir === "." ? "Root" : clean(dir) || dir}
       </span>
+
       {#if uniformRoot}
         <span class="disk-tag fs-xs" data-root={uniformRoot}>{uniformRoot}</span
         >
       {/if}
-      <span class="fs-sm tx-1 sh-0" style="margin-left:auto">
+      {#if broken > 0}
+        <span class="flag broken-flag fs-xs" title="{broken} unplayable">
+          {broken} corrupt
+        </span>
+      {/if}
+      {#if converting}
+        <span class="flag conv-flag fs-xs">converting</span>
+      {/if}
+
+      <span class="stat fs-xs tx-1">
         {#if sizeBytes > 0}
-          {bytes(sizeBytes)} · {pct(share, 1)} of disk ·
+          <span class="num">{bytes(sizeBytes)}</span>
+          <span class="share" style="--p:{Math.min(100, share)}%"></span>
+          <span class="num">{pct(share, 1)}</span>
         {/if}
-        {files.length} files
+        <span class="num files">{files.length}</span>
       </span>
 
       {#if onToggleHidden}
@@ -117,6 +132,7 @@
       {#if dir !== "."}
         <button
           class="btn-icon"
+          title="Rename folder"
           onclick={(e) => {
             e.stopPropagation();
             startEdit(dir, dir);
@@ -160,54 +176,80 @@
 
 <style>
   .folder {
+    position: relative;
     border: 1px solid var(--glass-bd);
-    background: rgba(22, 19, 28, 0.5);
+    background: color-mix(in oklab, var(--bg-3) 55%, transparent);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border-radius: var(--r-lg);
-    margin-bottom: 10px;
-    animation: slide-up 0.32s var(--ease-out) both;
-    animation-delay: calc(var(--i) * 40ms);
+    margin-bottom: 8px;
+    animation: slide-up var(--motion, 0.32s) var(--ease-out) both;
+    animation-delay: calc(min(var(--i, 0), 12) * 34ms);
     transition:
-      opacity 0.2s,
-      border-color 0.2s,
-      box-shadow 0.25s var(--ease-out);
+      opacity var(--motion, 0.2s),
+      border-color var(--motion, 0.2s),
+      box-shadow var(--motion, 0.25s) var(--ease-out);
   }
   .folder[open] {
     box-shadow: var(--sh-2);
+    border-color: rgb(255 255 255 / 0.12);
   }
   .folder[open] > .folder-hd {
     border-bottom: 1px solid var(--glass-bd);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
   }
+
+  /* State reads off a single rail at the edge rather than three competing
+     background colours: nothing, converting, or unplayable. */
+  .folder::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    border-radius: 999px;
+    background: transparent;
+    transition: background var(--motion, 0.25s) var(--ease-out);
+  }
+  .folder.converting::before {
+    background: var(--red);
+    box-shadow: 0 0 10px var(--red-glow);
+  }
+  .folder.broken::before {
+    background: var(--gold);
+    box-shadow: 0 0 10px color-mix(in oklab, var(--gold) 60%, transparent);
+  }
+
   .folder.is-hidden {
-    opacity: 0.55;
+    opacity: 0.5;
   }
   .folder.is-hidden:hover {
     opacity: 0.85;
   }
-  .eye-icon {
-    animation: pop-in 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.4);
-    display: inline-block;
-  }
   .folder.is-hidden .folder-hd {
     background: repeating-linear-gradient(
       -45deg,
-      rgba(255, 255, 255, 0.04),
-      rgba(255, 255, 255, 0.04) 8px,
+      rgb(255 255 255 / 0.035),
+      rgb(255 255 255 / 0.035) 8px,
       transparent 8px,
       transparent 16px
     );
   }
+  .eye-icon {
+    animation: pop-in 0.25s var(--ease-spring);
+    display: inline-block;
+  }
 
   .folder-hd {
-    padding: 12px 16px;
-    background: transparent;
+    padding: 11px 16px 11px 14px;
     border-radius: var(--r-lg);
     user-select: none;
-    transition: background 0.18s var(--ease-out);
+    list-style: none;
+    transition: background var(--motion-fast, 0.18s) var(--ease-out);
   }
-  .folder[open] > .folder-hd {
-    border-radius: var(--r-lg) var(--r-lg) 0 0;
+  .folder-hd::-webkit-details-marker {
+    display: none;
   }
   .folder-hd:hover {
     background: var(--glass);
@@ -216,29 +258,72 @@
     background: var(--glass-2);
   }
   @media (hover: hover) {
-    .folder-hd:hover .btn-icon {
+    .folder-hd:hover :global(.btn-icon) {
       opacity: 1;
     }
   }
-  @media (max-width: 640px) {
-    .folder-hd {
-      padding: 12px 12px;
-    }
+
+  .caret {
+    width: 12px;
+    color: var(--tx-1);
+    transition: rotate var(--motion, 0.24s) var(--ease-snap);
+  }
+  .folder[open] .caret {
+    rotate: 90deg;
+    color: var(--tx-3);
   }
 
-  .folder-icon {
-    line-height: 1;
+  .name {
+    min-width: 0;
   }
 
-  .conv-dot {
-    top: -2px;
-    right: -4px;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--red);
-    box-shadow: 0 0 8px var(--red-glow);
-    animation: breathe 1.4s ease-in-out infinite;
+  .flag {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .broken-flag {
+    color: var(--gold);
+    background: color-mix(in oklab, var(--gold) 16%, transparent);
+    border: 1px solid color-mix(in oklab, var(--gold) 34%, transparent);
+  }
+  .conv-flag {
+    color: var(--red);
+    background: var(--red-soft);
+    border: 1px solid color-mix(in oklab, var(--red) 34%, transparent);
+    animation: breathe 1.8s ease-in-out infinite;
+  }
+
+  /* Size, share and count on one baseline with tabular figures, so a column of
+     folders can be scanned down rather than read one at a time. */
+  .stat {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+    min-width: 52px;
+    text-align: right;
+  }
+  .files::after {
+    content: " files";
+    color: var(--bg-5);
+  }
+  .share {
+    width: 46px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.07);
+    background-image: linear-gradient(
+      90deg,
+      var(--tx-2) var(--p, 0%),
+      transparent var(--p, 0%)
+    );
   }
 
   .rename-form {
@@ -250,5 +335,49 @@
     width: 100%;
     border-color: var(--red);
     box-shadow: 0 0 0 4px var(--red-soft);
+  }
+
+  /* Native disclosure animation — Chrome only, and the folder opens correctly
+     without it everywhere else. */
+  @supports selector(::details-content) {
+    .folder {
+      interpolate-size: allow-keywords;
+    }
+    .folder::details-content {
+      block-size: 0;
+      overflow: hidden;
+      transition:
+        block-size var(--motion, 0.3s) var(--ease-out),
+        content-visibility var(--motion, 0.3s) allow-discrete;
+    }
+    .folder[open]::details-content {
+      block-size: auto;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .folder-hd {
+      padding: 11px 10px;
+      flex-wrap: wrap;
+    }
+    .stat {
+      margin-left: auto;
+    }
+    .share {
+      display: none;
+    }
+    .num {
+      min-width: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .folder,
+    .caret,
+    .eye-icon,
+    .conv-flag {
+      animation: none;
+      transition-duration: 1ms;
+    }
   }
 </style>

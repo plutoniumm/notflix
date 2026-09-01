@@ -22,11 +22,30 @@
 </button>
 
 <style>
+  /* Armed has to read as a different button, not a hover state — it is one tap
+     from an irreversible delete. */
   .armed {
     opacity: 1;
-    color: var(--red);
-    background: var(--red-soft);
+    color: #fff;
+    background: var(--red);
+    box-shadow: 0 0 0 3px var(--red-soft);
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    border-radius: 999px;
+    animation: arm 0.26s var(--ease-spring);
+  }
+
+  @keyframes arm {
+    from {
+      scale: 0.8;
+      box-shadow: 0 0 0 0 var(--red-soft);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .armed {
+      animation: none;
+    }
   }
 </style>

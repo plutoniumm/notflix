@@ -62,11 +62,13 @@
   <div class="head f al-ct g10">
     <h2 class="m0">{title}</h2>
     <span class="count fs-xs tx-1">{seasons.length} {noun}</span>
-    <div class="pills f al-ct g5">
+    <div class="pills f al-ct g2" role="tablist" aria-label="{title} seasons">
       {#each seasons as s (s.dir)}
         <button
           class="pill fs-xs ptr"
           class:on={s.dir === sel}
+          role="tab"
+          aria-selected={s.dir === sel}
           title={s.label}
           onclick={() => pick(s.dir)}
         >
@@ -78,7 +80,7 @@
 
   <ScrollRow>
     {#key season.dir}
-      <div class="cards flow-x-s g5 f">
+      <div class="cards spotlight flow-x-s g10 f">
         {#each season.files as f, idx (f.name)}
           <MediaCard
             dir={season.dir}
@@ -95,11 +97,11 @@
 
 <style>
   .row {
-    margin-bottom: 36px;
+    margin-bottom: 40px;
   }
   .head {
     padding: 0 48px;
-    margin-bottom: 14px;
+    margin-bottom: 12px;
     flex-wrap: wrap;
   }
   h2 {
@@ -107,45 +109,59 @@
   }
   .count {
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
+
+  /* One segmented control rather than a scatter of loose buttons: the group
+     carries the frame, each season is just a slot inside it. */
   .pills {
     margin-left: auto;
-  }
-  .pill {
+    padding: 3px;
+    border-radius: 999px;
     background: var(--glass);
     border: 1px solid var(--glass-bd);
-    border-radius: var(--r-md);
-    color: var(--tx-3);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .pill {
+    border-radius: 999px;
+    color: var(--tx-2);
     padding: 4px 12px;
-    min-height: 28px;
+    min-height: 26px;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
     transition:
-      color 0.18s var(--ease-out),
-      border-color 0.18s var(--ease-out);
+      color var(--motion-fast, 0.18s) var(--ease-out),
+      background var(--motion-fast, 0.18s) var(--ease-out);
   }
   .pill:hover {
-    background: var(--glass-2);
     color: var(--tx-4);
+    background: var(--glass-2);
   }
   .pill.on {
-    border-color: var(--red);
     color: var(--tx-5);
-    box-shadow: 0 0 10px var(--red-glow);
+    background: color-mix(in oklab, var(--red) 78%, transparent);
+    box-shadow: 0 2px 10px -2px var(--red-glow);
   }
 
   .cards {
-    padding: 8px 48px 16px;
+    padding: 4px 48px 14px;
     scrollbar-width: none;
-    animation: season-in 0.18s var(--ease-out);
+    transition:
+      opacity var(--motion, 0.26s) var(--ease-out),
+      translate var(--motion, 0.26s) var(--ease-out);
   }
-  @keyframes season-in {
-    from {
+  .cards :global(.tile) {
+    width: 220px;
+  }
+
+  /* The season swap replaces the strip outright, so the new one is animated in
+     from its own starting state rather than by a keyframe that has to be
+     re-triggered. */
+  @starting-style {
+    .cards {
       opacity: 0;
-      transform: translateX(8px);
-    }
-    to {
-      opacity: 1;
-      transform: none;
+      translate: 14px 0;
     }
   }
 
@@ -163,10 +179,19 @@
       flex-wrap: nowrap;
       overflow-x: auto;
       scrollbar-width: none;
-      padding: 4px 0;
+      border-radius: var(--r-md);
     }
     .cards {
-      padding: 6px 16px 12px;
+      padding: 4px 16px 12px;
+    }
+    .cards :global(.tile) {
+      width: 148px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cards {
+      transition-duration: 1ms;
     }
   }
 </style>

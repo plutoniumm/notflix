@@ -9,14 +9,31 @@
 
 <style>
   .back {
-    padding: 4px 10px;
-    border-radius: var(--r-md);
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid transparent;
     transition:
-      color 0.18s var(--ease-out),
-      background 0.18s var(--ease-out);
+      color var(--motion-fast, 0.18s) var(--ease-out),
+      background var(--motion-fast, 0.18s) var(--ease-out),
+      border-color var(--motion-fast, 0.18s) var(--ease-out),
+      translate var(--motion-fast, 0.18s) var(--ease-snap);
   }
   .back:hover {
     color: var(--tx-5);
     background: var(--glass);
+    border-color: var(--glass-bd);
+    translate: -2px 0;
+  }
+  .back:active {
+    scale: 0.92;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .back {
+      transition-duration: 1ms;
+    }
   }
 </style>
