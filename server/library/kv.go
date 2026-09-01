@@ -203,3 +203,17 @@ func KVSet(c *gin.Context) {
 	statsTee(single.Key, single.Value, ip)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "key": single.Key})
 }
+
+// KVPrefix returns every entry whose key starts with prefix, with the prefix
+// trimmed off the returned keys. Read-only — it goes through kvRead, not a
+// second read-modify-write path.
+func KVPrefix(prefix string) map[string]any {
+	out := map[string]any{}
+	for k, v := range kvRead() {
+		if strings.HasPrefix(k, prefix) {
+			out[strings.TrimPrefix(k, prefix)] = v
+		}
+	}
+
+	return out
+}

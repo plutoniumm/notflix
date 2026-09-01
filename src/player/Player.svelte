@@ -17,6 +17,7 @@
   import Volume from "./volume.svelte";
   import Sync from "./sync.svelte";
   import Related from "./related.svelte";
+  import Synopsis from "./synopsis.svelte";
   import Whisper from "./whisper.svelte";
   import Skip, { activeSkip } from "./skip.svelte";
   import Tune from "./tune.svelte";
@@ -794,6 +795,7 @@
   />
   <Volume level={ps.volLevel} visible={ps.volVisible} />
   <Sync ms={ps.syncMs} visible={ps.syncVisible} />
+  <Synopsis {name} {title} {embed} paused={ps.paused} />
   <Related rows={ps.rows} {dir} {name} {embed} paused={ps.paused} />
 </div>
 
