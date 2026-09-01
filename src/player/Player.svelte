@@ -750,7 +750,11 @@
     {runWhisper}
     {tuneOpen}
     {helpOpen}
+    {shotOpen}
+    {clipOpen}
     onHelp={() => (helpOpen = !helpOpen)}
+    onShot={() => (shotOpen = !shotOpen)}
+    onClip={() => (clipOpen = !clipOpen)}
     onTune={() => (tuneOpen = !tuneOpen)}
     onToggleSubs={toggleSubs}
     onSelectLocal={selectLocal}

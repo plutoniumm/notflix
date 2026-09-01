@@ -13,7 +13,9 @@
       | "download"
       | "search"
       | "settings"
-      | "volume";
+      | "volume"
+      | "camera"
+      | "scissors";
     size?: number;
     color?: string;
   } = $props();
@@ -34,6 +36,8 @@
     search: { vb: "0 0 24 24", w: 18, h: 18, stroke: 2, rnd: true },
     settings: { vb: "0 0 24 24", w: 18, h: 18, stroke: 2, rnd: true },
     volume: { vb: "0 0 24 24", w: 14, h: 14, fill: "currentColor" },
+    camera: { vb: "0 0 24 24", w: 18, h: 18, stroke: 2, rnd: true },
+    scissors: { vb: "0 0 24 24", w: 18, h: 18, stroke: 2, rnd: true },
   };
 
   const m = $derived(META[name]);
@@ -77,6 +81,13 @@
     {:else if name === "download"}
       <path d="M12 3v13M5 12l7 7 7-7" />
       <line x1="4" y1="21" x2="20" y2="21" />
+    {:else if name === "camera"}
+      <path d="M3 8h3l2-2h8l2 2h3v11H3z" />
+      <circle cx="12" cy="13" r="3.5" />
+    {:else if name === "scissors"}
+      <circle cx="6" cy="6" r="2.6" />
+      <circle cx="6" cy="18" r="2.6" />
+      <path d="M20 4 8.6 15.4M20 20 8.6 8.6" />
     {:else if name === "search"}
       <circle cx="11" cy="11" r="7" />
       <line x1="21" y1="21" x2="16.5" y2="16.5" />

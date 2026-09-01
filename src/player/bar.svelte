@@ -12,8 +12,12 @@
     title,
     tuneOpen = false,
     helpOpen = false,
+    shotOpen = false,
+    clipOpen = false,
     runWhisper,
     onHelp,
+    onShot,
+    onClip,
     onTune,
     onToggleSubs,
     onSelectLocal,
@@ -28,9 +32,13 @@
     title: string;
     tuneOpen?: boolean;
     helpOpen?: boolean;
+    shotOpen?: boolean;
+    clipOpen?: boolean;
     runWhisper: () => void;
     onHelp: () => void;
     onTune: () => void;
+    onShot: () => void;
+    onClip: () => void;
     onToggleSubs: () => void;
     onSelectLocal: (file: string, label: string) => void;
     onSelectEmbedded: (idx: number, lang: string) => Promise<void>;
@@ -102,6 +110,26 @@
         onclick={runWhisper}
       >
         <Icon name="whisper" />
+      </button>
+
+      <button
+        class="ibtn cc rx5 ptr p5"
+        aria-label="Grab a frame"
+        title="Grab a frame (g)"
+        class:active={shotOpen}
+        onclick={onShot}
+      >
+        <Icon name="camera" />
+      </button>
+
+      <button
+        class="ibtn cc rx5 ptr p5"
+        aria-label="Clip a section"
+        title="Clip a section (i / o)"
+        class:active={clipOpen}
+        onclick={onClip}
+      >
+        <Icon name="scissors" />
       </button>
 
       <button

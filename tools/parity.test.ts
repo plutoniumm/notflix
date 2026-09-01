@@ -157,5 +157,25 @@ check("home has a help control", /aria-label="Keyboard shortcuts"/.test(home.sou
 check("home mounts help", home.source.includes("<Help open={helpOpen}"));
 check("page keys ignore typing", home.source.includes('closest?.("input,textarea,[contenteditable]")'));
 
+// ---------------------------------------------------------------- UI parity
+// Every keyed feature needs a pointer route too. The key-dispatch checks above
+// passed for weeks while the frame-grab and clip tools shipped keyboard-only,
+// so assert the visible control exists, not just the handler.
+const uiSrc = ["bar.svelte", "dock.svelte", "clip.svelte", "shot.svelte"]
+  .map((f) => read(`src/player/${f}`))
+  .join("\n");
+for (const [feature, handler] of [
+  ["grab a frame", "onShot"],
+  ["clip a section", "onClip"],
+  ["mark clip in/out", "mark(0)"],
+  ["tune", "onTune"],
+  ["help", "onHelp"],
+  ["up next", "onEpisodes"],
+  ["mute", "onMute"],
+  ["fullscreen", "onFullscreen"],
+  ["next episode", "onNext"],
+])
+  check(`"${feature}" has a pointer control`, uiSrc.includes(`onclick={${handler}}`) || uiSrc.includes(handler));
+
 console.log(failed ? `${failed} failure(s)` : "ok — parity");
 process.exit(failed ? 1 : 0);
