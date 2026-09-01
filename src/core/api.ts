@@ -112,6 +112,14 @@ export const api = {
 
   skip: (file: string, opts?: ReqOpts) => GET(`/api/skip?file=${E(file)}`, opts),
 
+  // Encoding takes seconds: start returns a job, status polls it, and the file
+  // is fetched by navigation so Content-Disposition can force the save.
+  clip: {
+    start: (file: string, from: number, to: number, opts?: ReqOpts) =>
+      POST("/api/clip", { file, in: from, out: to }, opts),
+    status: (id: string, opts?: ReqOpts) => GET(`/api/clip/status?id=${E(id)}`, opts),
+  },
+
   organize: {
     plan: (opts?: ReqOpts) => POST("/api/organize/plan", {}, opts),
     status: (opts?: ReqOpts) => GET("/api/organize/status", opts),
