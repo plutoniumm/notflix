@@ -11,26 +11,29 @@
   );
   const visible = $derived(!embed && paused && files.length > 1);
   const activeIdx = $derived(files.findIndex((f: any) => f.name === name));
+  const pad = (n: number) => String(n).padStart(2, "0");
 </script>
 
-{#if visible}
+{#if !embed && files.length > 1}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <aside
-    class="rail p-fix flow-h"
+    class="rail flow-h"
     class:open
+    class:out={!visible}
     onmouseenter={() => (open = true)}
     onmouseleave={() => (open = false)}
   >
-    <button class="tab cc fw5 fs-xs ptr" onclick={() => (open = !open)}>
+    <button class="tab cc ptr" onclick={() => (open = !open)}>
       <span class="chev d-ib" class:rot={open}></span>
       <span class="label">UP NEXT</span>
+      <span class="count pl-num">{pad(files.length)}</span>
     </button>
 
     <div class="list flow-y-s f-col g10 p10">
       {#each files as f, i (f.key)}
         <a
           href={vidURL(dir, f.name)}
-          class="card flow-h rx5"
+          class="card flow-h"
           class:active={i === activeIdx}
         >
           <div class="thumb-wrap p-rel">
@@ -43,7 +46,10 @@
             />
             {#if i === activeIdx}<span class="now-pill">NOW</span>{/if}
           </div>
-          <span class="title d-b fs-xs p5 trunc">{clean(f.name)}</span>
+          <span class="meta f al-ct g5">
+            <span class="idx pl-num">{pad(i + 1)}</span>
+            <span class="title trunc">{clean(f.name)}</span>
+          </span>
         </a>
       {/each}
     </div>
@@ -52,27 +58,48 @@
 
 <style>
   .rail {
+    position: fixed;
     top: 64px;
     bottom: 96px;
     left: env(safe-area-inset-left);
     z-index: 9;
-    width: 36px;
+    width: 40px;
     display: flex;
     flex-direction: row;
     background: linear-gradient(
       to right,
-      rgba(7, 6, 10, 0.85) 0%,
-      rgba(7, 6, 10, 0.55) 80%,
+      rgba(3, 2, 6, 0.88) 0%,
+      rgba(3, 2, 6, 0.5) 80%,
       transparent 100%
     );
     border-right: 1px solid var(--glass-bd);
-    backdrop-filter: blur(10px) saturate(140%);
-    -webkit-backdrop-filter: blur(10px) saturate(140%);
-    transition: width 0.24s var(--ease-out), background 0.24s var(--ease-out);
-    animation: slide-r 0.3s var(--ease-out);
+    border-radius: 0 var(--r-lg) var(--r-lg) 0;
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    transition:
+      width var(--m, 260ms) var(--ease-out),
+      opacity var(--m, 260ms) var(--ease-out),
+      transform var(--m, 260ms) var(--ease-out);
   }
-  .rail.open { width: 220px; }
-  /* Hover-only affordance. On a phone the 36px strip can never be opened but
+  @supports (transition-behavior: allow-discrete) {
+    .rail {
+      transition-property: width, opacity, transform, display;
+      transition-behavior: allow-discrete;
+    }
+  }
+  .rail.open { width: 244px; }
+  .rail.out {
+    display: none;
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  @starting-style {
+    .rail {
+      opacity: 0;
+      transform: translateX(-14px);
+    }
+  }
+  /* Hover-only affordance. On a phone the strip can never be opened but
      still swallows taps in the left edge — part of the back-10s zone. */
   @media (hover: none) {
     .rail { display: none; }
@@ -80,10 +107,10 @@
 
   .tab {
     flex-direction: column;
-    gap: 10px;
-    width: 36px;
+    gap: 12px;
+    width: 40px;
     color: var(--tx-3);
-    padding: 14px 0;
+    padding: 16px 0;
     background: transparent;
     border: none;
     border-right: 1px solid var(--glass-bd);
@@ -97,22 +124,28 @@
     border-left: 0;
     border-bottom: 0;
     transform: rotate(45deg);
-    transition: transform 0.24s var(--ease-out);
+    transition: transform var(--m, 260ms) var(--ease-out);
   }
   .chev.rot { transform: rotate(225deg); }
   .label {
     writing-mode: vertical-rl;
     transform: rotate(180deg);
-    letter-spacing: 0.12em;
+    font-family: var(--font-display);
+    letter-spacing: 0.18em;
     font-size: 10px;
     font-weight: 600;
     color: var(--tx-2);
+  }
+  .count {
+    font-size: 10px;
+    color: var(--tx-1);
+    margin-top: auto;
   }
 
   .list {
     flex: 1;
     opacity: 0;
-    transition: opacity 0.18s var(--ease-out) 0.06s;
+    transition: opacity var(--m-fast, 130ms) var(--ease-out) 60ms;
     scrollbar-width: none;
   }
   .rail.open .list { opacity: 1; }
@@ -121,11 +154,22 @@
   .card {
     background: var(--bg-2);
     border: 1px solid transparent;
-    transition: border-color 0.15s var(--ease-out), transform 0.15s var(--ease-out);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    transition:
+      border-color var(--m-fast, 130ms) var(--ease-out),
+      transform var(--m-fast, 130ms) var(--ease-out),
+      background var(--m-fast, 130ms) var(--ease-out);
     flex-shrink: 0;
   }
-  .card:hover { transform: translateX(2px); }
-  .card.active { border-color: var(--red); }
+  .card:hover {
+    transform: translateX(3px);
+    background: var(--bg-3);
+  }
+  .card.active {
+    border-color: color-mix(in oklab, var(--red) 70%, var(--art-1));
+    box-shadow: 0 0 18px -6px var(--red-glow);
+  }
   .card.active .title { color: var(--tx-5); }
 
   .thumb-wrap { background: var(--bg-3); }
@@ -135,20 +179,28 @@
   }
   .now-pill {
     position: absolute;
-    top: 4px;
-    left: 4px;
-    padding: 1px 6px;
+    top: 5px;
+    left: 5px;
+    padding: 2px 7px;
     border-radius: 99px;
     background: var(--red);
     color: #fff;
+    font-family: var(--font-display);
     font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
   }
-  .title { color: var(--tx-3); }
 
-  @keyframes slide-r {
-    from { opacity: 0; transform: translateX(-12px); }
-    to   { opacity: 1; transform: translateX(0); }
+  .meta { padding: 7px 9px 8px; }
+  .idx {
+    font-size: 10px;
+    color: var(--tx-1);
+    flex-shrink: 0;
+  }
+  .title {
+    font-size: 12px;
+    line-height: 1.3;
+    letter-spacing: -0.008em;
+    color: var(--tx-3);
   }
 </style>

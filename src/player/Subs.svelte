@@ -5,6 +5,7 @@
   import type { SubsInfo } from "./subs";
 
   let {
+    open,
     info,
     onlineResults,
     searching,
@@ -15,6 +16,7 @@
     onSubsOff,
     onClose,
   }: {
+    open: boolean;
     info: SubsInfo | null;
     onlineResults: any[] | null;
     searching: boolean;
@@ -45,7 +47,7 @@
   }
 </script>
 
-<Dropdown {onClose} width="300px" maxHeight="320px">
+<Dropdown {open} {onClose} width="320px" maxHeight="340px">
   <button class="item" class:active={!activeSub} onclick={onSubsOff}>
     <span class="bullet">{!activeSub ? "●" : "○"}</span>
     Off

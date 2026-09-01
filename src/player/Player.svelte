@@ -34,6 +34,8 @@
   import { AVSync } from "./avsync";
   import { PlayerView } from "./view.svelte";
   import { Sprite } from "./sprite.svelte";
+  import { Ambient } from "./ambient";
+  import Chrome from "./chrome.svelte";
   import type { WhisperCue } from "./subs";
 
   let { videoParam: initialParam }: any = $props();
@@ -67,6 +69,8 @@
   let pageEl: HTMLElement | undefined;
   let player: any = null;
   let avSync: AVSync | null = null;
+  let ambient: Ambient | null = null;
+  let buffered = $state<[number, number][]>([]);
   let cleanups: (() => void)[] = [];
   let playerError = $state("");
   let listData: any[] | null = null;
@@ -234,6 +238,7 @@
       view.audio.close();
       sprite.manifest = null;
       sprite.url = "";
+      buffered = [];
       avSync?.set(0);
       player.src({ src: masterSrc, type: "application/vnd.apple.mpegurl" });
       const clearSwap = () => (swapping = false);
@@ -507,6 +512,25 @@
 
     ps.bind(player);
 
+    // The ambilight samples the tech element, which video.js may swap for the
+    // node bound here. Same-origin media, so the canvas never taints — the
+    // sampler still guards the read and gives up quietly if it ever does.
+    const tech = (player.el()?.querySelector("video") as HTMLVideoElement) ?? videoEl!;
+    ambient = new Ambient((a, b) => {
+      pageEl?.style.setProperty("--art-1", a);
+      pageEl?.style.setProperty("--art-2", b);
+    }).attach(tech);
+
+    const readBuffered = () => {
+      const b = player?.buffered?.();
+      const out: [number, number][] = [];
+      for (let i = 0; i < (b?.length ?? 0); i++) out.push([b.start(i), b.end(i)]);
+      buffered = out;
+    };
+    player.on("progress", readBuffered);
+    player.on("seeked", readBuffered);
+    player.on("loadedmetadata", readBuffered);
+
     player.on("timeupdate", autoSkipTick);
     player.on("ended", () => {
       if (ps.nextURL) goNext();
@@ -680,6 +704,7 @@
       cleanups.forEach((fn) => fn());
       cleanups = [];
       view.destroy();
+      ambient?.detach();
       avSync?.destroy();
       player?.dispose();
       player = null;
@@ -690,7 +715,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   bind:this={pageEl}
-  class="page p-fix flow-h"
+  class="page pl p-fix flow-h"
   class:hide-ui={ps.hideUI}
   class:embed
   onmousemove={() => ps.showUI(ps.paused)}
@@ -702,6 +727,8 @@
     {embed}
     {videoParam}
     {runWhisper}
+    {tuneOpen}
+    onTune={() => (tuneOpen = !tuneOpen)}
     onToggleSubs={toggleSubs}
     onSelectLocal={selectLocal}
     onSelectEmbedded={selectEmbedded}
@@ -710,7 +737,15 @@
     onSelectAudio={selectAudio}
   />
 
-  <div class="video-wrap p-abs">
+  <Chrome />
+
+  <!-- Shared-element target: the library card's thumbnail carries the same
+       `art-<key>` name, so the tile grows into the picture across the
+       navigation instead of the page cutting. -->
+  <div
+    class="video-wrap p-abs"
+    style:view-transition-name={ps.videoKey ? `art-${ps.videoKey}` : undefined}
+  >
     <!-- Without playsinline iPhone Safari hijacks playback into the native
          fullscreen player and every piece of custom chrome disappears. -->
     <video
@@ -739,6 +774,9 @@
   <Dock
     {ps}
     {title}
+    {buffered}
+    intro={introRange}
+    outro={outroRange}
     speed={ps.speed}
     onSeek={(t) => player?.currentTime(t)}
     onPlayPause={() => (player?.paused() ? safePlay() : player.pause())}
@@ -793,26 +831,44 @@
   .error-overlay {
     inset: 0;
     z-index: 20;
-    background: #000c;
+    background: rgba(3, 2, 6, 0.82);
+    backdrop-filter: blur(18px) saturate(120%);
+    -webkit-backdrop-filter: blur(18px) saturate(120%);
     color: var(--tx-4);
     text-align: center;
   }
   .err-icon {
     font-size: 2rem;
+    color: var(--red);
   }
   .err-msg {
-    font-size: 14px;
-    max-width: 320px;
+    font-family: var(--font-display);
+    font-size: 15px;
+    letter-spacing: -0.01em;
+    max-width: 34ch;
+    text-wrap: balance;
   }
   .err-retry {
-    background: var(--bg-5);
+    background: var(--glass-2);
+    border: 1px solid var(--glass-bd);
     color: var(--tx-5);
-    border: none;
-    padding: 8px 20px;
+    padding: 9px 22px;
+    font-family: var(--font-display);
     font-size: 14px;
+    font-weight: 500;
+    transition:
+      background var(--m-fast, 130ms) var(--ease-out),
+      transform var(--m-fast, 130ms) var(--ease-snap);
+  }
+  .err-retry:hover {
+    background: var(--red);
+  }
+  .err-retry:active {
+    transform: scale(0.96);
   }
 
   .video-wrap {
     inset: 0;
+    z-index: 1;
   }
 </style>

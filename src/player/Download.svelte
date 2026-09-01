@@ -120,14 +120,32 @@
 {/if}
 
 <style>
+  /* Matches the bar's own .ibtn — same component, different style scope. */
   .ibtn {
-    color: var(--tx-4);
+    color: var(--tx-3);
+    border: 1px solid transparent;
+    border-radius: var(--r-md) !important;
+    min-width: 38px;
+    min-height: 38px;
     transition:
-      color 0.15s,
-      background 0.15s;
+      color var(--m-fast, 130ms) var(--ease-out),
+      background var(--m-fast, 130ms) var(--ease-out),
+      border-color var(--m-fast, 130ms) var(--ease-out),
+      transform var(--m-fast, 130ms) var(--ease-snap);
   }
-  .ibtn:hover {
+  @media (hover: hover) {
+    .ibtn:hover {
+      color: var(--tx-5);
+      background: var(--glass);
+      border-color: var(--glass-bd);
+    }
+  }
+  @media (hover: none) {
+    .ibtn { min-width: 44px; min-height: 44px; }
+  }
+  .ibtn:active {
     color: var(--tx-5);
-    background: #fff2;
+    background: var(--glass-2);
+    transform: scale(0.9);
   }
 </style>

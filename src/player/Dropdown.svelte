@@ -4,24 +4,50 @@
   import type { Snippet } from "svelte";
 
   let {
+    open,
     onClose,
     width = "260px",
     maxHeight = "none",
     children,
   }: {
+    open: boolean;
     onClose: () => void;
     width?: string;
     maxHeight?: string;
     children: Snippet;
   } = $props();
 
-  onMount(() => clickOutside(onClose));
+  // Mounted always, hidden by `.out`, so the panel leaves with the motion it
+  // arrived with instead of being yanked out of the DOM. Dismissal only
+  // listens while it is actually open.
+  $effect(() => {
+    if (!open) return;
+
+    // onClose is only read inside these closures, so the effect depends on
+    // `open` alone — a re-rendered parent must not tear the listeners down.
+    const drop = clickOutside(() => onClose());
+    // Escape closes, which a click-outside listener alone never gave keyboard
+    // users. Capture, so the player's own keydown handler doesn't see it.
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", esc, true);
+
+    return () => {
+      drop();
+      window.removeEventListener("keydown", esc, true);
+    };
+  });
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="dropdown"
+  class="dropdown pl-pane pl-enter"
+  class:out={!open}
+  inert={!open}
   style:width
   style:max-height={maxHeight}
   onclick={(e) => e.stopPropagation()}
@@ -32,19 +58,26 @@
 <style>
   .dropdown {
     position: absolute;
-    top: calc(100% + 8px);
+    top: calc(100% + 10px);
     right: 0;
     overflow-y: auto;
-    background: rgba(13, 11, 18, 0.78);
-    backdrop-filter: blur(20px) saturate(140%);
-    -webkit-backdrop-filter: blur(20px) saturate(140%);
-    border: 1px solid var(--glass-bd);
+    overscroll-behavior: contain;
     border-radius: var(--r-lg);
     z-index: 100;
-    box-shadow: var(--sh-3);
     transform-origin: top right;
-    padding: 4px;
-    animation: dropdown-in 0.22s var(--ease-snap);
+    padding: 5px;
+    scrollbar-width: thin;
+  }
+  .dropdown.out {
+    display: none;
+    opacity: 0;
+    transform: translateY(-8px) scale(0.94);
+  }
+  @starting-style {
+    .dropdown {
+      opacity: 0;
+      transform: translateY(-8px) scale(0.94);
+    }
   }
 
   .dropdown :global(.item) {
@@ -53,12 +86,19 @@
     gap: 10px;
     width: 100%;
     padding: 9px 11px;
+    min-height: 38px;
     border-radius: var(--r-md);
     text-align: left;
     color: var(--tx-3);
     font-size: 13px;
     font-weight: 500;
-    transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
+    letter-spacing: -0.006em;
+    transition:
+      background var(--m-fast, 130ms) var(--ease-out),
+      color var(--m-fast, 130ms) var(--ease-out);
+  }
+  @media (hover: none) {
+    .dropdown :global(.item) { min-height: 44px; }
   }
   .dropdown :global(.item:hover) {
     background: var(--glass);
@@ -80,11 +120,13 @@
     color: var(--red);
   }
 
+  /* Section headings share the panel scale with the tune sheet's .pnl-hd. */
   .dropdown :global(.section-hd) {
-    padding: 10px 12px 6px;
+    padding: 11px 12px 6px;
+    font-family: var(--font-display);
     font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.12em;
     font-weight: 600;
     color: var(--tx-2);
   }
@@ -98,16 +140,5 @@
     height: 1px;
     background: var(--glass-bd);
     margin: 6px 4px;
-  }
-
-  @keyframes dropdown-in {
-    from {
-      opacity: 0;
-      transform: translateY(-6px) scale(0.94);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
   }
 </style>
