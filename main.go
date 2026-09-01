@@ -191,6 +191,7 @@ func main() {
 	router.POST("/api/aria2/add", func(c *gin.Context) { jobs.Aria2Add(c, lib) })
 	router.POST("/api/aria2/add-torrent", func(c *gin.Context) { jobs.Aria2AddTorrent(c, lib) })
 	router.GET("/api/search", jobs.TorrentSearch)
+	router.GET("/api/blurbs", jobs.BlurbList)
 	router.GET("/api/aria2/list", jobs.Aria2List)
 	router.POST("/api/aria2/pause", jobs.Aria2Pause)
 	router.POST("/api/aria2/resume", jobs.Aria2Resume)

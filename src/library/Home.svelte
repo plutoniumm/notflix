@@ -11,6 +11,7 @@
   import Continues from "./Continues.svelte";
   import ShowRow from "./ShowRow.svelte";
   import MediaCard from "../components/MediaCard.svelte";
+  import Blurb from "../components/Blurb.svelte";
   import ScrollRow from "../components/ScrollRow.svelte";
   import ProgressBar from "../components/ProgressBar.svelte";
   import EmptyState from "../components/EmptyState.svelte";
@@ -443,7 +444,11 @@
                     key={f.key}
                     {idx}
                     downloaded={home.downloadedSet.has(join(dir, f.name))}
-                  />
+                  >
+                    {#snippet footer()}
+                      <Blurb name={f.name} />
+                    {/snippet}
+                  </MediaCard>
                 {/each}
               </div>
             </ScrollRow>

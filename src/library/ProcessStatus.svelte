@@ -20,6 +20,7 @@
     repair: "Repair",
     thumbs: "Thumbnails",
     sprites: "Trickplay sprites",
+    blurbs: "Descriptions",
     whisper: "Subtitles (Whisper)",
   };
 
