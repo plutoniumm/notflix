@@ -113,3 +113,18 @@ export function parseRaw(raw: string): { dir: string; name: string } {
     name: raw.slice(i + 1),
   };
 }
+
+// Mirrors library.Hash in Go (FNV-32a, mod 1e7, zero-padded to 7). Thumbnails,
+// sprites and the view-transition name all key off it, and deriving it here
+// means the name exists at first paint instead of after /api/videos resolves —
+// a cross-document morph that names its element late has already missed.
+export function hashKey(name: string): string {
+  let h = 2166136261;
+
+  for (const b of new TextEncoder().encode(name)) {
+    h ^= b;
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+
+  return String(h % 1e7).padStart(7, "0");
+}

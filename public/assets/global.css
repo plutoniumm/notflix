@@ -611,10 +611,6 @@ textarea:disabled,
   container: rail / inline-size;
 }
 
-.media-card {
-  container: card / inline-size;
-}
-
 /* ── :has() ──────────────────────────────────────────────────────────────
    Spotlight: hovering one card dims its neighbours, so a rail resolves to the
    thing you are pointing at. This is a parent-state effect — the row has to
@@ -872,116 +868,13 @@ textarea:disabled,
   transform: scale(0.96);
 }
 
-.media-card {
-  flex-shrink: 0;
-  border-radius: var(--r-lg);
-  z-index: 1;
-  /* `backwards` and not `both`: a filling animation keeps overriding the
-     properties it animated, so `both` left every card pinned at transform:none
-     and the hover lift below never applied. */
-  animation: slide-up var(--motion-slow) var(--ease-out) backwards;
-  transition: transform var(--motion) var(--ease-snap),
-    box-shadow var(--motion) var(--ease-out), opacity var(--motion) var(--ease-out),
-    filter var(--motion) var(--ease-out), scale var(--motion) var(--ease-out);
-}
-
-.media-card:hover {
-  transform: translateY(-4px) scale(1.04);
-  z-index: 10;
-  box-shadow: var(--sh-3), var(--sh-art), 0 0 0 1px var(--glass-bd);
-}
-
-.media-card:active {
-  transform: translateY(-2px) scale(1.02);
-  transition-duration: var(--motion-fast);
-}
-
-.media-card .thumb {
-  aspect-ratio: 16 / 9 !important;
-  background: var(--bg-3);
-  border-radius: var(--r-lg) var(--r-lg) 0 0;
-}
-
-.media-card .thumb img {
-  transition: transform var(--motion-slow) var(--ease-out),
-    filter var(--motion) var(--ease-out);
-  filter: saturate(95%);
-}
-
-.media-card:hover .thumb img {
-  transform: scale(1.05);
-  filter: saturate(112%);
-}
-
-.media-card .play-icon {
-  inset: 0;
-  background: linear-gradient(180deg, transparent 30%, oklch(0% 0 0 / 0.55) 100%);
-  transition: opacity var(--motion) var(--ease-out);
-}
-
-.media-card:hover .play-icon {
-  opacity: 1;
-}
-
-.media-card .card-name {
-  color: var(--tx-5);
-  padding: 8px 10px 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  background: var(--bg-3);
-  font-weight: 500;
-  font-size: 14px;
-}
-
-.media-card .card-name:last-child {
-  padding-bottom: 8px;
-  border-radius: 0 0 var(--r-lg) var(--r-lg);
-}
-
-.media-card .dot {
-  bottom: 8px;
-  right: 8px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--grn);
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--bg-1) 60%, transparent),
-    0 0 10px color-mix(in oklab, var(--grn) 70%, transparent);
-}
-
 @container card (min-width: 210px) {
-  .media-card .card-name {
-    font-size: 15px;
-    padding: 10px 12px 5px;
-  }
-
-  .media-card .card-name:last-child {
-    padding-bottom: 10px;
-  }
 }
 
 @container card (max-width: 168px) {
-  .media-card .card-name {
-    font-size: 12.5px;
-    padding: 6px 8px 3px;
-    letter-spacing: -0.012em;
-  }
-
-  .media-card .card-name:last-child {
-    padding-bottom: 7px;
-  }
 }
 
 @media (max-width: 640px) {
-  .media-card {
-    width: 144px;
-  }
-
-  .media-card:hover {
-    transform: none;
-    box-shadow: var(--sh-2);
-  }
 }
 
 .scroll-arrow {
@@ -1242,10 +1135,6 @@ textarea:disabled,
   scroll-padding-left: 48px;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
-}
-
-.scroll-row .media-card {
-  scroll-snap-align: start;
 }
 
 @container rail (max-width: 640px) {

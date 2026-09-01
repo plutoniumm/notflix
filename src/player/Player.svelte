@@ -22,7 +22,7 @@
   import Skip, { activeSkip } from "./skip.svelte";
   import Tune from "./tune.svelte";
 
-  import { clean, parseRaw, nextVid } from "../core/video";
+  import { clean, parseRaw, nextVid, hashKey } from "../core/video";
   import { api, HEAD } from "../core/api";
   import { toast } from "../core/toast.svelte";
   import Subs from "./subs";
@@ -48,6 +48,8 @@
   // Any extension the server calls playable (.mp4/.mkv/.mov) reaches here, so
   // swap whatever is present — matching the server's own `base` computation.
   const sub = $derived(videoParam.replace(/\.[^./]+$/, ".vtt"));
+  // Derived, not awaited: ps.videoKey only lands after /api/videos.
+  const artKey = $derived(hashKey(name));
   // Probed once per mount — it's a UA capability, not element state. Sent so
   // the server can pick the h264 ladder over the AV1-only master rather than
   // guessing from the User-Agent.
@@ -744,7 +746,7 @@
        navigation instead of the page cutting. -->
   <div
     class="video-wrap p-abs"
-    style:view-transition-name={ps.videoKey ? `art-${ps.videoKey}` : undefined}
+    style:view-transition-name={`art-${artKey}`}
   >
     <!-- Without playsinline iPhone Safari hijacks playback into the native
          fullscreen player and every piece of custom chrome disappears. -->
