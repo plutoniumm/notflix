@@ -17,25 +17,50 @@
     children: Snippet;
   } = $props();
 
+  let el = $state<HTMLElement>();
+
   // Always mounted, hidden by `.out`, so the panel leaves with the motion it
   // arrived with. Dismissal only listens while it is open.
   $effect(() => {
     if (!open) return;
 
+    const from = document.activeElement as HTMLElement | null;
+
     // onClose is read only inside the closures, so the effect depends on `open`
     // alone — a re-rendered parent must not tear the listeners down.
     const drop = clickOutside(() => onClose());
-    // Capture, so the player's own keydown handler doesn't also see Escape.
-    const esc = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+
+    // Capture, so the player's own keydown handler doesn't also see these.
+    const keys = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+
+      const items = [...(el?.querySelectorAll<HTMLElement>(".item") ?? [])];
+      if (!items.length) return;
+
+      const i = items.indexOf(document.activeElement as HTMLElement);
+      let to: number;
+      if (e.key === "ArrowDown") to = (i + 1) % items.length;
+      else if (e.key === "ArrowUp") to = (i <= 0 ? items.length : i) - 1;
+      else if (e.key === "Home") to = 0;
+      else if (e.key === "End") to = items.length - 1;
+      else return;
+
+      e.preventDefault();
       e.stopPropagation();
-      onClose();
+      items[to].focus();
     };
-    window.addEventListener("keydown", esc, true);
+    window.addEventListener("keydown", keys, true);
 
     return () => {
       drop();
-      window.removeEventListener("keydown", esc, true);
+      window.removeEventListener("keydown", keys, true);
+      // Only if the closing panel still owns focus — a click elsewhere has
+      // already put it where the user wanted it.
+      if (el?.contains(document.activeElement)) from?.focus?.();
     };
   });
 </script>
@@ -43,6 +68,7 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+  bind:this={el}
   class="dropdown pl-pane pl-enter"
   class:out={!open}
   inert={!open}

@@ -55,6 +55,52 @@
     background-color: transparent;
   }
 
+  /* What is left of video.js once its control components are switched off: the
+     caption box and the spinner. Both are dressed to match, because they are
+     the only pieces of it still on screen.
+
+     video.js drops the caption box to `bottom: 1em` the moment controls are
+     disabled — straight behind the dock — so it rides above the dock while the
+     chrome is up and drops back once the chrome hides. `.video-js` is in the
+     selector to outweigh that rule rather than to depend on file order. */
+  .pl .video-js.vjs-controls-disabled .vjs-text-track-display {
+    bottom: calc(98px + var(--safe-b, 0px));
+    transition: bottom var(--m) var(--ease-out);
+  }
+
+  .pl.hide-ui .video-js.vjs-controls-disabled .vjs-text-track-display {
+    bottom: 2.6em;
+  }
+
+  /* video.js writes the cue background inline, so only !important reaches it. */
+  .pl .vjs-text-track-cue > div {
+    background: transparent !important;
+    font-family: var(--font-display) !important;
+    font-weight: 500 !important;
+    letter-spacing: -0.014em;
+    text-shadow:
+      0 0 4px #000,
+      0 1px 3px #000,
+      1px 0 3px #000,
+      -1px 0 3px #000;
+  }
+
+  .pl .vjs-loading-spinner {
+    border-color: color-mix(in oklab, var(--art-1) 55%, transparent);
+    width: 3.2em;
+    height: 3.2em;
+    border-width: 0.28em;
+    opacity: 0.9;
+  }
+
+  /* The pseudos are the spinning arcs and re-declare their own top colour. */
+  .pl .vjs-seeking .vjs-loading-spinner::before,
+  .pl .vjs-seeking .vjs-loading-spinner::after,
+  .pl .vjs-waiting .vjs-loading-spinner::before,
+  .pl .vjs-waiting .vjs-loading-spinner::after {
+    border-top-color: var(--red);
+  }
+
   .pl-pane {
     background: rgba(13, 11, 18, 0.82);
     background: color-mix(in oklab, var(--bg-2) 78%, transparent);
@@ -100,11 +146,11 @@
     }
   }
 
-  .pl:has(.tune.show) .pl-scrim,
+  .pl:has(.sheet.show) .pl-scrim,
   .pl:has(.dropdown:not(.out)) .pl-scrim {
     opacity: 1;
   }
-  .pl:has(.tune.show) .pl-glow,
+  .pl:has(.sheet.show) .pl-glow,
   .pl:has(.dropdown:not(.out)) .pl-glow {
     opacity: 0.45;
   }
@@ -135,8 +181,32 @@
     }
   }
 
-  .pl:has(.track.live) .rail {
-    opacity: 0.3;
+  /* Scrub cinema. The room goes dark around the one lit thing: the picture
+     dims, the surround brightens (the ambilight samples the decoded frame, not
+     the styled one, so it keeps the true colour), and every other piece of
+     chrome steps back until the pointer comes up. State comes off the DOM —
+     .track carries .live already — so nothing here needs a second JS flag.
+     The :not()s are load-bearing: each of these already has its own hidden
+     state at one class and this selector outweighs it, so without them a
+     scrub would fade the hidden chrome back IN at 16%. */
+  .pl:has(.track.live) .rail:not(.out),
+  .pl:has(.track.live) > .bar:not(.hidden),
+  .pl:has(.track.live) .synopsis:not(.out),
+  .pl:has(.track.live) .skip:not(.out),
+  .pl:has(.track.live) .ghost:not(.out) {
+    opacity: 0.16;
+  }
+
+  .pl:has(.track.live) .video-wrap {
+    filter: brightness(0.34) saturate(0.7);
+    scale: 0.985;
+  }
+
+  .pl:has(.track.live) .pl-glow {
+    opacity: 1;
+  }
+  .pl:has(.track.live) .pl-vig {
+    opacity: 1;
   }
 
   @media (prefers-reduced-motion: reduce) {

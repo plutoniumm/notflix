@@ -24,6 +24,8 @@
 </script>
 
 <script lang="ts">
+  import Sheet from "./sheet.svelte";
+
   let {
     open,
     videoEl,
@@ -45,24 +47,6 @@
   } = $props();
 
   let fx = $state(loadFx());
-  let sheet = $state<HTMLElement>();
-
-  // The top layer brings Escape and light-dismiss and can't be trapped by an
-  // ancestor's stacking context; without it, `.show` drives a plain fixed panel.
-  const popOk =
-    typeof HTMLElement !== "undefined" && "popover" in HTMLElement.prototype;
-
-  $effect(() => {
-    const el = sheet as any;
-    if (!popOk || !el?.isConnected) return;
-
-    try {
-      if (open) el.showPopover?.();
-      else el.hidePopover?.();
-    } catch {
-      // showPopover throws if the state already matches; nothing to repair.
-    }
-  });
 
   const isDefault = $derived(
     fx.bright === 1 && fx.contrast === 1 && fx.sat === 1 && fx.gamma === 1,
@@ -109,18 +93,7 @@
   </label>
 {/snippet}
 
-<aside
-  bind:this={sheet}
-  class="tune pl-pane"
-  class:show={open}
-  popover={popOk ? "auto" : undefined}
-  ontoggle={(e: any) => e.newState === "closed" && open && onClose()}
->
-  <div class="hd f al-ct">
-    <span class="ttl">Tune</span>
-    <button class="x ptr tx-1" aria-label="Close" onclick={onClose}>✕</button>
-  </div>
-
+<Sheet {open} {onClose} title="Tune">
   <div class="sec pl-lbl">video</div>
   {@render slider("Brightness", 0.25, 1.75, 0.01, fx.bright, (v) => (fx.bright = v), fx.bright.toFixed(2))}
   {@render slider("Contrast", 0.5, 1.5, 0.01, fx.contrast, (v) => (fx.contrast = v), fx.contrast.toFixed(2))}
@@ -139,7 +112,7 @@
   {@render slider("Speed", 0.25, 3, 0.05, speed, onSpeed, `${speed.toFixed(2)}×`)}
 
   <button class="reset rx5 ptr fs-xs" onclick={reset}>Reset all</button>
-</aside>
+</Sheet>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <filter id="fx-gamma">
@@ -152,79 +125,6 @@
 </svg>
 
 <style>
-  .tune {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    /* The UA popover sets `inset: 0`; without left:auto the element is
-       over-constrained and pins to the left edge. */
-    left: auto;
-    z-index: 14;
-    width: min(300px, 86vw);
-    margin: 0;
-    padding: calc(16px + var(--safe-t, 0px)) 18px
-      calc(18px + var(--safe-b, 0px));
-    border: 0;
-    border-left: 1px solid var(--glass-bd);
-    border-radius: 0;
-    transform: translateX(101%);
-    transition: transform var(--m, 260ms) var(--ease-out);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-  .tune.show {
-    transform: translateX(0);
-  }
-
-  /* The UA hides a closed popover outright, so the slide has to survive a
-     discrete display change. The fallback path never sees these rules. */
-  .tune:popover-open {
-    transform: translateX(0);
-  }
-  .tune[popover] {
-    transition-property: transform, display, overlay;
-    transition-duration: var(--m, 260ms);
-    transition-timing-function: var(--ease-out);
-    transition-behavior: allow-discrete;
-  }
-  @starting-style {
-    .tune:popover-open {
-      transform: translateX(101%);
-    }
-  }
-  .tune[popover]::backdrop {
-    background: rgba(3, 2, 6, 0.35);
-    backdrop-filter: blur(2px);
-    transition:
-      opacity var(--m, 260ms) var(--ease-out),
-      display var(--m, 260ms) allow-discrete;
-  }
-
-  .hd {
-    justify-content: space-between;
-    margin-bottom: 10px;
-  }
-  .ttl {
-    font-family: var(--font-display);
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--tx-5);
-  }
-  .x {
-    background: none;
-    border: none;
-    font-size: 14px;
-    min-width: 32px;
-    min-height: 32px;
-    border-radius: var(--r-sm);
-    transition: color var(--m-fast, 130ms) var(--ease-out);
-  }
-  .x:hover {
-    color: var(--tx-5);
-  }
-
   .sec {
     margin: 18px 0 2px;
   }
