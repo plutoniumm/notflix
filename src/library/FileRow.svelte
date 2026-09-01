@@ -92,6 +92,7 @@
   .file:hover {
     background: var(--glass);
   }
+  .file:focus-within .actions,
   .file:hover .actions,
   .file:hover :global(.btn-icon) {
     opacity: 1;

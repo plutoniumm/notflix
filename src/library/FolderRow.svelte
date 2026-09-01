@@ -251,6 +251,7 @@
   .folder-hd::-webkit-details-marker {
     display: none;
   }
+  .folder-hd:focus-within,
   .folder-hd:hover {
     background: var(--glass);
   }
@@ -258,6 +259,7 @@
     background: var(--glass-2);
   }
   @media (hover: hover) {
+    .folder-hd:focus-within :global(.btn-icon),
     .folder-hd:hover :global(.btn-icon) {
       opacity: 1;
     }

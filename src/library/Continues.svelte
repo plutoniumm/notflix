@@ -148,7 +148,7 @@
     margin: 0 -48px;
   }
   .cards {
-    padding: 4px 48px 12px;
+    padding: 14px 48px 18px;
     scrollbar-width: none;
   }
   .cards :global(.tile) {
@@ -169,7 +169,7 @@
       --fade-s: 0px;
     }
     .cards {
-      padding: 4px 48px 12px 0;
+      padding: 14px 48px 18px 0;
     }
   }
 

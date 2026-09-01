@@ -93,7 +93,10 @@ export function Hotkeys(
   onTune: () => void,
 ): () => void {
   const handler = (e: KeyboardEvent) => {
-    if ((e.target as HTMLElement).tagName === "INPUT") return;
+    // Space/letters belong to whatever control has focus, and Cmd/Ctrl
+    // chords belong to the browser.
+    if ((e.target as HTMLElement).closest?.("input,button,a,select,textarea,[contenteditable]")) return;
+    if (e.ctrlKey || e.metaKey) return;
 
     const key = e.key;
     const lkey = key.toLowerCase();

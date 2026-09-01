@@ -145,7 +145,7 @@
   }
 
   .cards {
-    padding: 4px 48px 14px;
+    padding: 14px 48px 20px;
     scrollbar-width: none;
     transition:
       opacity var(--motion, 0.26s) var(--ease-out),
@@ -182,7 +182,7 @@
       border-radius: var(--r-md);
     }
     .cards {
-      padding: 4px 16px 12px;
+      padding: 12px 16px 16px;
     }
     .cards :global(.tile) {
       width: 148px;

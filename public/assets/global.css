@@ -721,6 +721,10 @@ textarea:disabled,
   }
 }
 
+.btn-icon:focus-visible {
+  opacity: 1;
+}
+
 .btn-icon:active {
   transform: scale(0.85);
   background: var(--bg-4);

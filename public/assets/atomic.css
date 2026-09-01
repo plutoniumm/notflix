@@ -66,10 +66,13 @@ textarea {
   line-height: inherit;
 }
 
-input:focus,
-button:focus,
-select:focus,
-textarea:focus {
+/* Scoped to :not(:focus-visible): a bare :focus reset here has the same
+   specificity as global.css's :focus-visible ring and loads later, which
+   killed the keyboard focus ring on every button, input and select. */
+input:focus:not(:focus-visible),
+button:focus:not(:focus-visible),
+select:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible) {
   outline: none;
 }
 
@@ -474,10 +477,14 @@ textarea:focus {
 
 .flow-x-s {
   overflow-x: scroll;
+  /* A visible axis paired with a scrolling one computes to auto, so
+     overflow-x alone silently scrolls vertically too. */
+  overflow-y: hidden;
 }
 
 .flow-y-s {
   overflow-y: scroll;
+  overflow-x: hidden;
 }
 
 .flow-x-h {

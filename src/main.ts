@@ -50,7 +50,26 @@ if ("serviceWorker" in navigator) {
         window.dispatchEvent(new CustomEvent("sw-update", { detail: apply }));
       };
 
-      if (reg.waiting) offer();
+      // A waiting worker never activates on a plain reload — the page is
+      // still controlled by the old one — so the prompt survived the very
+      // action users take to dismiss it. Outside the player, adopt it on
+      // load; the sentinel stops a failed swap from reloading forever.
+      const adopt = () => {
+        if (reg.waiting && !location.search.includes("video=")) {
+          const url = reg.waiting.scriptURL;
+          try {
+            if (sessionStorage.getItem("swTried") === url) return false;
+            sessionStorage.setItem("swTried", url);
+          } catch {}
+          apply();
+
+          return true;
+        }
+
+        return false;
+      };
+
+      if (reg.waiting && !adopt()) offer();
       reg.addEventListener("updatefound", () => {
         const sw = reg.installing;
         sw?.addEventListener("statechange", () => {
