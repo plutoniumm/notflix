@@ -1,50 +1,130 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Notflix design system — "the room goes dark".
+   A personal cinema: content forward, chrome recedes, artwork colour bleeds
+   into the surface around it. Boldness is spent on motion and light; the
+   surfaces themselves stay quiet.
+
+   Token names are load-bearing across src/** — values may change, names may
+   not. Everything below is either a token, a contract other components code
+   against (.ambient / view-transition names / container names), or a shared
+   component class.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── registered properties ────────────────────────────────────────────────
+   A custom property can only be transitioned or animated once it is
+   registered with a syntax — an unregistered one is a raw token string and
+   jumps. Everything the app animates through a variable lives here. */
+
+/* Artwork ambient pair. Set inline per element by the components that know
+   the artwork (extracted from the thumbnail, or derived from the item key):
+     style="--art-1: oklch(62% .17 28); --art-2: oklch(48% .12 300)"
+   Defaults are the neutral house violet, so an element that never gets a
+   colour still reads as deliberate rather than broken. `inherits: true` so a
+   row can tint every card inside it with one declaration. */
+@property --art-1 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(56% 0.075 300);
+}
+
+@property --art-2 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(44% 0.06 272);
+}
+
+/* 0..1 light intensity. Inherited, because a pseudo-element does NOT pick up
+   a non-inherited property from the element that originates it — .ambient's
+   wash lives in ::before and would never see the hover value otherwise. */
+@property --glow {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* 0..1 house-lights level for the whole page. Drops when the player opens. */
+@property --room {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+@property --spin {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* Stagger index, set inline as style="--i: {idx}" on list items. */
+@property --i {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
 :root {
-  /* warmer, more controlled neutrals — less grey-on-grey */
-  --tx-1: #5a5664;
-  --tx-2: #7c7886;
-  --tx-3: #a6a2af;
-  --tx-4: #d6d3dc;
-  --tx-5: #fff;
+  /* Neutrals in OKLCH: one hue (300, the house violet), evenly spaced
+     lightness, chroma rising with lightness on the backgrounds so the deep
+     end reads as ink rather than plastic. Perceptual spacing is why the ramp
+     is in OKLCH — equal L steps look equal, which hex ramps never do. */
+  --tx-1: oklch(49% 0.021 300);
+  --tx-2: oklch(60% 0.019 300);
+  --tx-3: oklch(73% 0.015 300);
+  --tx-4: oklch(88% 0.01 300);
+  --tx-5: oklch(100% 0 0);
 
-  --bg-1: #07060a;
-  --bg-2: #0d0b12;
-  --bg-3: #16131c;
-  --bg-4: #221d2c;
-  --bg-5: #2e2738;
+  --bg-1: oklch(11.5% 0.012 300);
+  --bg-2: oklch(15.5% 0.016 300);
+  --bg-3: oklch(20% 0.02 300);
+  --bg-4: oklch(25% 0.026 300);
+  --bg-5: oklch(30% 0.032 300);
 
-  /* glass surface — sits on top of bg with blur */
-  --glass: rgba(255, 255, 255, 0.04);
-  --glass-2: rgba(255, 255, 255, 0.08);
-  --glass-bd: rgba(255, 255, 255, 0.08);
+  /* Glass and interaction states are mixed, not hand-picked, so retinting the
+     app is one edit. oklab keeps the mix perceptually neutral — sRGB mixing
+     drifts muddy through the midpoint. */
+  --glass: color-mix(in oklab, var(--tx-5) 4%, transparent);
+  --glass-2: color-mix(in oklab, var(--tx-5) 8%, transparent);
+  --glass-bd: color-mix(in oklab, var(--tx-5) 9%, transparent);
+  --hover: color-mix(in oklab, var(--tx-5) 8%, transparent);
+  --active: color-mix(in oklab, var(--tx-5) 14%, transparent);
+  --muted: color-mix(in oklab, var(--tx-1) 55%, transparent);
 
-  /* primary: coral-red, modern + saturated */
-  --red: #ff4d6d;
-  --red-soft: rgba(255, 77, 109, 0.16);
-  --red-glow: rgba(255, 77, 109, 0.4);
-  /* secondary accents */
-  --gold: #fbbf24;
-  --grn: #34d399;
-  --cyan: #5eead4;
+  /* Accents. Chroma sits at the sRGB edge on purpose: on a P3 display the
+     browser resolves it wider than #ff4d6d ever could. */
+  --red: oklch(68% 0.212 15);
+  --red-2: oklch(73% 0.178 42);
+  --red-soft: color-mix(in oklab, var(--red) 16%, transparent);
+  --red-glow: color-mix(in oklab, var(--red) 40%, transparent);
+  --gold: oklch(84% 0.165 85);
+  --grn: oklch(77% 0.155 163);
+  --cyan: oklch(85% 0.125 181);
 
-  /* radius scale */
   --r-sm: 6px;
   --r-md: 10px;
   --r-lg: 14px;
   --r-xl: 20px;
   --r-2xl: 28px;
 
-  /* layered shadow scale */
-  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --sh-2: 0 4px 10px -2px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
-  --sh-3: 0 12px 30px -8px rgba(0, 0, 0, 0.6), 0 4px 10px -4px rgba(0, 0, 0, 0.4);
-  --sh-4: 0 24px 60px -12px rgba(0, 0, 0, 0.7), 0 8px 20px -6px rgba(0, 0, 0, 0.5);
+  --sh-1: 0 1px 2px oklch(0% 0 0 / 0.4);
+  --sh-2: 0 4px 10px -2px oklch(0% 0 0 / 0.5), 0 2px 4px -2px oklch(0% 0 0 / 0.3);
+  --sh-3: 0 12px 30px -8px oklch(0% 0 0 / 0.62), 0 4px 10px -4px oklch(0% 0 0 / 0.4);
+  --sh-4: 0 24px 60px -12px oklch(0% 0 0 / 0.72), 0 8px 20px -6px oklch(0% 0 0 / 0.5);
+  /* Light the element casts in its own artwork colour. */
+  --sh-art: 0 20px 50px -20px color-mix(in oklab, var(--art-1) 70%, transparent),
+    0 8px 22px -12px color-mix(in oklab, var(--art-2) 50%, transparent);
 
-  /* easing */
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease-snap: cubic-bezier(0.2, 0.9, 0.3, 1.1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* type */
+  /* One motion scale for the whole app. Pull durations from here, never a
+     literal — the reduced-motion block at the bottom collapses these and any
+     transition built on them goes still for free. */
+  --motion-fast: 130ms;
+  --motion: 240ms;
+  --motion-slow: 480ms;
+  --motion-page: 520ms;
+
   --font-display: "Bricolage Grotesque", system-ui, -apple-system, sans-serif;
   --font-body: "Manrope", system-ui, -apple-system, sans-serif;
 
@@ -52,7 +132,12 @@
      an inset display, and only when the viewport meta says viewport-fit=cover. */
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
+
+  color-scheme: dark;
+  scrollbar-color: var(--bg-5) transparent;
 }
+
+/* ── base ───────────────────────────────────────────────────────────────── */
 
 html,
 body {
@@ -63,6 +148,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+body {
+  background: var(--bg-2);
+  color: var(--tx-5);
+  min-height: 100vh;
+  min-height: 100dvh;
+  position: relative;
+  overscroll-behavior-y: none;
+}
+
 h1,
 h2,
 h3,
@@ -70,79 +164,101 @@ h4 {
   font-family: var(--font-display);
   letter-spacing: -0.022em;
   font-weight: 600;
+  text-wrap: balance;
 }
 
-@view-transition {
-  navigation: auto;
+p,
+li {
+  text-wrap: pretty;
 }
 
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 0.42s;
-  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-}
-::view-transition-old(root) {
-  animation-name: vt-fade-out;
-}
-::view-transition-new(root) {
-  animation-name: vt-fade-in;
-}
-@keyframes vt-fade-out {
-  to {
-    opacity: 0;
-    transform: scale(0.985);
-    filter: blur(6px);
-  }
-}
-@keyframes vt-fade-in {
-  from {
-    opacity: 0;
-    transform: scale(1.012);
-    filter: blur(6px);
-  }
-}
-
-/* shared element transition for the active media card → player */
-::view-transition-group(media-hero) {
-  animation-duration: 0.5s;
-  animation-timing-function: cubic-bezier(0.34, 1.32, 0.64, 1);
-}
-::view-transition-old(media-hero),
-::view-transition-new(media-hero) {
-  animation-duration: 0.5s;
-  animation-timing-function: cubic-bezier(0.34, 1.32, 0.64, 1);
-}
-
-body {
-  background: var(--bg-2);
+::selection {
+  background: var(--red);
   color: var(--tx-5);
-  min-height: 100vh;
-  min-height: 100dvh;
-  position: relative;
 }
 
-/* drifting aurora — separate compositor layer so it doesn't repaint with content */
+input:focus-visible,
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Thin tinted bars everywhere, none inside card rails. scrollbar-width is the
+   standard property (Safari only got it in 18.2), so the -webkit- pseudos stay
+   as the fallback for older WebKit rather than as the primary mechanism. */
+* {
+  scrollbar-width: thin;
+}
+
+.cards,
+.noscroll {
+  scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-5);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--bg-5) 70%, var(--tx-5));
+  background-clip: padding-box;
+}
+
+.cards::-webkit-scrollbar,
+.noscroll::-webkit-scrollbar {
+  display: none;
+}
+
+video {
+  border: 0 !important;
+  outline: 0 !important;
+  transition: filter var(--motion-fast) linear, opacity var(--motion-fast) linear;
+}
+
+/* ── the room: ambient light ─────────────────────────────────────────────
+   The page wash is built from the same --art-1/--art-2 pair the cards use, so
+   setting them on <html> tints the whole room to whatever the user is looking
+   at. --room dims the house lights; the :has() below drops it when the player
+   mounts. Both are registered, so both animate. */
+
 body::after {
   content: "";
   position: fixed;
-  inset: -10%;
+  inset: -12%;
   pointer-events: none;
   z-index: -1;
+  opacity: var(--room);
   background:
-    radial-gradient(ellipse 70% 50% at 8% -4%, rgba(255, 77, 109, 0.22) 0%, transparent 60%),
-    radial-gradient(ellipse 55% 45% at 96% 6%, rgba(94, 234, 212, 0.12) 0%, transparent 60%),
-    radial-gradient(ellipse 90% 60% at 50% 110%, rgba(251, 191, 36, 0.08) 0%, transparent 60%);
-  animation: aurora-drift 28s ease-in-out infinite alternate;
-  will-change: transform;
+    radial-gradient(ellipse 70% 50% at 8% -4%,
+      color-mix(in oklab, var(--art-1) 27%, transparent) 0%, transparent 62%),
+    radial-gradient(ellipse 55% 45% at 96% 6%,
+      color-mix(in oklab, var(--art-2) 24%, transparent) 0%, transparent 62%),
+    radial-gradient(ellipse 90% 60% at 50% 112%,
+      color-mix(in oklab, var(--red) 9%, transparent) 0%, transparent 60%);
+  animation: drift 34s ease-in-out infinite alternate;
+  /* Transitioning the registered colours on the pseudo — rather than on <html>
+     where they are set — keeps a colour change to one element's style
+     recalculation instead of the whole inherited subtree. */
+  transition: opacity var(--motion-slow) var(--ease-out),
+    --art-1 var(--motion-slow) linear, --art-2 var(--motion-slow) linear;
 }
 
-@keyframes aurora-drift {
-  0%   { transform: translate3d(0, 0, 0)        rotate(0deg)   scale(1); }
-  50%  { transform: translate3d(-2%, 1.5%, 0)   rotate(2deg)   scale(1.04); }
-  100% { transform: translate3d(2%, -1.5%, 0)   rotate(-1.5deg) scale(1.02); }
-}
-
-/* subtle grain across the whole app — makes the dark surfaces feel like paper, not plastic */
+/* Grain, so the dark surfaces read as film stock rather than plastic. */
 body::before {
   content: "";
   position: fixed;
@@ -154,82 +270,861 @@ body::before {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
-::selection {
-  background: var(--red);
-  color: var(--tx-5);
+/* The room goes dark when the player is up. Player.svelte's root is .page and
+   its stage is .video-wrap; either one is enough to know a film is running. */
+body:has(.video-wrap),
+body:has(.page) {
+  --room: 0.28;
 }
 
-input:focus-visible,
-button:focus-visible,
-a:focus-visible {
-  outline: 2px solid var(--red);
-  outline-offset: 2px;
-  border-radius: var(--r-sm);
+/* ── the ambient contract ────────────────────────────────────────────────
+   .ambient paints a soft wash of --art-1/--art-2 behind an element, mixed
+   toward --bg-1 so it can never overpower the artwork it came from. Put it on
+   a surface that does NOT clip (rows, panels, hero, header) — the wash lives
+   in ::before and an ancestor's overflow:hidden will cut it off.
+   For elements that do clip (a .media-card is overflow:hidden), use .bleed:
+   box-shadow escapes the element's own overflow, so the colour still spills. */
+
+.ambient {
+  position: relative;
+  isolation: isolate;
 }
 
-/* style scrollbars once globally — subtle, not chrome-default */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+.ambient::before {
+  content: "";
+  position: absolute;
+  inset: -14%;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: calc(0.4 + var(--glow) * 0.45);
+  background:
+    radial-gradient(58% 58% at 24% 18%,
+      color-mix(in oklab, var(--art-1) 52%, var(--bg-1)) 0%, transparent 70%),
+    radial-gradient(66% 66% at 80% 86%,
+      color-mix(in oklab, var(--art-2) 44%, var(--bg-1)) 0%, transparent 72%);
+  filter: blur(34px) saturate(130%);
+  transition: opacity var(--motion-slow) var(--ease-out),
+    --art-1 var(--motion-slow) linear, --art-2 var(--motion-slow) linear;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+
+/* Registered --glow is what makes these transitions rather than jumps: an
+   unregistered custom property has no type to interpolate and snaps. */
+.bleed {
+  --glow: 0;
+  box-shadow:
+    0 calc(14px + var(--glow) * 12px) calc(38px + var(--glow) * 24px) -20px
+      color-mix(in oklab, var(--art-1) 70%, transparent),
+    0 8px 22px -12px color-mix(in oklab, var(--art-2) 50%, transparent);
+  transition: --glow var(--motion) var(--ease-out),
+    box-shadow var(--motion) var(--ease-out);
 }
-::-webkit-scrollbar-thumb {
-  background: var(--bg-4);
+
+.glow {
+  --glow: 0;
+  box-shadow: 0 0 calc(var(--glow) * 44px) calc(var(--glow) * -8px) var(--red-glow);
+  transition: --glow var(--motion) var(--ease-out),
+    box-shadow var(--motion) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .glow:hover,
+  .ambient:hover,
+  .bleed:hover {
+    --glow: 1;
+  }
+}
+
+/* Rotating conic rim for a "now playing" marker — again only animatable
+   because --spin is registered. */
+.ring {
+  position: relative;
+  isolation: isolate;
+}
+
+.ring::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from var(--spin),
+    transparent 0deg, var(--art-1) 90deg, var(--red) 180deg, transparent 300deg);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: spin-ring 4s linear infinite;
+}
+
+/* ── view transitions ────────────────────────────────────────────────────
+   App.svelte navigates for real (/ → ?video=… → /manage), so this is the
+   cross-document case: `navigation: auto` opts both documents in, and the
+   pseudo-elements below are the shared choreography.
+
+   NAME CONTRACT — every component must use exactly these, and a
+   view-transition-name has to be UNIQUE PER DOCUMENT. Two elements carrying
+   the same name abort the whole transition, so the art name goes on the ONE
+   card the user activated (set it in the click handler, or on the card that
+   matches the current ?video=), never on every card in a row.
+
+     art-<key>     the media card's .thumb on the library side and the
+                   player's .video-wrap on the player side. <key> is
+                   library.Hash(basename) — the same key /images/<key>.jpg
+                   uses — so the tile the user clicked becomes the stage.
+                   Also set `view-transition-class: art` on it to pick up the
+                   shared timing below.
+     page-header   the sticky top chrome (Header.svelte, Manage's header).
+     page-body     the scrolling content under it.
+
+   Everything else cross-fades as part of `root`. */
+
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root) {
+  animation: var(--motion-page) var(--ease-out) both fade-out-back;
+}
+
+::view-transition-new(root) {
+  animation: var(--motion-page) var(--ease-out) both fade-in-fwd;
+}
+
+/* Persistent chrome: the box morphs over the full duration while the contents
+   swap quickly underneath, which reads as one header re-labelling itself
+   rather than two headers dissolving. */
+::view-transition-group(page-header) {
+  animation-duration: var(--motion-page);
+  animation-timing-function: var(--ease-out);
+}
+
+::view-transition-old(page-header),
+::view-transition-new(page-header) {
+  animation-duration: var(--motion-fast);
+}
+
+::view-transition-group(page-body) {
+  animation-duration: var(--motion-page);
+  animation-timing-function: var(--ease-out);
+}
+
+::view-transition-old(page-body) {
+  animation: var(--motion) var(--ease-out) both fade-out-back;
+}
+
+::view-transition-new(page-body) {
+  animation: var(--motion-page) var(--ease-out) both rise-in;
+}
+
+/* `::view-transition-group(*)` and `view-transition-class` are Chrome 125+ /
+   Safari 18. A selector list dies whole if one item is unparseable, so each
+   wildcard form gets its own rule and its own @supports — the named rules
+   above must survive on engines that don't know them. */
+@supports selector(::view-transition-group(*)) {
+  ::view-transition-group(*) {
+    animation-timing-function: var(--ease-out);
+  }
+}
+
+@supports selector(::view-transition-group(.art)) {
+  ::view-transition-group(.art) {
+    animation-duration: var(--motion-page);
+    animation-timing-function: var(--ease-spring);
+    overflow: clip;
+    z-index: 20;
+  }
+
+  /* A thumbnail and a 16:9 stage are different shapes. Without these the
+     snapshots are stretched to each other's box and the morph visibly
+     squashes; object-fit: cover lets the group resize while the image keeps
+     its framing. */
+  ::view-transition-old(.art),
+  ::view-transition-new(.art) {
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+/* Reduced motion keeps the transition — a cross-fade is not the problem —
+   but drops every translation, scale and blur, and shortens it. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root),
+  ::view-transition-old(page-body),
+  ::view-transition-new(page-body) {
+    animation-name: fade-in;
+    animation-duration: 120ms;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-old(page-body) {
+    animation-direction: reverse;
+  }
+
+  ::view-transition-group(page-header),
+  ::view-transition-group(page-body) {
+    animation-duration: 120ms;
+  }
+
+  @supports selector(::view-transition-group(*)) {
+    ::view-transition-group(*) {
+      animation-duration: 120ms;
+    }
+  }
+}
+
+/* ── entry / exit ────────────────────────────────────────────────────────
+   @starting-style gives an element a "before it existed" style, so something
+   mounted by an {#if} — or revealed from display:none — can animate in
+   instead of popping. allow-discrete is what lets display and overlay take
+   part in the transition at all; without it the element vanishes on frame one
+   and the exit never plays. */
+
+.enter {
+  transition: opacity var(--motion) var(--ease-out),
+    translate var(--motion) var(--ease-out), filter var(--motion) var(--ease-out);
+}
+
+@starting-style {
+  .enter {
+    opacity: 0;
+    translate: 0 8px;
+    filter: blur(4px);
+  }
+}
+
+.enter-scale {
+  transition: opacity var(--motion) var(--ease-out),
+    scale var(--motion) var(--ease-spring);
+}
+
+@starting-style {
+  .enter-scale {
+    opacity: 0;
+    scale: 0.94;
+  }
+}
+
+/* For panels that toggle display rather than mount: .reveal is the closed
+   state, .reveal.open the open one. */
+.reveal {
+  display: none;
+  opacity: 0;
+  translate: 0 6px;
+  transition-property: opacity, translate, display, overlay;
+  transition-duration: var(--motion);
+  transition-timing-function: var(--ease-out);
+  transition-behavior: allow-discrete;
+}
+
+.reveal.open {
+  display: block;
+  opacity: 1;
+  translate: 0 0;
+}
+
+@starting-style {
+  .reveal.open {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+[popover],
+dialog {
+  opacity: 0;
+  scale: 0.96;
+  transition-property: opacity, scale, display, overlay;
+  transition-duration: var(--motion);
+  transition-timing-function: var(--ease-out);
+  transition-behavior: allow-discrete;
+}
+
+[popover]:popover-open {
+  opacity: 1;
+  scale: 1;
+}
+
+dialog[open] {
+  opacity: 1;
+  scale: 1;
+}
+
+@starting-style {
+  [popover]:popover-open {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+
+@starting-style {
+  dialog[open] {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+
+dialog::backdrop {
+  background: oklch(0% 0 0 / 0.6);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity var(--motion) var(--ease-out),
+    display var(--motion) allow-discrete, overlay var(--motion) allow-discrete;
+}
+
+dialog[open]::backdrop {
+  opacity: 1;
+}
+
+@starting-style {
+  dialog[open]::backdrop {
+    opacity: 0;
+  }
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled,
+[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: not-allowed;
+  filter: saturate(0.4);
+}
+
+/* ── containers ──────────────────────────────────────────────────────────
+   Cards size themselves from the box they land in, not the viewport, so one
+   card works in a dense grid and a wide rail.
+
+     rail   the horizontal strip or grid of cards (.cards, .scroll-row)
+     card   a single tile (.media-card)
+
+   A container's own width must come from its layout — a block in normal flow,
+   an explicit width, a grid track — never from its contents: inline-size
+   containment stops contents sizing the box, so a content-sized one collapses
+   to zero. That is why the rail is .scroll-row (a block) and not .cards:
+   .cards is a flex item sized by its content and containment would flatten it.
+   Cards qualify because Home gives them 220px / 144px / a grid track. */
+
+.scroll-row {
+  container: rail / inline-size;
+}
+
+.media-card {
+  container: card / inline-size;
+}
+
+/* ── :has() ──────────────────────────────────────────────────────────────
+   Spotlight: hovering one card dims its neighbours, so a rail resolves to the
+   thing you are pointing at. This is a parent-state effect — the row has to
+   know one of its children is hovered — which is exactly what :has() adds.
+   Hover-capable pointers only; on touch there is no "other cards", every tap
+   is a commit. */
+@media (hover: hover) and (pointer: fine) {
+  .cards:has(.media-card:hover) .media-card:not(:hover),
+  .grid:has(.media-card:hover) .media-card:not(:hover) {
+    opacity: 0.5;
+    filter: saturate(0.5) brightness(0.72);
+    scale: 0.985;
+  }
+
+  /* Promote only the rail being pointed at, instead of every card in the
+     library holding a compositor layer for its whole life. */
+  .cards:has(.media-card:hover) .media-card,
+  .grid:has(.media-card:hover) .media-card {
+    will-change: transform, opacity, filter;
+  }
+}
+
+/* A panel lifts while something inside it holds keyboard focus. */
+.surface:has(:focus-visible),
+.glass-header:has(:focus-visible) {
+  border-color: var(--glass-2);
+  box-shadow: 0 0 0 1px var(--red-soft);
+}
+
+/* ── components ─────────────────────────────────────────────────────────── */
+
+.btn-ghost {
+  background: var(--glass);
+  border: 1px solid var(--glass-bd);
+  color: var(--tx-4);
+  padding: 7px 14px;
   border-radius: var(--r-md);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--bg-5);
-  background-clip: padding-box;
-  border: 2px solid transparent;
-}
-
-@keyframes stripe-shift {
-  from { background-position: 0 0; }
-  to   { background-position: 28px 0; }
+  font-size: 13px;
+  font-weight: 500;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-snap),
+    border-color var(--motion-fast) var(--ease-out);
 }
 
-@keyframes shimmer {
-  from { background-position: -200px 0; }
-  to   { background-position: 200px 0; }
+@media (hover: hover) {
+  .btn-ghost:hover {
+    background: var(--hover);
+    color: var(--tx-5);
+    border-color: var(--active);
+  }
 }
 
-@keyframes breathe {
-  0%, 100% { opacity: 0.55; transform: scale(1); }
-  50%      { opacity: 1;    transform: scale(1.15); }
+.btn-ghost:active {
+  transform: scale(0.96);
+  background: var(--active);
 }
 
-@keyframes pop-in {
-  from { opacity: 0; transform: scale(0.8) rotate(-20deg); }
-  to   { opacity: 1; transform: scale(1)   rotate(0); }
+.btn-outline {
+  background: none;
+  border: 1px solid var(--bg-5);
+  color: var(--tx-3);
+  padding: 5px 11px;
+  border-radius: var(--r-md);
+  font-size: 12px;
+  font-weight: 500;
+  transition: color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-snap);
 }
 
-@keyframes flip-in {
-  from { opacity: 0; transform: rotateX(90deg); }
-  to   { opacity: 1; transform: rotateX(0);     }
+@media (hover: hover) {
+  .btn-outline:hover {
+    color: var(--tx-5);
+    border-color: var(--tx-2);
+  }
 }
 
-@keyframes nudge-x {
-  0%, 100% { transform: translateX(0); }
-  50%      { transform: translateX(3px); }
+.btn-outline:active {
+  transform: scale(0.96);
+  border-color: var(--tx-3);
 }
+
+.btn-icon {
+  background: none;
+  border: none;
+  color: var(--tx-1);
+  padding: 3px 7px;
+  border-radius: 3px;
+  font-size: 12px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: color var(--motion-fast), background var(--motion-fast),
+    transform var(--motion-fast);
+}
+
+@media (hover: hover) {
+  .btn-icon:hover {
+    background: var(--bg-4);
+    color: var(--tx-4);
+  }
+
+  .btn-icon.danger:hover {
+    color: var(--red);
+    background: color-mix(in oklab, var(--red) 14%, transparent);
+  }
+}
+
+.btn-icon:active {
+  transform: scale(0.85);
+  background: var(--bg-4);
+  color: var(--tx-4);
+}
+
+.btn-icon.danger:active {
+  color: var(--red);
+  background: color-mix(in oklab, var(--red) 20%, transparent);
+}
+
+/* An opacity-0 button still takes taps. On a touch pointer every control that
+   hover would have revealed must be visible and at least 44px. */
+@media (hover: none) {
+  .btn-icon {
+    opacity: 1;
+    padding: 8px 12px;
+    font-size: 14px;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-bd);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.glass-strong {
+  background: color-mix(in oklab, var(--bg-3) 78%, transparent);
+  border: 1px solid var(--glass-bd);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.glass-hover {
+  transition: background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-snap);
+}
+
+.glass-hover:hover {
+  background: var(--hover);
+  color: var(--tx-5);
+  border-color: var(--active);
+}
+
+.glass-hover:active {
+  transform: scale(0.96);
+}
+
+.surface {
+  background: color-mix(in oklab, var(--bg-3) 55%, transparent);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--glass-bd);
+  border-radius: var(--r-lg);
+  transition: border-color var(--motion) var(--ease-out),
+    box-shadow var(--motion) var(--ease-out);
+}
+
+.glass-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: linear-gradient(to bottom,
+    color-mix(in oklab, var(--bg-2) 80%, transparent) 0%,
+    color-mix(in oklab, var(--bg-2) 52%, transparent) 100%);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-bottom: 1px solid var(--glass-bd);
+  transition: border-color var(--motion) var(--ease-out),
+    box-shadow var(--motion) var(--ease-out);
+}
+
+.field {
+  background: var(--glass);
+  border: 1px solid var(--glass-bd);
+  color: var(--tx-5);
+  padding: 8px 14px;
+  border-radius: var(--r-md);
+  font-family: inherit;
+  font-size: 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: border-color var(--motion) var(--ease-out),
+    box-shadow var(--motion) var(--ease-out),
+    background var(--motion) var(--ease-out);
+}
+
+.field:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--red) 50%, transparent);
+  background: var(--glass-2);
+  box-shadow: 0 0 0 4px var(--red-soft);
+}
+
+.field::placeholder {
+  color: var(--tx-1);
+}
+
+/* iOS zooms the page on focus for anything under 16px and never zooms back. */
+@media (hover: none) {
+  .field {
+    font-size: 16px;
+  }
+}
+
+/* Chrome-only (129+); an input that grows with its content is a nicety, so it
+   degrades to a fixed box everywhere else with nothing to fix up. */
+@supports (field-sizing: content) {
+  .field-grow {
+    field-sizing: content;
+    min-width: 6ch;
+  }
+}
+
+.btn-action {
+  background: linear-gradient(135deg, var(--red) 0%, var(--red-2) 100%);
+  color: var(--tx-5);
+  border: none;
+  padding: 8px 18px;
+  border-radius: var(--r-md);
+  white-space: nowrap;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 16px -4px var(--red-glow);
+  transition: transform var(--motion-fast) var(--ease-snap),
+    box-shadow var(--motion) var(--ease-out), filter var(--motion) var(--ease-out);
+}
+
+.btn-action:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 10px 26px -4px var(--red-glow);
+}
+
+.btn-action:active {
+  transform: scale(0.96);
+}
+
+.media-card {
+  flex-shrink: 0;
+  border-radius: var(--r-lg);
+  z-index: 1;
+  /* `backwards` and not `both`: a filling animation keeps overriding the
+     properties it animated, so `both` left every card pinned at transform:none
+     and the hover lift below never applied. */
+  animation: slide-up var(--motion-slow) var(--ease-out) backwards;
+  transition: transform var(--motion) var(--ease-snap),
+    box-shadow var(--motion) var(--ease-out), opacity var(--motion) var(--ease-out),
+    filter var(--motion) var(--ease-out), scale var(--motion) var(--ease-out);
+}
+
+.media-card:hover {
+  transform: translateY(-4px) scale(1.04);
+  z-index: 10;
+  box-shadow: var(--sh-3), var(--sh-art), 0 0 0 1px var(--glass-bd);
+}
+
+.media-card:active {
+  transform: translateY(-2px) scale(1.02);
+  transition-duration: var(--motion-fast);
+}
+
+.media-card .thumb {
+  aspect-ratio: 16 / 9 !important;
+  background: var(--bg-3);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+
+.media-card .thumb img {
+  transition: transform var(--motion-slow) var(--ease-out),
+    filter var(--motion) var(--ease-out);
+  filter: saturate(95%);
+}
+
+.media-card:hover .thumb img {
+  transform: scale(1.05);
+  filter: saturate(112%);
+}
+
+.media-card .play-icon {
+  inset: 0;
+  background: linear-gradient(180deg, transparent 30%, oklch(0% 0 0 / 0.55) 100%);
+  transition: opacity var(--motion) var(--ease-out);
+}
+
+.media-card:hover .play-icon {
+  opacity: 1;
+}
+
+.media-card .card-name {
+  color: var(--tx-5);
+  padding: 8px 10px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--bg-3);
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.media-card .card-name:last-child {
+  padding-bottom: 8px;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+}
+
+.media-card .dot {
+  bottom: 8px;
+  right: 8px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--grn);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--bg-1) 60%, transparent),
+    0 0 10px color-mix(in oklab, var(--grn) 70%, transparent);
+}
+
+@container card (min-width: 210px) {
+  .media-card .card-name {
+    font-size: 15px;
+    padding: 10px 12px 5px;
+  }
+
+  .media-card .card-name:last-child {
+    padding-bottom: 10px;
+  }
+}
+
+@container card (max-width: 168px) {
+  .media-card .card-name {
+    font-size: 12.5px;
+    padding: 6px 8px 3px;
+    letter-spacing: -0.012em;
+  }
+
+  .media-card .card-name:last-child {
+    padding-bottom: 7px;
+  }
+}
+
+@media (max-width: 640px) {
+  .media-card {
+    width: 144px;
+  }
+
+  .media-card:hover {
+    transform: none;
+    box-shadow: var(--sh-2);
+  }
+}
+
+.scroll-arrow {
+  position: absolute;
+  z-index: 10;
+  background: color-mix(in oklab, var(--bg-2) 60%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-bd);
+  color: var(--tx-5);
+  font-size: 1.6rem;
+  width: 40px;
+  border-radius: var(--r-md);
+  opacity: 0;
+  transition: opacity var(--motion) var(--ease-out),
+    background var(--motion) var(--ease-out),
+    transform var(--motion) var(--ease-out),
+    border-color var(--motion) var(--ease-out);
+}
+
+.scroll-arrow.left {
+  left: 12px;
+}
+
+.scroll-arrow.right {
+  right: 12px;
+}
+
+.scroll-arrow:active {
+  transform: scale(0.9);
+  background: color-mix(in oklab, var(--bg-2) 85%, transparent);
+}
+
+@media (hover: hover) {
+  .scroll-row:hover .scroll-arrow {
+    opacity: 1;
+  }
+
+  .scroll-arrow:hover {
+    background: color-mix(in oklab, var(--bg-2) 85%, transparent);
+    border-color: var(--active);
+  }
+}
+
+@media (hover: none) {
+  .scroll-arrow {
+    opacity: 0.55;
+    font-size: 1.4rem;
+    width: 36px;
+  }
+}
+
+.disk-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--glass);
+  border: 1px solid var(--glass-bd);
+  color: var(--tx-4);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.disk-tag[data-root="Ravan"] {
+  background: color-mix(in oklab, var(--red) 14%, transparent);
+  border-color: color-mix(in oklab, var(--red) 35%, transparent);
+  color: color-mix(in oklab, var(--red) 55%, var(--tx-5));
+}
+
+.disk-tag[data-root="Oni"] {
+  background: color-mix(in oklab, var(--cyan) 12%, transparent);
+  border-color: color-mix(in oklab, var(--cyan) 32%, transparent);
+  color: color-mix(in oklab, var(--cyan) 62%, var(--tx-5));
+}
+
+.disk-tag[data-root="Kumbhakarn"] {
+  background: color-mix(in oklab, var(--gold) 14%, transparent);
+  border-color: color-mix(in oklab, var(--gold) 32%, transparent);
+  color: color-mix(in oklab, var(--gold) 60%, var(--tx-5));
+}
+
+.bar-track {
+  background: color-mix(in oklab, var(--tx-5) 6%, transparent);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--red), var(--red-2));
+  box-shadow: 0 0 8px var(--red-glow);
+  border-radius: 999px;
+  transition: width var(--motion-slow) var(--ease-out);
+}
+
+/* Kept global so they survive Svelte's style scoping inside ProgressBar. */
+.bar-fill.success {
+  background: linear-gradient(90deg, var(--grn) 0%, var(--cyan) 100%);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--grn) 50%, transparent);
+}
+
+/* Gradient interpolation space is Chrome 111 / Safari 16.2 and, unlike
+   color-mix(), an unparsed `in oklab` drops the whole declaration — so the
+   sRGB gradients above stand on their own and this block only upgrades the
+   ones where the hue path is actually visible. */
+@supports (background: linear-gradient(in oklab, red, blue)) {
+  .btn-action {
+    background: linear-gradient(135deg in oklab, var(--red) 0%, var(--red-2) 100%);
+  }
+
+  .bar-fill {
+    background: linear-gradient(90deg in oklab, var(--red), var(--red-2));
+  }
+
+  .bar-fill.success {
+    background: linear-gradient(90deg in oklab, var(--grn) 0%, var(--cyan) 100%);
+  }
+}
+
+.bar-fill.striped {
+  background-image: linear-gradient(45deg,
+    var(--red) 0 25%, var(--red-2) 25% 50%, var(--red) 50% 75%, var(--red-2) 75% 100%);
+  background-size: 28px 28px;
+  box-shadow: none;
+  animation: stripe-shift 0.8s linear infinite;
+}
+
+/* ── utilities ──────────────────────────────────────────────────────────── */
 
 .press {
-  transition: transform 0.1s ease;
+  transition: transform var(--motion-fast) ease;
 }
+
 .press:active {
   transform: scale(0.94);
 }
 
-/* prefers-reduced-motion intentionally ignored — user opted in to motion */
+.safe-t {
+  padding-top: var(--safe-t);
+}
 
-video {
-  border: 0 !important;
-  outline: 0 !important;
-  transition: all 0.1s ease-in-out;
+.safe-b {
+  padding-bottom: var(--safe-b);
 }
 
 .fs-xs {
@@ -272,7 +1167,6 @@ video {
   color: var(--tx-5);
 }
 
-/* named aliases */
 .red {
   color: var(--red);
 }
@@ -293,7 +1187,6 @@ video {
   color: var(--tx-5);
 }
 
-/* ── background ── */
 .bg-1 {
   background: var(--bg-1);
 }
@@ -314,368 +1207,6 @@ video {
   background: var(--bg-5);
 }
 
-.btn-ghost {
-  background: var(--glass);
-  border: 1px solid var(--glass-bd);
-  color: var(--tx-4);
-  padding: 7px 14px;
-  border-radius: var(--r-md);
-  font-size: 13px;
-  font-weight: 500;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  transition: background 0.18s var(--ease-out), color 0.18s var(--ease-out),
-    transform 0.16s var(--ease-snap), border-color 0.18s var(--ease-out);
-}
-
-@media (hover: hover) {
-  .btn-ghost:hover {
-    background: var(--glass-2);
-    color: var(--tx-5);
-    border-color: rgba(255, 255, 255, 0.16);
-  }
-}
-
-.btn-ghost:active {
-  transform: scale(0.96);
-  background: var(--glass-2);
-}
-
-.btn-outline {
-  background: none;
-  border: 1px solid var(--bg-5);
-  color: var(--tx-3);
-  padding: 5px 11px;
-  border-radius: var(--r-md);
-  font-size: 12px;
-  font-weight: 500;
-  transition: color 0.18s var(--ease-out), border-color 0.18s var(--ease-out),
-    transform 0.16s var(--ease-snap);
-}
-
-@media (hover: hover) {
-  .btn-outline:hover {
-    color: var(--tx-5);
-    border-color: var(--tx-2);
-  }
-}
-
-.btn-outline:active {
-  transform: scale(0.96);
-  border-color: var(--tx-3);
-}
-
-.btn-icon {
-  background: none;
-  border: none;
-  color: var(--tx-1);
-  padding: 3px 7px;
-  border-radius: 3px;
-  font-size: 12px;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: color 0.15s, background 0.15s, transform 0.1s;
-}
-
-@media (hover: hover) {
-  .btn-icon:hover {
-    background: var(--bg-4);
-    color: var(--tx-4);
-  }
-  .btn-icon.danger:hover {
-    color: var(--red);
-    background: #e112;
-  }
-}
-
-.btn-icon:active {
-  transform: scale(0.85);
-  background: var(--bg-4);
-  color: var(--tx-4);
-}
-
-.btn-icon.danger:active {
-  color: var(--red);
-  background: #e113;
-}
-
-@media (hover: none) {
-  .btn-icon {
-    opacity: 1;
-    padding: 8px 12px;
-    font-size: 14px;
-    min-width: 44px;
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-}
-
-/* ── reusable surfaces ── */
-.glass {
-  background: var(--glass);
-  border: 1px solid var(--glass-bd);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-.glass-strong {
-  background: rgba(22, 19, 28, 0.78);
-  border: 1px solid var(--glass-bd);
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-}
-.glass-hover {
-  transition: background 0.18s var(--ease-out), color 0.18s var(--ease-out),
-    border-color 0.18s var(--ease-out), transform 0.16s var(--ease-snap);
-}
-.glass-hover:hover {
-  background: var(--glass-2);
-  color: var(--tx-5);
-  border-color: rgba(255, 255, 255, 0.16);
-}
-.glass-hover:active {
-  transform: scale(0.96);
-}
-
-.surface {
-  background: rgba(22, 19, 28, 0.5);
-  backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
-  border: 1px solid var(--glass-bd);
-  border-radius: var(--r-lg);
-}
-
-.glass-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: linear-gradient(
-    to bottom,
-    rgba(13, 11, 18, 0.78) 0%,
-    rgba(13, 11, 18, 0.55) 100%
-  );
-  backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
-  border-bottom: 1px solid var(--glass-bd);
-}
-
-/* ── modern field/input ── */
-.field {
-  background: var(--glass);
-  border: 1px solid var(--glass-bd);
-  color: var(--tx-5);
-  padding: 8px 14px;
-  border-radius: var(--r-md);
-  font-family: inherit;
-  font-size: 14px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  transition: border-color 0.2s var(--ease-out),
-    box-shadow 0.25s var(--ease-out), background 0.2s var(--ease-out);
-}
-.field:focus {
-  outline: none;
-  border-color: rgba(255, 77, 109, 0.5);
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 0 0 4px var(--red-soft);
-}
-.field::placeholder { color: var(--tx-1); }
-/* iOS zooms the page on focus for anything under 16px and never zooms back. */
-@media (hover: none) {
-  .field {
-    font-size: 16px;
-  }
-}
-
-/* ── action button (gradient) ── */
-.btn-action {
-  background: linear-gradient(135deg, var(--red) 0%, #ff7849 100%);
-  color: #fff;
-  border: none;
-  padding: 8px 18px;
-  border-radius: var(--r-md);
-  white-space: nowrap;
-  font-family: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 6px 16px -4px var(--red-glow);
-  transition: transform 0.16s var(--ease-snap),
-    box-shadow 0.18s var(--ease-out), filter 0.18s var(--ease-out);
-}
-.btn-action:hover {
-  filter: brightness(1.08);
-  box-shadow: 0 8px 22px -4px var(--red-glow);
-}
-.btn-action:active { transform: scale(0.96); }
-
-/* ── media card (Home grid + Continues) ── */
-.media-card {
-  flex-shrink: 0;
-  border-radius: var(--r-lg);
-  transition: transform 0.32s var(--ease-snap),
-    box-shadow 0.32s var(--ease-out);
-  z-index: 1;
-  animation: slide-up 0.4s var(--ease-out) both;
-}
-.media-card:hover {
-  transform: translateY(-4px) scale(1.04);
-  z-index: 10;
-  box-shadow: var(--sh-3), 0 0 0 1px rgba(255, 255, 255, 0.08);
-}
-.media-card:active {
-  transform: translateY(-2px) scale(1.02);
-  transition-duration: 0.12s;
-}
-.media-card .thumb {
-  aspect-ratio: 16 / 9 !important;
-  background: var(--bg-3);
-  border-radius: var(--r-lg) var(--r-lg) 0 0;
-}
-.media-card .thumb img {
-  transition: transform 0.5s var(--ease-out), filter 0.3s var(--ease-out);
-  filter: saturate(95%);
-}
-.media-card:hover .thumb img {
-  transform: scale(1.05);
-  filter: saturate(110%);
-}
-.media-card .play-icon {
-  inset: 0;
-  background: linear-gradient(180deg, transparent 30%, rgba(0, 0, 0, 0.55) 100%);
-  transition: opacity 0.22s var(--ease-out);
-}
-.media-card:hover .play-icon { opacity: 1; }
-.media-card .card-name {
-  color: var(--tx-5);
-  padding: 8px 10px 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  background: var(--bg-3);
-  font-weight: 500;
-  font-size: 14px;
-}
-.media-card .card-name:last-child {
-  padding-bottom: 8px;
-  border-radius: 0 0 var(--r-lg) var(--r-lg);
-}
-.media-card .dot {
-  bottom: 8px;
-  right: 8px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--grn);
-  box-shadow: 0 0 0 2px rgba(7, 6, 10, 0.6),
-    0 0 10px rgba(52, 211, 153, 0.7);
-}
-@media (max-width: 640px) {
-  .media-card { width: 144px; }
-  .media-card:hover {
-    transform: none;
-    box-shadow: var(--sh-2);
-  }
-}
-
-/* ── horizontal scroller arrows ── */
-.scroll-arrow {
-  position: absolute;
-  z-index: 10;
-  background: rgba(13, 11, 18, 0.6);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--glass-bd);
-  color: var(--tx-5);
-  font-size: 1.6rem;
-  width: 40px;
-  border-radius: var(--r-md);
-  opacity: 0;
-  transition: opacity 0.22s var(--ease-out),
-    background 0.22s var(--ease-out), transform 0.22s var(--ease-out),
-    border-color 0.22s var(--ease-out);
-}
-.scroll-arrow.left { left: 12px; }
-.scroll-arrow.right { right: 12px; }
-.scroll-arrow:active {
-  transform: scale(0.9);
-  background: rgba(13, 11, 18, 0.85);
-}
-@media (hover: hover) {
-  .scroll-row:hover .scroll-arrow { opacity: 1; }
-  .scroll-arrow:hover {
-    background: rgba(13, 11, 18, 0.85);
-    border-color: rgba(255, 255, 255, 0.16);
-  }
-}
-@media (hover: none) {
-  .scroll-arrow {
-    opacity: 0.55;
-    font-size: 1.4rem;
-    width: 36px;
-  }
-}
-
-/* ── disk-tag pill (Header, FolderRow, FileRow) ── */
-.disk-tag {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--glass);
-  border: 1px solid var(--glass-bd);
-  color: var(--tx-4);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  flex-shrink: 0;
-}
-.disk-tag[data-root="Ravan"] {
-  background: rgba(255, 77, 109, 0.14);
-  border-color: rgba(255, 77, 109, 0.35);
-  color: #ffb6c2;
-}
-.disk-tag[data-root="Oni"] {
-  background: rgba(94, 234, 212, 0.12);
-  border-color: rgba(94, 234, 212, 0.32);
-  color: #a3e9da;
-}
-.disk-tag[data-root="Kumbhakarn"] {
-  background: rgba(251, 191, 36, 0.14);
-  border-color: rgba(251, 191, 36, 0.32);
-  color: #f6d683;
-}
-
-/* ── progress bar ── */
-.bar-track {
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--red), #ff7849);
-  box-shadow: 0 0 8px var(--red-glow);
-  border-radius: 999px;
-  transition: width 0.5s var(--ease-out);
-}
-/* Standard fill variants (kept global so they survive Svelte style scoping
-   when used inside the shared ProgressBar component). */
-.bar-fill.success {
-  background: linear-gradient(90deg, var(--grn) 0%, var(--cyan) 100%);
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
-}
-.bar-fill.striped {
-  background-image: linear-gradient(
-    45deg,
-    var(--red) 0 25%,
-    #ff7849 25% 50%,
-    var(--red) 50% 75%,
-    #ff7849 75% 100%
-  );
-  background-size: 28px 28px;
-  box-shadow: none;
-  animation: stripe-shift 0.8s linear infinite;
-}
-
-/* ── misc ── */
 .trunc {
   white-space: nowrap;
   overflow: hidden;
@@ -700,13 +1231,142 @@ video {
   color: var(--tx-5);
   font-size: 1.1rem;
   font-weight: 700;
-  text-shadow: 0 2px 8px #000c;
+  text-shadow: 0 2px 8px oklch(0% 0 0 / 0.8);
   pointer-events: none;
   animation: tap-fade 0.7s ease-out forwards;
   z-index: 20;
 }
 
-/* ── animations ── */
+.scroll-row .cards {
+  scroll-snap-type: x mandatory;
+  scroll-padding-left: 48px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.scroll-row .media-card {
+  scroll-snap-align: start;
+}
+
+@container rail (max-width: 640px) {
+  .scroll-row .cards {
+    scroll-padding-left: 16px;
+  }
+}
+
+/* ── keyframes ──────────────────────────────────────────────────────────── */
+
+@keyframes drift {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+
+  50% {
+    transform: translate3d(-2%, 1.5%, 0) rotate(2deg) scale(1.04);
+  }
+
+  100% {
+    transform: translate3d(2%, -1.5%, 0) rotate(-1.5deg) scale(1.02);
+  }
+}
+
+@keyframes spin-ring {
+  to {
+    --spin: 360deg;
+  }
+}
+
+@keyframes fade-out-back {
+  to {
+    opacity: 0;
+    transform: scale(0.985);
+    filter: blur(6px);
+  }
+}
+
+@keyframes fade-in-fwd {
+  from {
+    opacity: 0;
+    transform: scale(1.012);
+    filter: blur(6px);
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@keyframes stripe-shift {
+  from {
+    background-position: 0 0;
+  }
+
+  to {
+    background-position: 28px 0;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -200px 0;
+  }
+
+  to {
+    background-position: 200px 0;
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.8) rotate(-20deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes flip-in {
+  from {
+    opacity: 0;
+    transform: rotateX(90deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: rotateX(0);
+  }
+}
+
+@keyframes nudge-x {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  50% {
+    transform: translateX(3px);
+  }
+}
+
 @keyframes tap-fade {
   from {
     opacity: 1;
@@ -734,9 +1394,11 @@ video {
     opacity: 0;
     transform: translateY(14px) scale(0.96);
   }
+
   60% {
     opacity: 1;
   }
+
   to {
     opacity: 1;
     transform: none;
@@ -749,6 +1411,7 @@ video {
     transform: translateY(-14px) scale(0.98);
     filter: blur(2px);
   }
+
   to {
     opacity: 1;
     transform: none;
@@ -761,6 +1424,7 @@ video {
     opacity: 0;
     transform: translateX(20px) scale(0.96);
   }
+
   to {
     opacity: 1;
     transform: none;
@@ -772,35 +1436,49 @@ video {
     opacity: 0;
     transform: scale(0.94);
   }
+
   to {
     opacity: 1;
     transform: none;
   }
 }
 
-/* hint compositor for elements that animate often */
-.media-card,
-.scroll-arrow,
-.btn-action,
-.glass-hover {
-  will-change: transform;
-  transform: translateZ(0);
-  backface-visibility: hidden;
+/* ── motion preferences ─────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
 }
 
-/* horizontal scroll: snap, momentum, hidden scrollbar */
-.scroll-row .cards {
-  scroll-snap-type: x mandatory;
-  scroll-padding-left: 48px;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
-}
-.scroll-row .cards::-webkit-scrollbar { display: none; }
-.scroll-row .media-card {
-  scroll-snap-align: start;
-}
-@media (max-width: 640px) {
-  .scroll-row .cards {
-    scroll-padding-left: 16px;
+/* Last block in the file so it wins. Collapsing the motion tokens takes out
+   every transition built on them; the blanket rule catches the literals in
+   component styles and the looping ambient animations. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 1ms;
+    --motion: 1ms;
+    --motion-slow: 1ms;
+    --motion-page: 1ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .media-card:hover {
+    transform: none;
+  }
+
+  .cards:has(.media-card:hover) .media-card:not(:hover),
+  .grid:has(.media-card:hover) .media-card:not(:hover) {
+    scale: none;
+    filter: none;
   }
 }

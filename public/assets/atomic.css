@@ -1,10 +1,15 @@
+/* atomic.css is imported after global.css, so anything here wins a specificity
+   tie with the design system. This rule used to hard-set a system font stack
+   and silently beat global.css's --font-body: the app loaded Manrope and then
+   rendered in San Francisco. Pull from the tokens instead. */
 body {
   margin: 0;
   width: 100%;
   height: 100%;
   box-sizing: border-box;
-  font: 300 16px helvetica;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 400;
 }
 
 @property --P {
@@ -47,10 +52,6 @@ img {
   object-fit: cover;
 }
 
-*::-webkit-scrollbar {
-  display: none;
-}
-
 input,
 button,
 select,
@@ -72,8 +73,9 @@ textarea:focus {
   outline: none;
 }
 
+/* `--bg: #222 8` was not a colour, so the background never painted. */
 .blur {
-  --bg: #222 8;
+  --bg: color-mix(in oklab, var(--bg-3) 55%, transparent);
   --sz: 32px;
   background: var(--bg);
   backdrop-filter: blur(var(--sz));
@@ -507,4 +509,39 @@ textarea:focus {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.balance {
+  text-wrap: balance;
+}
+
+.pretty {
+  text-wrap: pretty;
+}
+
+/* Stop a scroll from chaining to the page (and, on the body, from arming
+   pull-to-refresh) once the inner box hits its end. */
+.oc {
+  overscroll-behavior: contain;
+}
+
+/* Make any box a size container. Its own width has to come from its layout,
+   never its contents — inline-size containment stops contents sizing the box,
+   and a content-sized one collapses. */
+.ct {
+  container-type: inline-size;
+}
+
+/* Children share one grid cell, so they stack without position: absolute
+   taking them out of flow — the layer keeps contributing its size. */
+.stack {
+  display: grid;
+}
+
+.stack > * {
+  grid-area: 1 / 1;
 }
