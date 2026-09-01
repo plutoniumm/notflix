@@ -22,6 +22,7 @@
   import Skip, { activeSkip } from "./skip.svelte";
   import Tune from "./tune.svelte";
   import Help from "./help.svelte";
+  import Shot from "./shot.svelte";
 
   import { clean, parseRaw, nextVid, hashKey } from "../core/video";
   import { api, HEAD } from "../core/api";
@@ -338,6 +339,7 @@
   let whisperCues = $state<WhisperCue[]>([]);
   let tuneOpen = $state(false);
   let helpOpen = $state(false);
+  let shotOpen = $state(false);
   let railOpen = $state(false);
   let canPip = $state(false);
   let canSync = $state(false);
@@ -357,7 +359,8 @@
   // One ladder, most-recently-raised first. The panels that own the top layer
   // dismiss themselves too, and closing a closed panel is a no-op.
   function closeTop() {
-    if (helpOpen) helpOpen = false;
+    if (shotOpen) shotOpen = false;
+    else if (helpOpen) helpOpen = false;
     else if (tuneOpen) tuneOpen = false;
     else if (view.subs.open) view.subs.close();
     else if (view.audio.open) view.audio.close();
@@ -600,6 +603,7 @@
           tune: () => (tuneOpen = !tuneOpen),
           rail: () => (railOpen = !railOpen),
           help: () => (helpOpen = !helpOpen),
+          shot: () => (shotOpen = !shotOpen),
           esc: closeTop,
         }),
       );
@@ -850,6 +854,12 @@
     onClose={() => (tuneOpen = false)}
   />
   <Help open={helpOpen} onClose={() => (helpOpen = false)} />
+  <Shot
+    open={shotOpen}
+    file={videoParam}
+    t={ps.currentTime}
+    onClose={() => (shotOpen = false)}
+  />
   <Volume level={ps.volLevel} visible={ps.volVisible} />
   <Sync ms={ps.syncMs} visible={ps.syncVisible} />
   <Synopsis {name} {title} {embed} paused={ps.paused} />

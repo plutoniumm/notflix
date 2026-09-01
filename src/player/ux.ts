@@ -119,6 +119,7 @@ export type Acts = {
   tune: () => void;
   rail: () => void;
   help: () => void;
+  shot: () => void;
   esc: () => void;
 };
 
@@ -155,6 +156,7 @@ export const KEYS: Group[] = [
       { k: "p", a: "picture in picture" },
       { k: "c", a: "subtitles on / off" },
       { k: "w", a: "transcribe with Whisper" },
+      { k: "g", a: "grab a frame" },
     ],
   },
   {
@@ -227,6 +229,8 @@ export function Hotkeys(
       player.paused() ? safePlay(player) : player.pause();
     } else if (key === "?") {
       on.help();
+    } else if (lkey === "g") {
+      on.shot();
     } else if (key === "Escape") {
       on.esc();
     } else if (lkey === "f") {

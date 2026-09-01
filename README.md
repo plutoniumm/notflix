@@ -13,6 +13,7 @@ discoverable only by reading this file. The table itself is generated from
 `KEYS` in `src/player/ux.ts`; `tools/parity.test.ts` fails if the two drift.
 
 <!-- keys -->
+
 ### Playback
 
 | Key | Action |
@@ -42,6 +43,7 @@ discoverable only by reading this file. The table itself is generated from
 | `p` | picture in picture |
 | `c` | subtitles on / off |
 | `w` | transcribe with Whisper |
+| `g` | grab a frame |
 
 ### Panels
 
@@ -72,6 +74,7 @@ discoverable only by reading this file. The table itself is generated from
 | `Double-tap left third / right third` | seek −10s / +10s |
 | `Double-tap centre` | fullscreen |
 | `Scrub track` | drag to scrub; focus it for ← → Home End PageUp PageDown |
+
 <!-- /keys -->
 
 ## Requirements
