@@ -16,15 +16,16 @@
 </script>
 
 {#if jobs.length > 0}
-  <section class="surface flow-h">
-    <h3 class="m0 p10 fs-sm fw6">
-      Downloading ({jobs.length})
+  <section class="panel surface flow-h">
+    <h3 class="phead m0 f al-ct g10">
+      <span class="plabel">Downloading</span>
+      <span class="pcount fs-xs">{jobs.length}</span>
     </h3>
 
     {#each jobs as j (j.gid)}
-      <div class="item f al-ct g10">
+      <div class="item f al-ct g10" class:paused={j.status === "paused"}>
         <div class="info">
-          <span class="name d-b fs-sm tx-4 flow-h">{j.name || j.gid}</span>
+          <span class="name d-b fs-sm tx-4 trunc">{j.name || j.gid}</span>
           <div class="f al-ct g10">
             <div style="flex:1; min-width:0">
               <ProgressBar
@@ -33,7 +34,7 @@
                 label
               />
             </div>
-            <span class="fs-xs tx-1">
+            <span class="speed fs-xs tx-1">
               {j.status === "paused" ? "paused" : rate(j.speed)}
             </span>
           </div>
@@ -68,29 +69,75 @@
 {/if}
 
 <style>
-  section {
-    margin-bottom: 24px;
+  .panel {
+    margin-bottom: 20px;
+    transition:
+      opacity var(--motion, 0.32s) var(--ease-out),
+      translate var(--motion, 0.32s) var(--ease-out);
   }
-  section h3 {
-    background: rgba(255, 255, 255, 0.02);
-    color: var(--tx-4);
+  @starting-style {
+    .panel {
+      opacity: 0;
+      translate: 0 10px;
+    }
+  }
+  .phead {
+    padding: 10px 16px;
+    background: rgb(255 255 255 / 0.02);
     border-bottom: 1px solid var(--glass-bd);
   }
-  .item {
-    padding: 12px 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+  .plabel {
+    color: var(--tx-3);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
   }
-  .item:first-child { border-top: none; }
-  .info { flex: 1; min-width: 0; }
+  .pcount {
+    color: var(--tx-1);
+    font-variant-numeric: tabular-nums;
+  }
+  .item {
+    padding: 11px 16px;
+    border-top: 1px solid rgb(255 255 255 / 0.04);
+    transition: opacity var(--motion, 0.25s) var(--ease-out);
+  }
+  .item:first-of-type {
+    border-top: none;
+  }
+  .item.paused {
+    opacity: 0.6;
+  }
+  .info {
+    flex: 1;
+    min-width: 0;
+  }
   .name {
-    white-space: nowrap;
-    text-overflow: ellipsis;
     margin-bottom: 6px;
     font-weight: 500;
   }
-  .item :global(.btn-icon) { opacity: 1; }
+  .speed {
+    min-width: 68px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .item :global(.btn-icon) {
+    opacity: 1;
+  }
+
   @media (max-width: 640px) {
-    .item { padding: 10px 8px; }
-    .name { font-size: 12px; }
+    .item {
+      padding: 10px 8px;
+    }
+    .name {
+      font-size: 12px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .panel,
+    .item {
+      transition-duration: 1ms;
+    }
   }
 </style>

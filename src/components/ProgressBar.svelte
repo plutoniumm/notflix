@@ -40,7 +40,8 @@
   }
   .pct {
     flex-shrink: 0;
-    min-width: 30px;
+    min-width: 32px;
     text-align: right;
+    font-variant-numeric: tabular-nums;
   }
 </style>

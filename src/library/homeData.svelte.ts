@@ -7,7 +7,14 @@ import { usePoll } from "../core/poll";
 import { Down } from "./dl";
 import { parseDirSeason } from "./torrentName";
 
-export type ContinueItem = { dir: string; name: string; key: string; t: number; at: number };
+export type ContinueItem = {
+  dir: string;
+  name: string;
+  key: string;
+  t: number;
+  at: number;
+  dur?: number;
+};
 
 export type SeasonEntry = {
   dir: string;
@@ -255,7 +262,7 @@ export class HomeData {
     if (!allParams.length) return;
 
     const keys = allParams.map((v) => "watched:" + v.param);
-    const store: Record<string, { t: number; at: number } | null> =
+    const store: Record<string, { t: number; at: number; dur?: number } | null> =
       (await kv.get(keys)) ?? {};
 
     this.continues = allParams
@@ -275,6 +282,7 @@ export class HomeData {
         key: v.key,
         t: store[`watched:${v.param}`]!.t,
         at: store[`watched:${v.param}`]!.at,
+        dur: store[`watched:${v.param}`]!.dur,
       }));
   }
 

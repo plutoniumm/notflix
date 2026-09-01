@@ -52,7 +52,7 @@
     style="display:none"
     onchange={onFileSelected}
   />
-  <select class="field" bind:value={dir}>
+  <select class="field ptr" bind:value={dir}>
     {#each disks as d}
       <option value={d.path}>
         {d.root} ({bytes(d.free)} free)
@@ -65,16 +65,37 @@
 
 <style>
   .form-wrap {
-    padding: 12px 40px;
-    background: rgba(13, 11, 18, 0.5);
-    backdrop-filter: blur(10px) saturate(140%);
-    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    padding: 10px 40px;
+    background: color-mix(in oklab, var(--bg-1) 62%, transparent);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
     border-bottom: 1px solid var(--glass-bd);
     top: 0;
     z-index: 9;
+    transition: background var(--motion, 0.3s) var(--ease-out);
+  }
+  /* The bar only asserts itself while it's being used — the parent can't know
+     a field three nodes down has focus without :has(). */
+  .form-wrap:has(.field:focus) {
+    background: color-mix(in oklab, var(--bg-1) 88%, transparent);
+  }
+  .form-wrap:has(.field:focus) select {
+    border-color: var(--glass-bd);
   }
   select {
-    cursor: pointer;
     white-space: nowrap;
+  }
+
+  @media (max-width: 640px) {
+    .form-wrap {
+      padding: 10px 16px;
+      flex-wrap: wrap;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .form-wrap {
+      transition-duration: 1ms;
+    }
   }
 </style>

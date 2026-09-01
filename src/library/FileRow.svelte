@@ -1,6 +1,7 @@
 <script lang="ts">
   import { clean } from "../core/video";
   import { join } from "../core/path";
+  import { pct } from "../core/fmt";
   import DeleteBtn from "../components/DeleteBtn.svelte";
 
   let {
@@ -20,11 +21,7 @@
 
   const fpath = $derived(join(dir, f));
 
-  function icon(name: string) {
-    const ext = name.split(".").pop()?.toLowerCase();
-
-    return ext === "mkv" || ext === "mov" ? "⟳" : "▶";
-  }
+  const ext = $derived((f.split(".").pop() ?? "").toUpperCase());
 
   function focus(el: HTMLInputElement) {
     el.focus();
@@ -32,29 +29,23 @@
   }
 </script>
 
-<li class="file" class:corrupt>
+<li class="file" class:corrupt class:busy={!!job}>
   {#if job}
-    <div class="conv-track">
-      <div class="conv-fill" style="width:{job.percent.toFixed(1)}%"></div>
+    <div class="conv-track p-abs">
+      <div class="conv-fill h-100" style="width:{job.percent.toFixed(1)}%"></div>
     </div>
   {/if}
 
   <div class="row f al-ct g10">
-    {#if corrupt}
-      <span
-        class="fs-xs sh-0 tc icon skull"
-        title="ffprobe failed to read this file — likely corrupt or truncated"
-      >
-        💀
-      </span>
-    {:else}
-      <span
-        class="fs-xs tx-1 sh-0 tc icon"
-        title={f.split(".").pop()?.toUpperCase()}
-      >
-        {icon(f)}
-      </span>
-    {/if}
+    <span
+      class="tag fs-xs sh-0 tc"
+      class:skull={corrupt}
+      title={corrupt
+        ? "ffprobe failed to read this file — likely corrupt or truncated"
+        : ext}
+    >
+      {corrupt ? "!" : ext}
+    </span>
 
     {#if editing === fpath}
       <form class="form f" onsubmit={confirmEdit}>
@@ -68,9 +59,12 @@
       </form>
     {:else}
       <div class="names">
-        <span class="d-b fs tx-4 trunc">{clean(f)}</span>
+        <span class="d-b fs-sm tx-4 trunc">{clean(f)}</span>
         <span class="d-b fs-xs trunc raw">{f}</span>
       </div>
+      {#if job}
+        <span class="pctl fs-xs sh-0">{pct(job.percent)}</span>
+      {/if}
       {#if root}
         <span class="disk-tag fs-xs sh-0" data-root={root}>{root}</span>
       {/if}
@@ -90,8 +84,8 @@
 
 <style>
   .file {
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
-    transition: background 0.15s var(--ease-out);
+    border-top: 1px solid rgb(255 255 255 / 0.04);
+    transition: background var(--motion-fast, 0.15s) var(--ease-out);
     position: relative;
     overflow: hidden;
   }
@@ -99,45 +93,48 @@
     background: var(--glass);
   }
   .file:hover .actions,
-  .file:hover .btn-icon {
+  .file:hover :global(.btn-icon) {
     opacity: 1;
+  }
+  .file.corrupt {
+    background: color-mix(in oklab, var(--red) 6%, transparent);
   }
 
   .conv-track {
-    position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
     height: 2px;
-    background: rgba(255, 255, 255, 0.06);
+    background: rgb(255 255 255 / 0.06);
   }
   .conv-fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--red) 0%, #ff7849 100%);
+    background: linear-gradient(90deg, var(--red), var(--gold));
     box-shadow: 0 0 6px var(--red-glow);
-    transition: width 0.5s var(--ease-out);
+    transition: width var(--motion-slow, 0.5s) var(--ease-out);
     min-width: 2px;
   }
 
   .row {
-    padding: 9px 16px 9px 44px;
+    padding: 8px 16px 8px 40px;
   }
 
-  .icon {
-    width: 16px;
+  /* The container extension is the file's identity here — a fixed-width
+     monospace slug keeps a long list scannable down one column. */
+  .tag {
+    width: 34px;
+    padding: 2px 0;
+    border-radius: var(--r-sm);
+    background: rgb(255 255 255 / 0.05);
+    color: var(--tx-1);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
   }
   .skull {
-    filter: drop-shadow(0 0 4px var(--red));
-    animation: pulse 1.6s ease-in-out infinite;
-  }
-  @keyframes pulse {
-    0%,
-    100% {
-      filter: drop-shadow(0 0 3px var(--red));
-    }
-    50% {
-      filter: drop-shadow(0 0 7px var(--red));
-    }
+    color: var(--red);
+    background: var(--red-soft);
+    animation: breathe 1.8s ease-in-out infinite;
   }
 
   .names {
@@ -147,10 +144,14 @@
   .raw {
     color: var(--bg-5);
   }
+  .pctl {
+    color: var(--tx-2);
+    font-variant-numeric: tabular-nums;
+  }
 
   .actions {
     opacity: 0;
-    transition: opacity 0.18s var(--ease-out);
+    transition: opacity var(--motion, 0.18s) var(--ease-out);
   }
   /* An opacity-0 wrapper still takes taps — on touch these were an invisible
      rename and an invisible delete sitting under the row. */
@@ -160,7 +161,7 @@
     }
   }
   .file.corrupt .actions,
-  .file.corrupt .btn-icon {
+  .file.corrupt :global(.btn-icon) {
     opacity: 1;
   }
 
@@ -177,5 +178,20 @@
     width: 100%;
     border-color: var(--red);
     box-shadow: 0 0 0 4px var(--red-soft);
+  }
+
+  @media (max-width: 640px) {
+    .row {
+      padding: 8px 10px 8px 24px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skull,
+    .conv-fill,
+    .actions {
+      animation: none;
+      transition-duration: 1ms;
+    }
   }
 </style>
