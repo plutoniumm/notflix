@@ -63,7 +63,7 @@ var (
 	// Release tags carry no meaning but plenty of token overlap: two unrelated
 	// films that share "BONE" or "NeoNoir" scored as neighbours before this
 	// list existed.
-	recoJunk = words(`nflx amzn hevc hdtv hdrip bluray webdl webrip web bd brrip br rip dvdrip dvd
+	recoJunk = junkRes(`nflx amzn hevc hdtv hdrip bluray webdl webrip web bd brrip br rip dvdrip dvd
 		yify yts rarbg evo xvid etrg psa anoxmous sujaidr deejayahmed rdlinks immortal rawr kin now
 		sartre bone neonoir mkvcage rapta elite bokutox scorp ettv ntb ion10 galaxyrg tgx qxr cm8
 		fgt sparks amiable drones publichd mzabi playweb edith flux ntg cakes minx scorp
@@ -87,7 +87,7 @@ var (
 	recoExt    = regexp.MustCompile(`(?i)\.(mp4|mkv|mov)$`)
 )
 
-func words(s string) []*regexp.Regexp {
+func junkRes(s string) []*regexp.Regexp {
 	var out []*regexp.Regexp
 	for _, w := range strings.Fields(s) {
 		out = append(out, regexp.MustCompile(`(?i)\b`+regexp.QuoteMeta(w)+`\b`))
@@ -204,12 +204,12 @@ func groupAll(cat, hist []string) map[string]string {
 		}
 	}
 
-	return merge(raw)
+	return mergeGroups(raw)
 }
 
-// merge unions cluster keys that share a two-token prefix. Sorting puts every
+// mergeGroups unions cluster keys that share a two-token prefix. Sorting puts every
 // such pair adjacent, so one linear pass over the sorted keys finds them all.
-func merge(raw map[string]string) map[string]string {
+func mergeGroups(raw map[string]string) map[string]string {
 	seen := map[string]bool{}
 	for _, k := range raw {
 		seen[k] = true
@@ -346,13 +346,13 @@ type candidate struct {
 	group string
 }
 
-// pick drops everything the history has already touched. Anything with a
+// pickCands drops everything the history has already touched. Anything with a
 // progress record is out — that covers Continue Watching, which is exactly the
 // row this one must not duplicate — and so is anything in the same cluster,
 // because "you are three episodes into this" is a resume prompt, not a
 // discovery. History keys are dir-qualified and files move, so a title is
 // matched by basename as well as by full path.
-func pick(cat []string, watched map[string]library.Watch, group map[string]string) []candidate {
+func pickCands(cat []string, watched map[string]library.Watch, group map[string]string) []candidate {
 	base := make(map[string]string, len(cat))
 	for _, rel := range cat {
 		base[path.Base(rel)] = rel
@@ -386,10 +386,10 @@ func pick(cat []string, watched map[string]library.Watch, group map[string]strin
 	return out
 }
 
-// rank scores every candidate against its best anchor and returns a
+// rankRecs scores every candidate against its best anchor and returns a
 // diversified top slice. Split out from the I/O so the maths and the
 // selection are testable on synthetic vectors.
-func rank(cands []candidate, anchors []anchor, vecs map[string]vec) []Rec {
+func rankRecs(cands []candidate, anchors []anchor, vecs map[string]vec) []Rec {
 	type scored struct {
 		c      candidate
 		anchor anchor
@@ -523,13 +523,13 @@ func RecoRefresh(lib *library.Library) bool {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
 
-		build(ctx, lib)
+		buildReco(ctx, lib)
 	}()
 
 	return true
 }
 
-func build(ctx context.Context, lib *library.Library) {
+func buildReco(ctx context.Context, lib *library.Library) {
 	if lib == nil || !embedReady() {
 		return
 	}
@@ -586,9 +586,9 @@ func build(ctx context.Context, lib *library.Library) {
 		}
 	}
 
-	centered := center(byTitle)
+	centered := centerVecs(byTitle)
 
-	cands := pick(cat, watched, group)
+	cands := pickCands(cat, watched, group)
 
 	if len(centered) == 0 {
 		// No vectors at all means the embedding host is unreachable, not that
@@ -597,7 +597,7 @@ func build(ctx context.Context, lib *library.Library) {
 		return
 	}
 
-	items := rank(cands, anchors, centered)
+	items := rankRecs(cands, anchors, centered)
 	reasons(ctx, items)
 
 	reco.mu.Lock()

@@ -57,7 +57,7 @@ func TestCenterRemovesSharedComponent(t *testing.T) {
 	}
 
 	raw := cosine(unit(in["a"]), unit(in["b"]))
-	out := center(in)
+	out := centerVecs(in)
 	got := cosine(out["a"], out["b"])
 
 	if raw < 0.9 {
@@ -76,13 +76,13 @@ func TestCenterRemovesSharedComponent(t *testing.T) {
 }
 
 func TestCenterEmptyAndRagged(t *testing.T) {
-	if got := center(nil); len(got) != 0 {
-		t.Fatalf("center(nil) = %v", got)
+	if got := centerVecs(nil); len(got) != 0 {
+		t.Fatalf("centerVecs(nil) = %v", got)
 	}
 
 	// A vector of the wrong length is from another model's space; it must be
 	// dropped, never truncated into a plausible-looking answer.
-	out := center(map[string]vec{"a": {1, 2, 3}, "b": {1, 2, 3}, "short": {1}})
+	out := centerVecs(map[string]vec{"a": {1, 2, 3}, "b": {1, 2, 3}, "short": {1}})
 	if _, ok := out["short"]; ok {
 		t.Fatal("ragged vector survived centering")
 	}
@@ -212,7 +212,7 @@ func TestMergeKeepsDistinctFilmsApart(t *testing.T) {
 		"f": "breaking bad deejayahmed",
 	}
 
-	g := merge(raw)
+	g := mergeGroups(raw)
 
 	if g["a"] == g["b"] {
 		t.Fatal("two different Transformers films merged on one shared token")
@@ -298,7 +298,7 @@ func TestPickExcludesWatchedAndContinueWatching(t *testing.T) {
 	}
 
 	group := groupAll(cat, []string{"Old/Moved.Film.mp4"})
-	got := pick(cat, watched, group)
+	got := pickCands(cat, watched, group)
 
 	if len(got) != 1 || got[0].rel != "Fresh.Film.mp4" {
 		t.Fatalf("want only Fresh.Film.mp4, got %+v", got)
@@ -306,7 +306,7 @@ func TestPickExcludesWatchedAndContinueWatching(t *testing.T) {
 }
 
 func TestPickEmptyLibrary(t *testing.T) {
-	if got := pick(nil, nil, nil); len(got) != 0 {
+	if got := pickCands(nil, nil, nil); len(got) != 0 {
 		t.Fatalf("want none, got %+v", got)
 	}
 }
@@ -340,7 +340,7 @@ func TestRankSuppressesSameShowClustering(t *testing.T) {
 	}
 	cands = append(cands, candidate{rel: "Other Film.mp4", title: "Other Film", group: "other film"})
 
-	got := rank(cands, []anchor{{Param: "a.mp4", Title: "Anchor Show"}}, vecs)
+	got := rankRecs(cands, []anchor{{Param: "a.mp4", Title: "Anchor Show"}}, vecs)
 
 	if len(got) != 2 {
 		t.Fatalf("want 2 picks (one per cluster), got %d: %+v", len(got), got)
@@ -366,7 +366,7 @@ func TestRankCapsPerAnchor(t *testing.T) {
 		cands = append(cands, candidate{rel: n + ".mp4", title: title, group: n})
 	}
 
-	got := rank(cands, []anchor{{Param: "a.mp4", Title: "A"}}, vecs)
+	got := rankRecs(cands, []anchor{{Param: "a.mp4", Title: "A"}}, vecs)
 
 	if len(got) != perAnchorMax {
 		t.Fatalf("want %d picks from one anchor, got %d: %+v", perAnchorMax, len(got), got)
@@ -386,7 +386,7 @@ func TestRankDropsWeakMatches(t *testing.T) {
 		{rel: "further.mp4", title: "further", group: "further"},
 	}
 
-	if got := rank(cands, []anchor{{Param: "a.mp4", Title: "A"}}, vecs); len(got) != 0 {
+	if got := rankRecs(cands, []anchor{{Param: "a.mp4", Title: "A"}}, vecs); len(got) != 0 {
 		t.Fatalf("orthogonal titles scored above the floor: %+v", got)
 	}
 }
@@ -394,11 +394,11 @@ func TestRankDropsWeakMatches(t *testing.T) {
 func TestRankWithoutVectorsOrAnchors(t *testing.T) {
 	cands := []candidate{{rel: "a.mp4", title: "a", group: "a"}}
 
-	if got := rank(cands, nil, nil); len(got) != 0 {
+	if got := rankRecs(cands, nil, nil); len(got) != 0 {
 		t.Fatalf("no anchors should mean no picks, got %+v", got)
 	}
 
-	if got := rank(cands, []anchor{{Param: "x", Title: "x"}}, map[string]vec{}); len(got) != 0 {
+	if got := rankRecs(cands, []anchor{{Param: "x", Title: "x"}}, map[string]vec{}); len(got) != 0 {
 		t.Fatalf("no vectors should mean no picks, got %+v", got)
 	}
 }
@@ -408,7 +408,7 @@ func TestRankSingleTitleLibrary(t *testing.T) {
 	v := axis(dim, 0, 0, 0)
 
 	// One title, and it is the one that was watched — nothing left to suggest.
-	got := rank(nil, []anchor{{Param: "only.mp4", Title: "Only"}}, map[string]vec{"Only": v})
+	got := rankRecs(nil, []anchor{{Param: "only.mp4", Title: "Only"}}, map[string]vec{"Only": v})
 	if len(got) != 0 {
 		t.Fatalf("want none, got %+v", got)
 	}
@@ -419,7 +419,7 @@ func TestRankFillsCardFields(t *testing.T) {
 	vecs := map[string]vec{"A": axis(dim, 0, 0, 0), "Near": axis(dim, 0, 0.3, 1)}
 	cands := []candidate{{rel: "Some Dir/Near.mp4", title: "Near", group: "near"}}
 
-	got := rank(cands, []anchor{{Param: "a.mp4", Title: "A"}}, vecs)
+	got := rankRecs(cands, []anchor{{Param: "a.mp4", Title: "A"}}, vecs)
 	if len(got) != 1 {
 		t.Fatalf("want 1, got %+v", got)
 	}
@@ -436,7 +436,7 @@ func TestRankRootFileGetsDotDir(t *testing.T) {
 	vecs := map[string]vec{"A": axis(dim, 0, 0, 0), "Near": axis(dim, 0, 0.3, 1)}
 	cands := []candidate{{rel: "Near.mp4", title: "Near", group: "near"}}
 
-	got := rank(cands, []anchor{{Param: "a.mp4", Title: "A"}}, vecs)
+	got := rankRecs(cands, []anchor{{Param: "a.mp4", Title: "A"}}, vecs)
 	if len(got) != 1 || got[0].Dir != "." {
 		t.Fatalf("root file should carry dir \".\": %+v", got)
 	}

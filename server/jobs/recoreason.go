@@ -87,7 +87,7 @@ func reasons(ctx context.Context, items []Rec) {
 		"Return a JSON object {\"out\": [\"...\", ...]} with exactly " +
 		strconv.Itoa(len(pairs)) + " strings, same order.\nInput: " + string(in)
 
-	out, err := chat(ctx, prompt, reasonTimeout)
+	out, err := askOllama(ctx, prompt, reasonTimeout)
 	if err != nil {
 		log.Printf("[reco] reasons unavailable: %v", err)
 
@@ -116,8 +116,8 @@ func reasons(ctx context.Context, items []Rec) {
 	}
 }
 
-// chat is one JSON-mode completion against the configured text model.
-func chat(ctx context.Context, prompt string, timeout time.Duration) (string, error) {
+// askOllama is one JSON-mode completion against the configured text model.
+func askOllama(ctx context.Context, prompt string, timeout time.Duration) (string, error) {
 	req := map[string]any{
 		"model":      ollamaModel(),
 		"stream":     false,

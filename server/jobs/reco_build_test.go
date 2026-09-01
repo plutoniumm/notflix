@@ -66,7 +66,7 @@ func themedOllama(t *testing.T, themes [][]string) *httptest.Server {
 	return srv
 }
 
-// libRoot lays out a temp library and points the process at it, so build()
+// libRoot lays out a temp library and points the process at it, so buildReco()
 // exercises the whole path: catalogue walk, KV history, vector store, ranking.
 func libRoot(t *testing.T, files []string, kv map[string]any) *library.Library {
 	t.Helper()
@@ -151,7 +151,7 @@ func TestBuildEndToEnd(t *testing.T) {
 	t.Setenv("OLLAMA_HOST", srv.URL)
 	t.Setenv("EMBED_MODEL", "fake-embed")
 
-	build(context.Background(), lib)
+	buildReco(context.Background(), lib)
 
 	reco.mu.Lock()
 	items := reco.items
@@ -212,7 +212,7 @@ func TestBuildOneTitleLibrary(t *testing.T) {
 	t.Setenv("OLLAMA_HOST", srv.URL)
 	t.Setenv("EMBED_MODEL", "fake-embed")
 
-	build(context.Background(), lib)
+	buildReco(context.Background(), lib)
 
 	reco.mu.Lock()
 	items, at := reco.items, reco.at
@@ -257,7 +257,7 @@ func TestBuildKeepsPreviousRowWhenHostDies(t *testing.T) {
 	t.Setenv("OLLAMA_HOST", srv.URL)
 	t.Setenv("EMBED_MODEL", "fake-embed")
 
-	build(context.Background(), lib)
+	buildReco(context.Background(), lib)
 
 	reco.mu.Lock()
 	before := len(reco.items)
@@ -273,7 +273,7 @@ func TestBuildKeepsPreviousRowWhenHostDies(t *testing.T) {
 	}
 	t.Setenv("OLLAMA_HOST", "http://127.0.0.1:1")
 
-	build(context.Background(), lib)
+	buildReco(context.Background(), lib)
 
 	reco.mu.Lock()
 	after := len(reco.items)
@@ -309,7 +309,7 @@ func TestBuildIgnoresHiddenDirs(t *testing.T) {
 	t.Setenv("OLLAMA_HOST", srv.URL)
 	t.Setenv("EMBED_MODEL", "fake-embed")
 
-	build(context.Background(), lib)
+	buildReco(context.Background(), lib)
 
 	reco.mu.Lock()
 	items := reco.items
@@ -340,7 +340,7 @@ func TestBuildWithoutAnchorsRecommendsNothing(t *testing.T) {
 	t.Setenv("OLLAMA_HOST", srv.URL)
 	t.Setenv("EMBED_MODEL", "fake-embed")
 
-	build(context.Background(), lib)
+	buildReco(context.Background(), lib)
 
 	reco.mu.Lock()
 	items := reco.items
@@ -370,7 +370,7 @@ func TestBuildDoesNotBlowUpOnRaggedStore(t *testing.T) {
 	t.Setenv("OLLAMA_HOST", srv.URL)
 	t.Setenv("EMBED_MODEL", "fake-embed")
 
-	build(context.Background(), lib)
+	buildReco(context.Background(), lib)
 
 	reco.mu.Lock()
 	items := reco.items

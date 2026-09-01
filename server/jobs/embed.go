@@ -388,12 +388,12 @@ func cosine(a, b vec) float64 {
 	return sum
 }
 
-// center subtracts the catalogue's mean vector and renormalises. Embeddings of
+// centerVecs subtracts the catalogue's mean vector and renormalises. Embeddings of
 // short titles all share a large "this is a video title" component: raw cosine
 // over this library sits at a median of 0.55 with everything crushed into
 // 0.45–0.9, so no threshold separates a real match from a coincidence.
 // Removing the mean spreads the same ranking over roughly -0.35 to 0.75.
-func center(in map[string]vec) map[string]vec {
+func centerVecs(in map[string]vec) map[string]vec {
 	out := make(map[string]vec, len(in))
 	if len(in) == 0 {
 		return out

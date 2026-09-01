@@ -60,7 +60,7 @@ func TestLiveEmbedding(t *testing.T) {
 		}
 	}
 
-	centered := center(byTitle)
+	centered := centerVecs(byTitle)
 	for tx, v := range centered {
 		if len(v) != store.Dim {
 			t.Fatalf("%q has dim %d, store says %d", tx, len(v), store.Dim)
