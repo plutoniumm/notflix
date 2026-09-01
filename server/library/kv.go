@@ -221,9 +221,12 @@ type Watch struct {
 }
 
 // Watched returns every watch record in the store, keyed by video param.
-// Cleared entries are stored as JSON null (that is how the UI removes a
-// Continue Watching card) and are skipped here — a nil is "forget this",
-// not "watched for zero seconds".
+//
+// A cleared entry is stored as JSON null — that is how the UI removes a
+// Continue Watching card — and comes back as a zero Watch rather than being
+// dropped. The title was still opened at some point, which is what a caller
+// asking "has this been seen" needs to know, and a zero T keeps it below
+// every watched threshold so it can never count as finished.
 func Watched() map[string]Watch {
 	store := kvRead()
 	out := make(map[string]Watch)
@@ -233,12 +236,15 @@ func Watched() map[string]Watch {
 			continue
 		}
 
-		m, ok := v.(map[string]any)
-		if !ok {
+		w := Watch{}
+
+		m, _ := v.(map[string]any)
+		if m == nil {
+			out[strings.TrimPrefix(k, "watched:")] = w
+
 			continue
 		}
 
-		w := Watch{}
 		w.T, _ = m["t"].(float64)
 		w.Dur, _ = m["dur"].(float64)
 		w.At, _ = m["at"].(float64)

@@ -135,7 +135,9 @@ func TestBuildEndToEnd(t *testing.T) {
 		"watched:Cooking with Fire 2019 1080p WEBRip.mp4": map[string]any{
 			"t": 30.0, "dur": 3600.0, "at": 2000.0,
 		},
-		// Cleared entry: stored as null, must be ignored entirely.
+		// Dismissed from Continue Watching, stored as null. Never an anchor
+		// (nothing is known about how much played) but still seen, so it must
+		// not come back as a discovery.
 		"watched:Ben Hur 1959 1080p BluRay x264.mp4": nil,
 	}
 
@@ -167,6 +169,10 @@ func TestBuildEndToEnd(t *testing.T) {
 	for _, it := range items {
 		if strings.Contains(it.Name, "Spartacus") {
 			t.Fatal("recommended the very title that was watched")
+		}
+
+		if strings.Contains(it.Name, "Ben Hur") {
+			t.Fatal("recommended a title dismissed from Continue Watching")
 		}
 
 		if it.Because == "" {

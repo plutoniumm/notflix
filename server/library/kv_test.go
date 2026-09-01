@@ -105,3 +105,37 @@ func TestKVWriteIsAtomic(t *testing.T) {
 		t.Fatalf("key missing from store: %v", m)
 	}
 }
+
+func TestWatchedKeepsClearedEntriesAsZero(t *testing.T) {
+	kvTemp(t)
+
+	body := `{
+		"watched:Finished.mp4": {"t": 7000, "dur": 8000, "at": 12},
+		"watched:Dismissed.mp4": null,
+		"watched:Malformed.mp4": "nonsense",
+		"codec:1234567": "av1"
+	}`
+	if err := os.WriteFile("cache/kv.json", []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Watched()
+
+	if len(got) != 3 {
+		t.Fatalf("want 3 watch entries, got %d: %+v", len(got), got)
+	}
+
+	if w := got["Finished.mp4"]; w.T != 7000 || w.Dur != 8000 || w.At != 12 {
+		t.Fatalf("Finished.mp4 = %+v", w)
+	}
+
+	// A dismissed card is still a title the user has seen; it comes back with
+	// a zero T so it can never pass a watched threshold.
+	if w, ok := got["Dismissed.mp4"]; !ok || w != (Watch{}) {
+		t.Fatalf("Dismissed.mp4 = %+v (present %v)", w, ok)
+	}
+
+	if w, ok := got["Malformed.mp4"]; !ok || w != (Watch{}) {
+		t.Fatalf("Malformed.mp4 = %+v (present %v)", w, ok)
+	}
+}

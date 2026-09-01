@@ -26,7 +26,7 @@
   // few tries, because "no recommendations" is a legitimate resting state
   // (no ollama host, no finished titles) and not something to keep asking about.
   const RETRY_MS = 6000;
-  const RETRIES = 5;
+  const RETRIES = 10;
 
   onMount(() => {
     let tries = 0;
