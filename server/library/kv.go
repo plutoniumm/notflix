@@ -78,6 +78,12 @@ func KVSetValue(key string, value any) error {
 	return update(func(store map[string]any) { store[key] = value })
 }
 
+// KVDelete removes a key through the same single write path, so a delete
+// racing a set cannot lose the set.
+func KVDelete(key string) error {
+	return update(func(store map[string]any) { delete(store, key) })
+}
+
 // DirRecency maps a library dir to the newest watched:<param>.at (ms) under
 // it; drives the LRU ordering of the Home list.
 func DirRecency() map[string]float64 {

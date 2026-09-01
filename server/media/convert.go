@@ -44,7 +44,7 @@ func ProcessAll(lib *library.Library) {
 	// Fan-out is safe because every stage owns its pool and gates on IsBusy
 	// (torrent-owned, sidecar-present, or freshly-written).
 	var wg sync.WaitGroup
-	wg.Add(7)
+	wg.Add(6)
 	go func() {
 		defer wg.Done()
 		PhaseStart("convert")
@@ -61,17 +61,35 @@ func ProcessAll(lib *library.Library) {
 		RepairAll(lib)
 		PhaseEnd("repair")
 	}()
+
+	// Thumbs and sprites stay concurrent with each other, but posters runs
+	// strictly after both: it reads the sprite sheet and it OVERWRITES the
+	// thumbnail, so overlapping with a thumbs pass that writes the same path
+	// would sometimes stomp a chosen poster with a fixed-timestamp grab.
+	// BackfillSprites only queues, so a sheet that lands late is picked up by
+	// the next sweep rather than skipped forever.
 	go func() {
 		defer wg.Done()
-		PhaseStart("thumbs")
-		RegenerateThumbnails(lib, 0)
-		PhaseEnd("thumbs")
-	}()
-	go func() {
-		defer wg.Done()
-		PhaseStart("sprites")
-		BackfillSprites(lib)
-		PhaseEnd("sprites")
+
+		var art sync.WaitGroup
+		art.Add(2)
+		go func() {
+			defer art.Done()
+			PhaseStart("thumbs")
+			RegenerateThumbnails(lib, 0)
+			PhaseEnd("thumbs")
+		}()
+		go func() {
+			defer art.Done()
+			PhaseStart("sprites")
+			BackfillSprites(lib)
+			PhaseEnd("sprites")
+		}()
+		art.Wait()
+
+		PhaseStart("posters")
+		PosterAll(lib)
+		PhaseEnd("posters")
 	}()
 	go func() {
 		defer wg.Done()
