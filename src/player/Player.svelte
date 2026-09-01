@@ -8,8 +8,7 @@
     Vhs.GOAL_BUFFER_LENGTH = 30;
     Vhs.MAX_GOAL_BUFFER_LENGTH = 90;
     Vhs.GOAL_BUFFER_LENGTH_RATE = 3;
-    // Bias first-segment ABR to a high rung on a fat pipe. Without this VHS
-    // starts at the lowest rendition and climbs only after measuring.
+    // Without this VHS starts at the lowest rendition and climbs only after measuring.
     Vhs.INITIAL_BANDWIDTH = 20_000_000;
   }
 
@@ -45,14 +44,12 @@
   const dir = $derived(parsed.dir);
   const name = $derived(parsed.name);
   const title = $derived(clean(name));
-  // Any extension the server calls playable (.mp4/.mkv/.mov) reaches here, so
-  // swap whatever is present — matching the server's own `base` computation.
+  // Swap whatever extension is present, matching the server's own `base`.
   const sub = $derived(videoParam.replace(/\.[^./]+$/, ".vtt"));
   // Derived, not awaited: ps.videoKey only lands after /api/videos.
   const artKey = $derived(hashKey(name));
-  // Probed once per mount — it's a UA capability, not element state. Sent so
-  // the server can pick the h264 ladder over the AV1-only master rather than
-  // guessing from the User-Agent.
+  // Sent so the server picks the h264 ladder over the AV1-only master instead
+  // of guessing from the User-Agent.
   const av1 = av1Ok() ? 1 : 0;
   const masterSrc = $derived(
     `/api/hls/master?file=${encodeURIComponent(videoParam)}&av1=${av1}`,
@@ -98,10 +95,8 @@
     }
   }
 
-  // Seamless next: swap the source in the same document. A full navigation
-  // drops Chrome's user-gesture autoplay allowance, so whole seasons would
-  // stall on every episode boundary. Offline records still play via direct
-  // MP4 + a real navigation.
+  // Swap the source in the same document: a full navigation drops Chrome's
+  // user-gesture autoplay allowance and every episode boundary stalls.
   function goNext() {
     if (!ps.nextURL || swapping) return;
     if (isOffline) {
@@ -147,11 +142,8 @@
     setMediaMeta();
   }
 
-  // Resume guard: only seek to a saved position once duration is known
-  // and the position lands sanely inside the media. An earlier broken
-  // playback timeline could have persisted a drifted/huge currentTime;
-  // without this, the player yanks a fresh start to a bogus timestamp
-  // ("just started but shows ~2h, jumped back"). Out-of-range → start at 0.
+  // Seek only once duration is known and the saved position lands inside the
+  // media — a drifted/huge persisted currentTime yanks a fresh start to ~2h.
   const applyResume = (param: string, t: number) => {
     if (param !== videoParam || !Number.isFinite(t) || t <= 0) return;
     const trySeek = () => {
@@ -168,10 +160,8 @@
     player.one("loadedmetadata", trySeek);
   };
 
-  // One-shot per episode: guards consumed on trigger, so seeking back into
-  // a range deliberately never auto-skips again (manual button + `x` still
-  // do). Paused/seeking scrubs through a range don't count — only actual
-  // playback entering it.
+  // One-shot per episode: guards are consumed on trigger, so seeking back into
+  // a range deliberately never re-skips. Paused/seeking scrubs don't count.
   function autoSkipTick() {
     if (swapping || player.paused() || player.seeking()) return;
     const which = activeSkip(player.currentTime() ?? 0, introRange, outroRange);
@@ -186,11 +176,9 @@
     }
   }
 
-  // ffprobe sees every audio stream, but the picker can only switch what HLS
-  // actually shipped: the AV1 demuxed-CMAF master emits ONE #EXT-X-MEDIA
-  // rendition, so advertising the probe list there sells switches that don't
-  // exist. Re-runs on `addtrack` because the manifest is parsed after the
-  // probe call resolves.
+  // AV1 demuxed-CMAF emits ONE #EXT-X-MEDIA rendition, so advertising ffprobe's
+  // full list sells switches that don't exist. Re-runs on `addtrack`: the
+  // manifest is parsed after the probe call resolves.
   function applyAudio() {
     const atl = player?.audioTracks?.();
     const n = atl?.length ?? 0;
@@ -302,10 +290,8 @@
     }
   }
 
-  // iPhone Safari exposes no Fullscreen API on non-video ELEMENTS — neither
-  // requestFullscreen nor webkitRequestFullscreen exists there, and
-  // document.fullscreenElement is always undefined. Only the video itself can
-  // go fullscreen, at the cost of the custom chrome.
+  // iPhone Safari exposes no Fullscreen API on non-video elements — only the
+  // video itself can go fullscreen, at the cost of the custom chrome.
   function isFull(): boolean {
     return !!(
       document.fullscreenElement ||
@@ -482,10 +468,8 @@
       },
     });
 
-    // MEDIA_ERR_DECODE / MEDIA_ERR_SRC_NOT_SUPPORTED means the device can't
-    // play what HLS offered — most often an AV1 master on hardware with no AV1
-    // decoder. The stored file is served with byte ranges and faststart, so one
-    // retry there rescues the session instead of dead-ending on the overlay.
+    // MEDIA_ERR_DECODE / SRC_NOT_SUPPORTED is usually an AV1 master on hardware
+    // with no AV1 decoder — one retry on the stored MP4 rescues the session.
     player.on("error", () => {
       const err = player.error();
       if (!err) return;
@@ -514,9 +498,7 @@
 
     ps.bind(player);
 
-    // The ambilight samples the tech element, which video.js may swap for the
-    // node bound here. Same-origin media, so the canvas never taints — the
-    // sampler still guards the read and gives up quietly if it ever does.
+    // video.js may swap the node bound here, so sample the live tech element.
     const tech = (player.el()?.querySelector("video") as HTMLVideoElement) ?? videoEl!;
     ambient = new Ambient((a, b) => {
       pageEl?.style.setProperty("--art-1", a);
@@ -602,10 +584,9 @@
       player.on("pause", saveProgress);
       player.on("seeked", saveProgress);
 
-      // iOS Safari does not reliably fire beforeunload on app switch, screen
-      // lock, tab discard or PWA swipe-away, and the 2s loop stops saving the
-      // moment the page hides — so the last write has to happen on pagehide and
-      // on visibilitychange, over sendBeacon, which a suspending page keeps.
+      // iOS Safari doesn't reliably fire beforeunload on app switch/lock/discard
+      // and the loop stops when hidden — last write goes via pagehide/
+      // visibilitychange over sendBeacon, which a suspending page keeps.
       const saveOnLeave = () => {
         watch.flushOnLeave(videoParam, player.currentTime() ?? 0, player.duration() ?? 0);
       };
@@ -696,8 +677,8 @@
     loadEpisode(videoParam, false);
   }
 
-  // onMount must stay synchronous: Svelte only honours a returned FUNCTION,
-  // so an async callback's promise silently discards the teardown.
+  // Must stay synchronous: Svelte only honours a returned FUNCTION, so an async
+  // callback's promise silently discards the teardown.
   onMount(() => {
     init().catch((err: any) => console.warn("[player init]", err));
 
@@ -742,14 +723,13 @@
   <Chrome />
 
   <!-- Shared-element target: the library card's thumbnail carries the same
-       `art-<key>` name, so the tile grows into the picture across the
-       navigation instead of the page cutting. -->
+       `art-<key>` name. Must be unique per document. -->
   <div
     class="video-wrap p-abs"
     style:view-transition-name={`art-${artKey}`}
   >
-    <!-- Without playsinline iPhone Safari hijacks playback into the native
-         fullscreen player and every piece of custom chrome disappears. -->
+    <!-- Without playsinline iPhone Safari hijacks playback into its native
+         fullscreen player and the custom chrome disappears. -->
     <video
       bind:this={videoEl}
       playsinline
@@ -821,9 +801,8 @@
   .page {
     inset: 0;
     background: #000;
-    /* touch-action isn't inherited, but hit-testing walks up to the nearest
-       non-auto ancestor — so this kills double-tap zoom for the whole player
-       without a global rule. The scrub track opts out with `none`. */
+    /* Not inherited, but hit-testing walks up to the nearest non-auto ancestor,
+       so this kills double-tap zoom player-wide. The track opts out with `none`. */
     touch-action: manipulation;
   }
   .page.hide-ui {

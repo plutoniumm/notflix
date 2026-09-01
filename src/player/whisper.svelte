@@ -27,8 +27,8 @@
 <style>
   .sub-overlay {
     position: fixed;
-    /* Clears the dock and the home indicator; the dock's own height is fixed
-       so this can stay a constant rather than a measurement. */
+    /* Clears the dock and the home indicator; the dock's height is fixed, so
+       this can stay a constant. */
     bottom: calc(104px + var(--safe-b, 0px));
     left: 50%;
     transform: translateX(-50%);

@@ -145,8 +145,6 @@
   .phases {
     padding: 8px 16px 10px;
   }
-  /* A stepper, not seven independent rows: one rail runs behind the markers so
-     the order of the pipeline is visible even when nothing is moving. */
   .phase {
     padding: 5px 0;
     position: relative;

@@ -14,10 +14,8 @@ import (
 )
 
 // FFRun is a single ffmpeg invocation. It always prepends -nostdin / -v error.
-// Progress (when requested) goes to its OWN pipe (stdout), parsed and
-// discarded — never stored. stderr is captured into a BOUNDED tail so a
-// failing/looping ffmpeg can't flood the log with its progress stream or
-// binary spew; the actual error is always at the end, which is what's kept.
+// Progress goes to its OWN pipe so it can't pollute stderr, which is captured
+// as a bounded tail — the real error is always at the end.
 type FFRun struct {
 	Args     []string
 	Duration float64           // optional: total seconds, enables progress
@@ -26,13 +24,10 @@ type FFRun struct {
 	Nice     bool              // optional: lowest CPU priority — batch work must never starve live streaming
 }
 
-// max stderr retained for error messages. ffmpeg's real diagnostics are a few
-// lines; this is generous headroom while capping pathological output.
 const ffStderrCap = 8 << 10
 
-// shutdownCtx is the base context for every FFRun. Cancelled by Shutdown()
-// when the server exits, so no ffmpeg ever outlives its parent — an orphaned
-// encoder keeps writing files the next server run then fights over.
+// shutdownCtx is the base context for every FFRun: no ffmpeg may outlive the
+// server, or the orphan keeps writing files the next run then fights over them.
 var shutdownCtx, shutdownCancel = context.WithCancel(context.Background())
 
 func Shutdown() { shutdownCancel() }
@@ -42,9 +37,8 @@ func (r FFRun) Run() (string, error) {
 
 	progress := r.Duration > 0 && r.OnPct != nil
 	if progress {
-		// pipe:1 = stdout. ffmpeg encode/remux jobs write their output to file
-		// args, never stdout, so it's free for the machine-readable -progress
-		// key=value stream — keeping it OUT of the stderr error buffer.
+		// ffmpeg jobs write output to file args, never stdout, so -progress can
+		// own pipe:1 and stay OUT of the stderr error buffer.
 		args = append(args, "-progress", "pipe:1")
 	}
 
@@ -83,7 +77,6 @@ func FF(args ...string) (string, error) {
 	return FFRun{Args: args}.Run()
 }
 
-// FFErr formats an ffmpeg error with stderr included, trimmed.
 func FFErr(stderr string, err error) error {
 	stderr = strings.TrimSpace(stderr)
 	if stderr == "" {
@@ -97,12 +90,9 @@ var (
 	usTimeRe = regexp.MustCompile(`out_time_us=(\d+)`)
 )
 
-// TailWriter keeps only the last `Max` bytes written and strips NUL bytes —
-// a cheap ring so a runaway subprocess can neither grow memory nor flood the
-// log with binary garbage (a partial-buffer Read or a busted writer dumps
-// `\x00\x00…` for thousands of lines; NUL is never meaningful in text
-// stderr). Exported so non-ffmpeg subprocess captures (whisper, etc.) can
-// reuse the same defense.
+// TailWriter keeps only the last Max bytes and strips NUL bytes — a runaway
+// subprocess can otherwise grow memory or flood the log with binary spew.
+// Exported so non-ffmpeg captures (whisper) reuse the same defense.
 type TailWriter struct {
 	Max int
 	b   []byte
@@ -124,8 +114,8 @@ func (w *TailWriter) Write(p []byte) (int, error) {
 
 func (w *TailWriter) String() string { return string(w.b) }
 
-// progressWriter parses ffmpeg -progress output for the OnPct callback and
-// discards it. Nothing is stored — this never feeds error messages.
+// progressWriter parses ffmpeg -progress for OnPct and discards it; nothing
+// here ever reaches an error message.
 type progressWriter struct {
 	durationSec float64
 	onPct       func(pct float64)

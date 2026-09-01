@@ -1,9 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
-  // Centered message block. `plain` = an inline hint inside a flow of results;
-  // `hero` = a screen with nothing on it, which gets a mark and room to
-  // breathe. gridSpan makes it span a CSS-grid row (Home's grid).
   let {
     variant = "plain",
     gridSpan = false,
@@ -52,8 +49,6 @@
     text-wrap: balance;
     line-height: 1.5;
   }
-  /* The mark is a shape in the dark, not an illustration competing with the
-     message — heavily dimmed and blurred into the surface behind it. */
   .mark {
     font-size: 52px;
     line-height: 1;

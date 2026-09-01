@@ -9,10 +9,8 @@ import (
 	"time"
 )
 
-// StepState is the lifecycle of a single pipeline step for a single file.
-// A missing entry means "never started". "running" that survives a restart
-// is treated as interrupted and silently reset to missing so the step redoes
-// from scratch.
+// StepState is a step's lifecycle. A missing entry means "never started"; a
+// "running" that survives a restart is interrupted and reset to missing.
 type StepState string
 
 const (
@@ -21,9 +19,6 @@ const (
 	StepFailed  StepState = "failed"
 )
 
-// FilePipeline records step outcomes for a single file, keyed by an opaque
-// step name (e.g. "convert", "sprite", "thumb", "whisper"). Serialized to
-// ./cache/pipeline.json.
 type FilePipeline struct {
 	Steps   map[string]StepState `json:"steps"`
 	Updated int64                `json:"t,omitempty"` // unix seconds
@@ -34,20 +29,18 @@ var (
 	plMap      = map[string]*FilePipeline{}
 	plFilePath = "./cache/pipeline.json"
 	plDirty    atomic.Bool
-	plRecover  []PipelineRecoverEntry // populated by PipelineInit for the caller
+	plRecover  []PipelineRecoverEntry
 )
 
-// PipelineRecoverEntry describes a step that was mid-flight when the process
-// last exited. Callers (e.g. media package) use it to delete stale .tmp
-// output before letting the redoing step land.
+// PipelineRecoverEntry is a step that was mid-flight when the process exited;
+// callers delete its stale .tmp output before the redo lands.
 type PipelineRecoverEntry struct {
 	Path string
 	Step string
 }
 
-// PipelineInit loads the persisted ledger, resets any "running" step to
-// missing (treating it as interrupted), and starts the periodic flush
-// goroutine. Safe to call once at startup; idempotent.
+// PipelineInit loads the ledger, resets any surviving "running" step to
+// missing (interrupted → redo), and starts the periodic flush.
 func PipelineInit() []PipelineRecoverEntry {
 	if data, err := os.ReadFile(plFilePath); err == nil {
 		var m map[string]*FilePipeline
@@ -82,12 +75,8 @@ func PipelineInit() []PipelineRecoverEntry {
 	return recover
 }
 
-// PipelineRecovered returns the interrupted-step list from the most recent
-// PipelineInit — useful for callers that skip an eager scan and want to
-// respond to the recovery list on demand.
 func PipelineRecovered() []PipelineRecoverEntry { return plRecover }
 
-// PipelineMark sets step state for path. Creates the ledger entry lazily.
 func PipelineMark(path, step string, s StepState) {
 	plMu.Lock()
 	st, ok := plMap[path]
@@ -104,7 +93,6 @@ func PipelineMark(path, step string, s StepState) {
 	plDirty.Store(true)
 }
 
-// PipelineStep returns the current state for (path, step), or "" if none.
 func PipelineStep(path, step string) StepState {
 	plMu.RLock()
 	defer plMu.RUnlock()
@@ -114,8 +102,8 @@ func PipelineStep(path, step string) StepState {
 	return ""
 }
 
-// PipelineForget removes any ledger for path. Call when a file is deleted
-// or renamed so the map doesn't grow unbounded with stale keys.
+// PipelineForget drops path's ledger; call on delete/rename so stale keys
+// don't pile up.
 func PipelineForget(path string) {
 	plMu.Lock()
 	delete(plMap, path)
@@ -123,8 +111,7 @@ func PipelineForget(path string) {
 	plDirty.Store(true)
 }
 
-// PipelineSnapshot returns a copy of the whole ledger for read-only use
-// (status endpoints, debug dumps).
+// PipelineSnapshot returns a deep copy for read-only use.
 func PipelineSnapshot() map[string]*FilePipeline {
 	plMu.RLock()
 	defer plMu.RUnlock()

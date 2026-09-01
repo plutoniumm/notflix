@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// The bug this locks: A registers, B kills A and registers itself, then A's
-// deferred cleanup deletes by key and drops B's entry. C finds nothing to
-// kill and starts a third python — two of them racing to write one .vtt.
+// Bug: A's deferred cleanup deleted by key, dropping B's entry, so the next
+// run killed nothing and started a second python racing for the same .vtt.
 func TestProcRegistryComparesIdentity(t *testing.T) {
 	key := "Show.S01E01.mkv"
 	a, b := &exec.Cmd{}, &exec.Cmd{}
@@ -36,8 +35,7 @@ func TestProcKillKeepsEntry(t *testing.T) {
 	procSwap(key, cmd)
 	t.Cleanup(func() { procDone(key, cmd) })
 
-	// procKill only stops the process; the entry belongs to the run that
-	// stored it, so a later procDone from that run still matches.
+	// The entry belongs to the run that stored it, so its procDone still matches.
 	procKill(key)
 	if _, ok := activeProcs.Load(key); !ok {
 		t.Fatal("procKill removed the entry")

@@ -16,11 +16,9 @@ import (
 
 var Prober = astiffprobe.New(astiffprobe.Configuration{BinaryPath: "ffprobe"})
 
-// resolve joins rel onto root and proves the result still sits inside root.
 // The trailing separator on the prefix test is load-bearing: without it
 // "/Volumes/AomineEvil" passes a "/Volumes/Aomine" containment check.
-// Rejecting the ".." path element (post-Clean) rather than the ".."
-// substring keeps legitimate names like "Movie..2020.mp4" servable.
+// Rejecting the ".." path element (not the substring) keeps "Movie..2020.mp4".
 func resolve(root, rel string) (string, bool) {
 	absR, err := filepath.Abs(root)
 	if err != nil {
@@ -76,12 +74,8 @@ func Hash(name string) string {
 	return fmt.Sprintf("%07d", h.Sum32()%1e7)
 }
 
-// EnsureDir makes sure dir exists. Returns true when the directory is
-// available afterwards (whether pre-existing or freshly created), false
-// when it couldn't be created (e.g. parent is read-only, or a removable
-// volume's mountpoint isn't actually mounted). Non-fatal — boot must
-// survive missing drives so the server still answers requests against
-// whatever roots are reachable.
+// EnsureDir returns false when the dir isn't usable (read-only parent,
+// unmounted volume) — non-fatal, boot must survive that.
 func EnsureDir(dir string) bool {
 	if info, err := os.Stat(dir); err == nil {
 		return info.IsDir()
@@ -93,17 +87,15 @@ func EnsureDir(dir string) bool {
 	return true
 }
 
-// DelFile serves optional sidecars (.vtt/.srt) as much as the video itself,
-// so a missing file is the normal case, not a failure worth logging.
+// Sidecars are optional, so a missing file is normal, not a failure.
 func DelFile(path string) {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		log.Printf("Failed to delete file %s: %v", path, err)
 	}
 }
 
-// ParseRange reads a single-range "bytes=" header against a known size.
-// ok is false for a malformed header and for an unsatisfiable one (start
-// past EOF), which is the caller's cue to answer 416.
+// ParseRange returns ok=false for a malformed or unsatisfiable range —
+// the caller's cue to answer 416.
 func ParseRange(hdr string, size int64) (start, end int64, ok bool) {
 	spec, found := strings.CutPrefix(strings.ToLower(strings.TrimSpace(hdr)), "bytes=")
 	if !found || size <= 0 {
@@ -154,8 +146,7 @@ func ParseRange(hdr string, size int64) (start, end int64, ok bool) {
 	return start, end, true
 }
 
-// Range never fails: a malformed or unsatisfiable header degrades to the
-// whole file so a bad client header can't panic the video handler.
+// Range never fails: a bad header degrades to the whole file.
 func Range(hdr string, size int64) (start int64, end int64, clen string) {
 	start, end, ok := ParseRange(hdr, size)
 	if !ok {

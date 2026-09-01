@@ -90,8 +90,7 @@ export function vidURL(dir: string, name: string, autoplay = false): string {
   return `/?video=${encodeURIComponent(join(dir, name))}` + (autoplay ? "&autoplay=1" : "");
 }
 
-// A thumbnail only exists once the thumbs phase has run, so a miss is routine
-// — swap in the logo instead of the browser's broken-image glyph.
+// A miss is routine until the thumbs phase has run — swap in the logo.
 export function thumbFail(e: Event) {
   const img = e.currentTarget as HTMLImageElement;
 
@@ -114,10 +113,8 @@ export function parseRaw(raw: string): { dir: string; name: string } {
   };
 }
 
-// Mirrors library.Hash in Go (FNV-32a, mod 1e7, zero-padded to 7). Thumbnails,
-// sprites and the view-transition name all key off it, and deriving it here
-// means the name exists at first paint instead of after /api/videos resolves —
-// a cross-document morph that names its element late has already missed.
+// Mirrors library.Hash in Go (FNV-32a, mod 1e7, pad 7). Derived here so the
+// view-transition name exists at first paint — named late, the morph has missed.
 export function hashKey(name: string): string {
   let h = 2166136261;
 

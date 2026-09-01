@@ -17,11 +17,8 @@ import (
 
 var repairPool = jobs.NewPool(2)
 
-// RepairAll walks the corrupt set built by library.ScanCorrupt and tries
-// progressively harder repair strategies on each entry. Recovered files
-// replace the original in place; the source is preserved as
-// <file>.corrupt.bak. Runs a fresh corrupt scan at the end so anything
-// recovered drops out of the set.
+// RepairAll tries progressively harder strategies on the corrupt set; recovered
+// files replace the original, whose bytes stay as <file>.corrupt.bak.
 func RepairAll(lib *library.Library) {
 	paths := library.CorruptPaths()
 	if len(paths) == 0 {
@@ -75,10 +72,8 @@ func repairOne(path string) bool {
 	return false
 }
 
-// repairCopyRemux copies streams into a fresh container of the same type,
-// regenerating PTS/DTS and ignoring recoverable decode errors. Fixes
-// moov/index/timestamp issues without re-encoding — non-lossy and fast.
-// Extension is preserved so the caller sees the same file layout.
+// repairCopyRemux rebuilds the container with regenerated PTS/DTS — fixes
+// moov/index/timestamp damage without re-encoding. Extension preserved.
 func repairCopyRemux(path string) error {
 	ext := filepath.Ext(path)
 	tmp := path + ".repair.tmp" + ext
@@ -105,11 +100,8 @@ func repairCopyRemux(path string) error {
 	return commitRepair(path, tmp, path)
 }
 
-// repairReencode does a full re-encode with the HW-preferred AV1 picker,
-// tolerating decode errors and dropping subtitles/chapters. Lossy fallback
-// when copy-remux can't rebuild the file. Always outputs .mp4 so the result
-// slots straight into the AV1 HLS pipeline; original extension is retired
-// (the source is preserved as .corrupt.bak).
+// Lossy fallback. Always outputs .mp4 so the result slots into the AV1 HLS
+// pipeline; the original extension is retired (source kept as .corrupt.bak).
 func repairReencode(path string) error {
 	base := strings.TrimSuffix(path, filepath.Ext(path))
 	tmp := base + ".repair.tmp.mp4"
@@ -139,8 +131,6 @@ func repairReencode(path string) error {
 	return commitRepair(path, tmp, dst)
 }
 
-// verifyOutput confirms ffprobe can read the file and it contains at least
-// one video stream — the minimum bar for "repair succeeded".
 func verifyOutput(path string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -156,10 +146,8 @@ func verifyOutput(path string) bool {
 	return false
 }
 
-// commitRepair swaps in the repaired file. Original goes to
-// <origPath>.corrupt.bak; tmp is renamed to dst. If dst != origPath (the
-// re-encode case that changes extension) and dst already exists, we bail
-// rather than clobber. Any failure rolls back the backup.
+// commitRepair backs the original up before swapping, bails rather than clobber
+// an existing dst, and rolls the backup back on failure.
 func commitRepair(origPath, tmp, dst string) error {
 	if dst != origPath {
 		if _, err := os.Stat(dst); err == nil {

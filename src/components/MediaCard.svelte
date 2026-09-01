@@ -3,11 +3,6 @@
   import { clean, thumbFail, vidURL } from "../core/video";
   import { art, morph } from "./art";
 
-  // The library's one video tile. It has no fixed size: everything inside is
-  // driven by the tile's own inline size, so the same component is a dense
-  // grid poster at 130px, a rail tile at 220px and a hero at 480px.
-  // `overlay` draws inside the artwork (badges, per-card actions), `footer`
-  // under the title.
   let {
     dir,
     name,
@@ -102,8 +97,7 @@
       filter var(--motion, 0.3s) var(--ease-out);
   }
 
-  /* The thumbnail is missing until the thumbs phase runs, and the stand-in is
-     the logo — a mark, not a frame, so it must not be cropped to fill. */
+  /* The .svg stand-in is the logo — a mark, not a frame, so never cropped. */
   .art img[src$=".svg"] {
     object-fit: contain;
     padding: 18%;
@@ -111,7 +105,6 @@
     box-sizing: border-box;
   }
 
-  /* The artwork never meets the page cold — it fades into its own colour. */
   .scrim {
     inset: 0;
     background: linear-gradient(
@@ -195,7 +188,6 @@
     transition-duration: var(--motion-fast, 0.12s);
   }
 
-  /* Dense grid: the poster does the work, the caption stays out of the way. */
   @container tile (max-width: 168px) {
     .label {
       padding-top: 6px;
@@ -205,8 +197,6 @@
     }
   }
 
-  /* Hero: the same component, given room. The caption moves onto the artwork
-     and the aspect opens up to something cinematic. */
   @container tile (min-width: 360px) {
     .art {
       aspect-ratio: 2.2 / 1;
@@ -247,8 +237,6 @@
     }
   }
 
-  /* The room goes dark around whatever you're pointing at. Only :has() can ask
-     a row whether one of its own children is hovered. */
   @media (hover: hover) {
     :global(.spotlight > .tile) {
       transition:

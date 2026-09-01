@@ -1,12 +1,7 @@
-// Package httpc is the outbound HTTP path for the server. Every request it
-// makes carries an enforced timeout, every response is status-checked before
-// a caller sees a byte, and every body is closed and length-capped.
-//
-// The timeout is not a courtesy: an ollama host that goes to sleep accepts the
-// connection and then never answers, and a wedged aria2c still listens on its
-// RPC port. A plain http.Get against either blocks forever, which is how one
-// sleeping peer used to take down the whole whisper pool.
-//
+// Package httpc is the outbound HTTP path: every request carries an enforced
+// timeout, every response is status-checked and length-capped. The timeout is
+// not a courtesy — a sleeping ollama host accepts the connection and never
+// answers, and a plain http.Get against it once took down the whisper pool.
 // Imports nothing internal, so every package can depend on it.
 package httpc
 
@@ -20,17 +15,14 @@ import (
 	"time"
 )
 
-// Cap bounds every response read. Nothing we talk to — RPC, chat completions,
-// torrent search — has a legitimate reason to be bigger.
+// Cap bounds every response read.
 const Cap = 8 << 20
 
-// Fallback deadline for a caller that passes none, so "no timeout" is not
-// reachable through this package.
+// Fallback deadline so "no timeout" is unreachable through this package.
 const fallback = 30 * time.Second
 
-// Send runs req and returns its body. A non-2xx status is an error carrying a
-// snippet of what came back, so an error page can never reach a parser or get
-// written to disk as though it were content.
+// Send returns an error for a non-2xx status, so an error page can never reach
+// a parser or get written to disk as though it were content.
 func Send(req *http.Request, timeout time.Duration) ([]byte, error) {
 	if timeout <= 0 {
 		timeout = fallback
@@ -83,8 +75,7 @@ func GetJSON(ctx context.Context, url string, out any, timeout time.Duration) er
 	return decode(body, out)
 }
 
-// PostJSON marshals in, posts it, and decodes the reply into out. A nil out
-// discards the reply.
+// PostJSON decodes the reply into out; a nil out discards it.
 func PostJSON(ctx context.Context, url string, in, out any, timeout time.Duration) error {
 	req, err := json.Marshal(in)
 	if err != nil {

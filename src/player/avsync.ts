@@ -1,9 +1,8 @@
 import videojs from "video.js";
 
-// WebKit's MediaElementAudioSourceNode does not support HLS/streaming media:
-// piping an AVPlayer-backed element through WebAudio plays the video with no
-// audio at all, and kills AirPlay/PiP audio for that element. Safari (iOS and
-// desktop) therefore gets no delay graph — offset stays 0 and the sync UI hides.
+// WebKit's MediaElementAudioSourceNode can't take HLS: routing the element
+// through WebAudio silences it and kills AirPlay/PiP audio, so Safari and iOS
+// get no delay graph — offset stays 0 and the sync UI hides.
 const usable = () =>
   typeof AudioContext !== "undefined" &&
   !(videojs as any).browser?.IS_ANY_SAFARI &&
@@ -26,9 +25,8 @@ export class AVSync {
       this.delay.delayTime.value = 0;
       src.connect(this.delay);
       this.delay.connect(this.ctx.destination);
-      // An autoplay or an in-place episode swap can leave the context
-      // suspended, which is silent — resume on any playback start, not just
-      // the gesture-driven `play`.
+      // Autoplay or an in-place episode swap can leave the context suspended
+      // (silent) — resume on any playback start, not just on `play`.
       this.el = videoEl;
       videoEl.addEventListener("play", this.wake);
       videoEl.addEventListener("playing", this.wake);

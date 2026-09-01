@@ -1,7 +1,3 @@
-// usePoll runs `fn` on a setInterval that auto-pauses while the tab is hidden
-// and clears itself when the returned dispose function is called. Designed
-// to be called inside onMount and the dispose returned (or pushed onto a
-// cleanup list).
 export function usePoll(
   fn: () => unknown,
   intervalMs: number,

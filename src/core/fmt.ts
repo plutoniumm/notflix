@@ -1,6 +1,4 @@
-// The one place a number becomes a string. Every formatter clamps: NaN,
-// Infinity and negatives are display noise (metadata that hasn't loaded, a
-// clock-skewed timestamp) and must never leak "NaN:NaN" into the UI.
+// Every formatter clamps: NaN, Infinity and negatives must never reach the UI.
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -26,8 +24,7 @@ export function durWords(sec: number): string {
   return `${s}s`;
 }
 
-// 1000-base: disks and aria2 both report decimal units, and the library has
-// always displayed them that way.
+// 1000-base: disks and aria2 both report decimal units.
 const TIERS: [number, string, number][] = [
   [1e12, "TB", 1],
   [1e9, "GB", 1],

@@ -18,8 +18,7 @@ import (
 	"notflix/server/library"
 )
 
-// chdirTemp moves cwd to a fresh temp dir with a `cache/` subdir, so kv.json
-// and the HLS cache write into isolated state. Restored on test cleanup.
+// Isolates kv.json and the HLS cache under a temp cwd.
 func chdirTemp(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,8 +29,6 @@ func chdirTemp(t *testing.T) string {
 	return dir
 }
 
-// makeMP4 generates a 2s 320x240 test clip with sine audio under root/name.
-// Caller must have ffmpeg in PATH; skips otherwise.
 func makeMP4(t *testing.T, root, name string) string {
 	t.Helper()
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -55,9 +52,7 @@ func makeMP4(t *testing.T, root, name string) string {
 	return out
 }
 
-// makeAV1MP4 generates a 2s AV1 (8-bit yuv420p) + aac clip under root/name,
-// with a leading keyframe so it's copy-passthrough eligible. Skips if
-// libsvtav1 is unavailable.
+// Leading keyframe, so the clip is copy-passthrough eligible.
 func makeAV1MP4(t *testing.T, root, name string) string {
 	t.Helper()
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -70,9 +65,8 @@ func makeAV1MP4(t *testing.T, root, name string) string {
 		t.Fatal(err)
 	}
 	out := filepath.Join(root, name)
-	// testsrc2 (a moving pattern) — not a static color: TestE2E_AV1CopyPassthrough
-	// hashes decoded frames across the GOP boundary to catch a copy segment that
-	// holds the wrong GOP, which solid-color frames could never distinguish.
+	// testsrc2, not a static color: TestE2E_AV1CopyPassthrough hashes decoded
+	// frames across the GOP boundary, which solid color can't distinguish.
 	cmd := exec.Command("ffmpeg", "-y", "-v", "error",
 		"-f", "lavfi", "-i", "testsrc2=s=320x240:d=2:r=24",
 		"-f", "lavfi", "-i", "sine=f=440:d=2",
@@ -87,8 +81,6 @@ func makeAV1MP4(t *testing.T, root, name string) string {
 	}
 	return out
 }
-
-// --- codec selector ----------------------------------------------------------
 
 func TestMediaCodec_DefaultsToH264(t *testing.T) {
 	chdirTemp(t)
@@ -112,14 +104,10 @@ func TestMediaCodec_UnknownValueFallsBackToH264(t *testing.T) {
 	if err := SetMediaCodec("bar.mp4", "vp9"); err != nil {
 		t.Fatal(err)
 	}
-	// We treat anything that isn't "av1" as h264 — defensive against KV state
-	// from older code paths or hand-edits.
 	if got := MediaCodec("bar.mp4"); got != CodecH264 {
 		t.Errorf("vp9 → %q, want h264", got)
 	}
 }
-
-// --- segPaths ----------------------------------------------------------------
 
 func TestSegPaths_H264UsesTSAndDefaultRoot(t *testing.T) {
 	p, _ := segPaths("HASH", CodecH264, "720p", 3, 0, segMuxed, false)
@@ -142,7 +130,6 @@ func TestSegPaths_AV1UsesM4SAndAV1Root(t *testing.T) {
 }
 
 func TestSegPaths_H264CopyStaysOnTS(t *testing.T) {
-	// h264 source passthrough: MPEG-TS in the -copy cache root.
 	p, _ := segPaths("HASH", CodecH264, "720p", 0, 0, segMuxed, true)
 	if !strings.Contains(p, "/d4-copy/") {
 		t.Errorf("copy root not honored: %s", p)
@@ -153,8 +140,6 @@ func TestSegPaths_H264CopyStaysOnTS(t *testing.T) {
 }
 
 func TestSegPaths_AV1CopyVideoUsesM4SAndAV1CopyRoot(t *testing.T) {
-	// AV1 demuxed video rung: fMP4 (.m4s) single-track under the dedicated
-	// -av1-copy root, in the audio-independent /<q>/v/ subtree.
 	p, _ := segPaths("HASH", CodecAV1, qSrc, 0, 0, segVideoOnly, true)
 	if !strings.Contains(p, "/d4-av1-copy/src/v/") {
 		t.Errorf("av1-copy video root not honored: %s", p)
@@ -165,8 +150,7 @@ func TestSegPaths_AV1CopyVideoUsesM4SAndAV1CopyRoot(t *testing.T) {
 }
 
 func TestSegPaths_AV1AudioUsesM4SInAV1CopyRoot(t *testing.T) {
-	// hls.js can't demux fMP4, so the AV1 title's audio is its OWN fMP4
-	// rendition — .m4s under -av1-copy/audio/a<idx>/, NOT MPEG-TS.
+	// hls.js can't demux fMP4, so AV1 audio is its own fMP4 rendition, not TS.
 	p, _ := segPaths("HASH", CodecAV1, "audio", 0, 1, segAudioOnly, true)
 	if !strings.HasSuffix(p, ".m4s") {
 		t.Errorf("av1 audio rendition must be fMP4 .m4s: %s", p)
@@ -190,8 +174,6 @@ func TestInitPath_CopyRoot(t *testing.T) {
 	}
 }
 
-// --- codec strings -----------------------------------------------------------
-
 func TestAV1Codec_LevelsByHeight(t *testing.T) {
 	cases := []struct {
 		h, depth int
@@ -211,8 +193,6 @@ func TestAV1Codec_LevelsByHeight(t *testing.T) {
 		}
 	}
 }
-
-// --- HLSMaster routing -------------------------------------------------------
 
 func setupRouter(lib *library.Library) *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -276,8 +256,6 @@ func TestHLSMaster_AV1MarkedFile(t *testing.T) {
 	if strings.Contains(body, "avc1.") {
 		t.Errorf("av1 master should not have avc1: %s", body)
 	}
-	// Demuxed CMAF: a separate audio rendition + a video-only rung that
-	// carries NO audio param (so its segments are video-only fMP4).
 	if !strings.Contains(body, "#EXT-X-MEDIA:TYPE=AUDIO") || !strings.Contains(body, "GROUP-ID=\"aud\"") {
 		t.Errorf("av1 master must declare a demuxed audio rendition: %s", body)
 	}
@@ -295,11 +273,9 @@ func TestHLSMaster_AV1MarkedFile(t *testing.T) {
 	}
 }
 
-// The AV1 master is a single av01 rung with NO h264 alternate, and iOS plays
-// HLS natively (no MSE negotiation), so a device without an AV1 decoder gets
-// MEDIA_ERR_SRC_NOT_SUPPORTED and a black screen for every converted title.
-// The player states its capability with &av1=0/1; without the param the UA
-// decides, and unsure means h264 — which always plays.
+// The AV1 master has no h264 alternate and iOS plays HLS natively (no MSE
+// negotiation), so a device without an AV1 decoder gets a black screen. The
+// player declares itself with &av1=0/1; without it, unsure means h264.
 func TestHLSMaster_AV1CapabilityGate(t *testing.T) {
 	chdirTemp(t)
 	root := filepath.Join(t.TempDir(), "lib")
@@ -348,8 +324,7 @@ func TestHLSMaster_AV1CapabilityGate(t *testing.T) {
 				}
 				return
 			}
-			// Downgraded clients take the existing h264 ladder — the same URLs
-			// (no codec param) every h264 client gets, so the cache is shared.
+			// Same URLs as any h264 client (no codec param), so the cache is shared.
 			if !strings.Contains(body, "avc1.") {
 				t.Errorf("downgraded client must get the h264 ladder: %s", body)
 			}
@@ -364,8 +339,7 @@ func TestHLSMaster_AV1CapabilityGate(t *testing.T) {
 }
 
 func TestHLSMaster_AV1MarkedButNotActuallyAV1FallsBackToH264(t *testing.T) {
-	// Marking an h264 file av1 must NOT force the av1 path (that was the jank
-	// bug). canCopyAV1 fails → safe h264 ladder.
+	// Marking an h264 file av1 must not force the av1 path — that was the jank bug.
 	chdirTemp(t)
 	root := filepath.Join(t.TempDir(), "lib")
 	makeMP4(t, root, "movie.mp4") // h264
@@ -393,8 +367,6 @@ func TestHLSMaster_AV1MarkedButNotActuallyAV1FallsBackToH264(t *testing.T) {
 	}
 }
 
-// --- HLSPlaylist EXT-X-MAP ---------------------------------------------------
-
 func TestHLSPlaylist_AV1HasMapAndV6(t *testing.T) {
 	chdirTemp(t)
 	root := filepath.Join(t.TempDir(), "lib")
@@ -403,7 +375,6 @@ func TestHLSPlaylist_AV1HasMapAndV6(t *testing.T) {
 	lib := &library.Library{Roots: []string{root}}
 	r := setupRouter(lib)
 
-	// Video rung: requested with NO audio param (demuxed → video-only fMP4).
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/hls/playlist?file=movie.mp4&q=src&codec=av1", nil)
 	r.ServeHTTP(w, req)
@@ -415,7 +386,6 @@ func TestHLSPlaylist_AV1HasMapAndV6(t *testing.T) {
 	if !strings.Contains(body, "#EXT-X-VERSION:6") {
 		t.Errorf("av1 playlist needs version 6: %s", body)
 	}
-	// Video init must be the av01-only copy init — no audio param in the URL.
 	if !strings.Contains(body, "#EXT-X-MAP:URI=\"/api/hls/init?file=movie.mp4&q=src&codec=av1&m=copy&cv=") {
 		t.Errorf("av1 video EXT-X-MAP must be the video-only copy init (cache-versioned): %s", body)
 	}
@@ -435,7 +405,6 @@ func TestHLSPlaylist_AV1AudioRenditionIsFMP4(t *testing.T) {
 	lib := &library.Library{Roots: []string{root}}
 	r := setupRouter(lib)
 
-	// Audio rendition request, as emitted by the demuxed master.
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/hls/playlist?file=movie.mp4&q=audio&audio=0&codec=av1", nil)
 	r.ServeHTTP(w, req)
@@ -479,10 +448,8 @@ func TestHLSPlaylist_H264NoMap(t *testing.T) {
 	}
 }
 
-// --- segment guards -----------------------------------------------------------
-
-// seg= is client-supplied: past the end of the playlist it used to be a real
-// ffmpeg spawn for media that doesn't exist, deduped only by cache key.
+// seg= is client-supplied: past the playlist end it used to spawn a real
+// ffmpeg for media that doesn't exist.
 func TestEnsureSegment_RejectsPastEnd(t *testing.T) {
 	chdirTemp(t)
 	root := filepath.Join(t.TempDir(), "lib")
@@ -512,8 +479,6 @@ func TestEnsureSegment_WaiterInheritsError(t *testing.T) {
 		t.Errorf("waiter err = %v, want the generator's", err)
 	}
 }
-
-// --- E2E: real ffmpeg ---------------------------------------------------------
 
 func TestE2E_GenerateAV1Init(t *testing.T) {
 	if testing.Short() {
@@ -550,7 +515,7 @@ func TestE2E_GenerateAV1Init(t *testing.T) {
 	if string(head[4:8]) != "ftyp" {
 		t.Errorf("init missing ftyp box; head=% x", head)
 	}
-	// AV1 brand should appear in compatible_brands (within first 32 bytes).
+	// The av01 brand sits in compatible_brands, inside the first 32 bytes.
 	if !strings.Contains(string(head), "av01") {
 		t.Errorf("init missing av01 brand; head=% x", head)
 	}
@@ -593,8 +558,7 @@ func TestE2E_GenerateAV1Segment(t *testing.T) {
 	}
 }
 
-// boxCount counts top-level/anywhere occurrences of a 4-byte box type. Crude
-// but sufficient to assert single-track-ness (the hls.js fMP4 requirement).
+// Crude byte scan, but enough to assert single-track-ness.
 func boxCount(t *testing.T, path, box string) int {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -604,18 +568,15 @@ func boxCount(t *testing.T, path, box string) int {
 	return bytes.Count(b, []byte(box))
 }
 
-// TestE2E_AV1CopyPassthrough is the jank-free demuxed path: an AV1-on-disk
-// source streamed by copy. The hard requirement is that video and audio are
-// SEPARATE single-track fMP4 renditions — hls.js cannot demux fMP4, so a muxed
-// segment (2 traf / both av01+mp4a) plays as a frozen 200. Also asserts the
-// video copy runs far faster than realtime (remux, not re-encode).
+// Video and audio must be SEPARATE single-track fMP4 renditions: hls.js cannot
+// demux fMP4, so a muxed segment (2 traf) serves 200 and plays frozen.
 func TestE2E_AV1CopyPassthrough(t *testing.T) {
 	if testing.Short() {
 		t.Skip("ffmpeg-driven; -short")
 	}
 	chdirTemp(t) // isolate ./cache — both continuous passes write there
 	root := filepath.Join(t.TempDir(), "lib")
-	src := makeAV1MP4(t, root, "movie.mp4") // skips if no libsvtav1
+	src := makeAV1MP4(t, root, "movie.mp4")
 
 	si := getSrcInfo(src)
 	if !canCopyAV1(si) {
@@ -623,7 +584,6 @@ func TestE2E_AV1CopyPassthrough(t *testing.T) {
 			si.vCodec, si.vPixFmt, si.kfTimes)
 	}
 
-	// --- video rendition: ONE continuous -c:v copy pass ---
 	// hls_time 0.5 with the 1s-GOP 2s fixture → exactly 2 keyframe-cut segs.
 	const vhash = "VIDHASH"
 	start := time.Now()
@@ -656,9 +616,8 @@ func TestE2E_AV1CopyPassthrough(t *testing.T) {
 	if c := boxCount(t, vSeg0, "traf"); c != 1 {
 		t.Errorf("video segment must have exactly 1 traf (demuxed), got %d", c)
 	}
-	// The single muxer instance writes correct cumulative tfdt natively —
-	// seg0 at 0, seg1 one GOP later — so hls.js stacks them contiguously with
-	// NO post-hoc patch (the old per-segment path needed av1PatchFragment).
+	// One muxer instance writes cumulative tfdt natively; the old per-segment
+	// path needed av1PatchFragment to fake it.
 	if got := readTfdt(t, vSeg0); got != 0 {
 		t.Errorf("video seg0 tfdt = %d, want 0", got)
 	}
@@ -666,12 +625,9 @@ func TestE2E_AV1CopyPassthrough(t *testing.T) {
 		t.Errorf("video seg1 tfdt = 0 — segments not contiguous (stacked at t=0)")
 	}
 
-	// THE assertion whose absence shipped the off-by-one-GOP bug: a segment's
-	// DECODED CONTENT must be its OWN GOP, not the previous keyframe's. The old
-	// -ss+copy path snapped every segment back one keyframe while tfdt was
-	// patched to look correct (ffprobe + every structural check passed — only a
-	// frame-level decode catches it). Fixture is 24fps, 1s GOP: seg0 = source
-	// frames 0.., seg1 = source frames 24..
+	// Off-by-one-GOP bug: the old -ss+copy path snapped every segment back one
+	// keyframe with tfdt patched to look right, so only a frame-level decode
+	// catches it. Fixture is 24fps/1s GOP: seg0 = frames 0.., seg1 = 24..
 	srcF0 := frameMD5(t, src, 0)
 	srcF24 := frameMD5(t, src, 24)
 	if srcF0 == srcF24 {
@@ -690,7 +646,6 @@ func TestE2E_AV1CopyPassthrough(t *testing.T) {
 		t.Errorf("video copy pass took %v — not a remux, likely transcoding", elapsed)
 	}
 
-	// --- audio rendition: ONE continuous pass, gapless, single-track mp4a ---
 	const ahash = "AUDHASH"
 	if err := ensureAV1Audio(src, ahash, 0, 1.0); err != nil {
 		t.Fatalf("ensureAV1Audio: %v", err)
@@ -720,9 +675,8 @@ func TestE2E_AV1CopyPassthrough(t *testing.T) {
 	if string([]byte(mustHead(t, a0))[4:8]) != "styp" {
 		t.Errorf("audio segment missing styp")
 	}
-	// Gapless: ffmpeg's one-pass writes absolute cumulative tfdt — seg1 must
-	// start exactly where seg0's samples end (this is what per-segment audio
-	// failed; it overlapped ~5ms/seg and MEDIA_ERR_DECODE'd mid-file).
+	// Per-segment audio overlapped ~5ms/seg and MEDIA_ERR_DECODE'd mid-file, so
+	// seg1 must start exactly where seg0's samples end.
 	if got := readTfdt(t, a0); got != 0 {
 		t.Errorf("audio seg0 tfdt = %d, want 0", got)
 	}
@@ -736,7 +690,6 @@ func TestE2E_AV1CopyPassthrough(t *testing.T) {
 	t.Logf("demuxed: video seg in %v (remux), one-pass gapless stereo AAC, single-traf", elapsed)
 }
 
-// trunSamples returns the sample_count field of the first trun box.
 func trunSamples(t *testing.T, path string) int {
 	t.Helper()
 	d, err := os.ReadFile(path)
@@ -774,9 +727,8 @@ func probeCSV(t *testing.T, path, entries string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// frameMD5 returns the md5 of decoded video frame index n of path. Decoding
-// (not byte-comparing) is what catches a copy segment that holds the wrong
-// GOP: the bitstream differs but every container/tfdt check still passes.
+// Decoding, not byte-comparing: a copy segment holding the wrong GOP still
+// passes every container and tfdt check.
 func frameMD5(t *testing.T, path string, n int) string {
 	t.Helper()
 	out, err := exec.Command("ffmpeg", "-v", "error",
@@ -799,7 +751,6 @@ func frameMD5(t *testing.T, path string, n int) string {
 	return ""
 }
 
-// readTfdt returns the moof/traf/tfdt baseMediaDecodeTime of an fMP4 segment.
 func readTfdt(t *testing.T, path string) uint64 {
 	t.Helper()
 	d, err := os.ReadFile(path)

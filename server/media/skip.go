@@ -17,13 +17,9 @@ import (
 	"notflix/server/library"
 )
 
-// Skip detection: episodes of one folder share their opening/ending audio
-// (theme music, recurring narration), so fingerprinting the head and tail of
-// each episode and cross-matching against a sibling finds the intro/outro
-// bounds per episode. Results persist in KV under skip:<hash> keyed exactly
-// like codec:<hash> (see skipKey), and the player turns them into skip
-// buttons. A folder needs ≥2 episodes; a match must run ≥skipMinSec so stray
-// shared lines can't trigger it.
+// Episodes in one folder share opening/ending audio, so fingerprinting each
+// episode's head and tail and cross-matching against a sibling gives the
+// intro/outro bounds. Needs ≥2 episodes; results persist under skip:<hash>.
 
 const (
 	skipHeadSec = 480.0 // intro must live in the first 8 minutes
@@ -32,18 +28,13 @@ const (
 	skipMaxSec  = 300.0 // longer "shared audio" than this means duplicate files, not an intro
 )
 
-// skipKey mirrors codecKey's move-proof BASENAME scheme. Marks are stamped
-// with the rel path the episode had at scan time, and CleanAll/Organize move
-// files between dirs afterwards — a dir-qualified key silently orphans the
-// mark, so the player loses its skip buttons and DetectSkips re-fingerprints
-// an episode it already scanned (57% of the live library's skip: keys were
-// orphans). The basename survives moves, so it's the canonical write key.
+// skipKey uses the BASENAME hash: marks are stamped with the rel path at scan
+// time and CleanAll/Organize move files later, orphaning a dir-qualified key.
 func skipKey(rel string) string {
 	return "skip:" + library.Hash(filepath.Base(rel))
 }
 
-// skipVal reads a mark, falling back to the basename key for the dir-qualified
-// marks written before skipKey moved.
+// skipVal also reads the legacy dir-qualified key.
 func skipVal(rel string) any {
 	if v := library.KVGetValue("skip:" + library.Hash(rel)); v != nil {
 		return v
@@ -51,11 +42,9 @@ func skipVal(rel string) any {
 	return library.KVGetValue(skipKey(rel))
 }
 
-// extractPCM decodes a window of the first audio track to 5512 Hz mono s16le.
-// FFRun pipes stdout to /dev/null, so the samples land in a temp file rather
-// than a pipe — that keeps this on the shared runner (shutdown-cancelled,
-// timeouts, nice -n 19) instead of a bare exec that outlives Shutdown() and
-// fingerprints at the same CPU priority as a live stream.
+// extractPCM decodes a window of the first audio track to 5512 Hz mono s16le
+// through a temp file, keeping it on the shared FFRun runner (shutdown-cancelled,
+// timeouts, nice -n 19) instead of a bare exec that outlives Shutdown().
 func extractPCM(path string, ss, dur float64) ([]int16, error) {
 	tmp, err := os.CreateTemp("", "pcm*.raw")
 	if err != nil {
@@ -122,8 +111,6 @@ func (e *episode) prep() {
 	}
 }
 
-// matchWindow converts a fingerprint match into an absolute [start,end]
-// second pair, or nil when no acceptable run exists.
 func matchWindow(a, b []uint32, base float64) []float64 {
 	s, e, ok := matchFingerprints(a, b, skipMinSec)
 	if !ok {
@@ -136,9 +123,8 @@ func matchWindow(a, b []uint32, base float64) []float64 {
 	return []float64{start, end}
 }
 
-// detectEpisode matches ep against up to two siblings and stores whatever it
-// finds — including an explicit empty record, so unscannable episodes aren't
-// re-fingerprinted on every ProcessAll pass.
+// Stores an explicit empty record too, so unscannable episodes aren't
+// re-fingerprinted on every pass.
 func detectEpisode(ep *episode, partners []*episode) {
 	var intro, outro []float64
 	for _, p := range partners {
@@ -170,9 +156,6 @@ func detectEpisode(ep *episode, partners []*episode) {
 	}
 }
 
-// DetectSkips scans every multi-episode folder and fills in missing skip
-// ranges. Fingerprints are computed once per episode per run and only for
-// episodes that still need matching (or serve as partners).
 func DetectSkips(lib *library.Library) {
 	byDir := map[string][]*episode{}
 	for _, v := range lib.AllVideos() {
@@ -200,10 +183,8 @@ func DetectSkips(lib *library.Library) {
 		PhaseInc("skips", len(pending), 0)
 		log.Printf("[skips] %s: scanning %d/%d episodes", dir, len(pending), len(eps))
 
-		// Episode order in eps follows AllVideos (directory order); partners
-		// are the next two siblings, wrapping. prep() races nowhere: pending
-		// episodes prep in the pool, partners prep lazily inside the single
-		// detect loop below.
+		// Partners are the next two siblings in AllVideos order, wrapping; they prep
+		// lazily inside this single-threaded loop, so nothing races.
 		idx := map[*episode]int{}
 		for i, e := range eps {
 			idx[e] = i

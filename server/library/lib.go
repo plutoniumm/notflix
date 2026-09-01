@@ -8,11 +8,7 @@ import (
 
 type Library struct {
 	Roots []string
-	// Caps holds a UI-only capacity cap (in bytes) keyed by absolute root
-	// path. DiskInfo reports min(actualTotal, cap) for the total and
-	// max(0, cap - used) for free. Writes aren't enforced — the underlying
-	// filesystem keeps whatever real capacity it has; this only shapes what
-	// the UI shows so the user can budget against a soft quota.
+	// Caps is a UI-only capacity cap per root; writes aren't enforced.
 	Caps map[string]uint64
 }
 
@@ -69,9 +65,8 @@ func isVid(name string) bool {
 	return ext == ".mp4" || ext == ".mkv" || ext == ".mov"
 }
 
-// AllVideos walks each root to full depth. It used to stop at two levels,
-// so anything nested deeper was invisible to LiveHashes — and CleanHLSCache
-// deletes the cache of every hash it can't see, mid-stream.
+// AllVideos must walk full depth: CleanHLSCache deletes the cache of every
+// hash LiveHashes can't see, mid-stream.
 func (l *Library) AllVideos() []VideoRef {
 	var out []VideoRef
 

@@ -20,8 +20,8 @@ func kvTemp(t *testing.T) string {
 	return dir
 }
 
-// The store is one JSON blob, so a read that releases its lock before the
-// write takes one loses every set but the last. All N keys must survive.
+// One JSON blob: a read that drops its lock before the write takes one loses
+// every set but the last.
 func TestKVConcurrentSet(t *testing.T) {
 	kvTemp(t)
 
@@ -51,8 +51,8 @@ func TestKVConcurrentSet(t *testing.T) {
 	}
 }
 
-// A truncated store must never be treated as empty and overwritten — that
-// would swap thousands of keys for the one being set.
+// A truncated store must not read as empty and get overwritten — that swaps
+// thousands of keys for the one being set.
 func TestKVCorruptRefusesWrite(t *testing.T) {
 	dir := kvTemp(t)
 	path := filepath.Join(dir, "cache", "kv.json")
@@ -71,8 +71,6 @@ func TestKVCorruptRefusesWrite(t *testing.T) {
 	}
 }
 
-// A write must land whole or not at all: no reader ever sees a partial file,
-// and an absent store starts empty rather than erroring.
 func TestKVWriteIsAtomic(t *testing.T) {
 	dir := kvTemp(t)
 

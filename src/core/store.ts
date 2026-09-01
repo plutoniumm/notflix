@@ -1,6 +1,5 @@
-// localStorage throws, not just on quota: Chrome's "block all cookies" makes
-// every access raise, so an unguarded setItem takes the calling feature down
-// with it. Reads fall back, writes are best-effort.
+// localStorage throws beyond quota too — Chrome's "block all cookies" makes
+// every access raise. Reads fall back, writes are best-effort.
 export function local<T>(key: string, fallback: T) {
   return {
     get(): T {

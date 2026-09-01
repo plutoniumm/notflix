@@ -100,8 +100,6 @@
         <Icon name="whisper" />
       </button>
 
-      <!-- The tune sheet was hotkey-only (`v`), which is unreachable on a
-           phone. -->
       <button
         class="ibtn cc rx5 ptr p5"
         aria-label="Picture and audio"
@@ -124,8 +122,7 @@
     left: 0;
     right: 0;
     z-index: 10;
-    /* viewport-fit=cover puts the page under the notch; max() keeps the real
-       padding on devices where the inset resolves to 0. */
+    /* max() keeps the real padding where the safe-area inset resolves to 0. */
     padding: 12px 16px;
     padding-top: max(12px, var(--safe-t, env(safe-area-inset-top)));
     padding-left: max(16px, env(safe-area-inset-left));

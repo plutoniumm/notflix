@@ -8,9 +8,8 @@ import (
 	"notflix/server/library"
 )
 
-// A bracket in a release name is a character class to filepath.Glob, so
-// "Movie [2020]…" matched nothing (and returned no error) — 7% of the library
-// showed no sidecar subtitle tracks at all.
+// A bracket is a character class to filepath.Glob, so "Movie [2020]…" matched
+// nothing, with no error, and those titles showed no sidecar subs at all.
 func TestVTTSiblings_BracketedName(t *testing.T) {
 	dir := t.TempDir()
 	video := filepath.Join(dir, "Movie [2020] 1080p-[YTS.MX].mp4")
@@ -37,8 +36,8 @@ func TestVTTSiblings_BracketedName(t *testing.T) {
 	}
 }
 
-// An unreadable root reads as "these titles are gone", which used to delete
-// every cache dir belonging to it — including one being streamed right then.
+// An unreadable root reads as "these titles are gone" and used to delete every
+// cache dir it owns, including one being streamed right then.
 func TestCleanHLSCache_SkipsUnreadableRoot(t *testing.T) {
 	chdirTemp(t)
 	cached := filepath.Join(hlsCacheDir, "1234567")

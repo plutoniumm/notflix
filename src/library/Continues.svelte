@@ -23,7 +23,6 @@
     onRemove: (e: Event, dir: string, name: string) => void;
   } = $props();
 
-  // The one you'd actually resume gets the room; the rest stay a rail.
   const lede = $derived(items[0]);
   const rest = $derived(items.slice(1));
 
@@ -155,8 +154,6 @@
     width: 190px;
   }
 
-  /* Wide: the resume target holds the left column at hero size (the tile's own
-     container query flips it), the rest run as a rail beside it. */
   @media (min-width: 980px) {
     .lede {
       grid-template-columns: minmax(360px, 38%) minmax(0, 1fr);
@@ -204,8 +201,7 @@
   .cw-remove:active {
     scale: 0.88;
   }
-  /* No hover to reveal it on touch: opacity 0 still takes taps, so the card
-     carried an invisible delete button where a thumb naturally lands. */
+  /* opacity 0 still takes taps — on touch it must be visible, not hover-revealed. */
   @media (hover: none) {
     .cw-remove {
       opacity: 0.85;

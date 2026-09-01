@@ -35,20 +35,14 @@ func ProcessAll(lib *library.Library) {
 	StatusReset()
 	defer StatusFinish()
 
-	// Clean is a tree-mutating pass (rename/move/flatten). Run alone before
-	// fan-out so the concurrent phases below walk a settled tree. Cheap:
-	// metadata-only, seconds not minutes. Every phase gates on IsBusy, so
-	// clean itself is safe with respect to in-flight aria2 downloads.
+	// Tree-mutating (rename/move/flatten): run alone so the concurrent phases
+	// below walk a settled tree.
 	PhaseStart("clean")
 	library.CleanAll(lib.Roots)
 	PhaseEnd("clean")
 
-	// Convert, scan+repair, thumbs, sprites, and whisper all fan out
-	// concurrently. Each has its own worker pool and each skips busy files
-	// (IsBusy = torrent-owned, sidecar-present, or freshly-written), so the
-	// stages don't step on each other. toMP4 also dispatches downstream work
-	// (sprite/thumb/whisper) per-file as each conversion completes — so a
-	// file can gain its thumbnail while the next file is still transcoding.
+	// Fan-out is safe because every stage owns its pool and gates on IsBusy
+	// (torrent-owned, sidecar-present, or freshly-written).
 	var wg sync.WaitGroup
 	wg.Add(6)
 	go func() {
@@ -213,20 +207,10 @@ func toMP4(srcPath, root string) error {
 	mp4Path := filepath.Join(dir, cleanedBase+".mp4")
 	name := srcName
 
-	// Both a source and a same-basename .mp4 exist. Historically we assumed
-	// the .mp4 was a partial-write from a previous killed run and deleted it
-	// to restart convert — but that destroys a good .mp4 whenever the prior
-	// run finished the convert but was killed before removing the source
-	// (data-loss root cause of the Modern Family Joy corruption, 2026-07-14).
-	// Probe the .mp4 first: if it's readable, the previous convert really did
-	// finish, so drop the source and be done. Only when the .mp4 is itself
-	// unreadable is it safe to blow away and re-convert.
-	// A fresh-mtime output (.mp4 or its .tmp) means another encoder — possibly
-	// an ffmpeg orphaned by a server restart — is writing it RIGHT NOW.
-	// Probing it reads "broken" (no moov yet) and the old delete-and-restart
-	// path would stomp the live encode: the orphan keeps writing an unlinked
-	// inode and the finished file is silently lost (Bleach 001–010, 2026-07-29).
-	// Skip and let a later pass handle it once it's quiet.
+	// Never blow away an existing .mp4 to restart: a fresh mtime on it or its
+	// .tmp means another encoder (possibly one orphaned by a restart) is still
+	// writing, and a probe reads "broken" until moov lands — deleting loses the
+	// finished file. Probe first; only a quiet, unreadable .mp4 is safe to redo.
 	if fresh(mp4Path) || fresh(mp4Path+".tmp") {
 		log.Printf("[convert] %s: output being written by another encoder, skipping", name)
 		return nil
@@ -266,21 +250,13 @@ func toMP4(srcPath, root string) error {
 	library.PipelineForget(srcPath) // source is gone; ledger key is now mp4Path
 	library.PipelineMark(mp4Path, "convert", library.StepDone)
 
-	// remux() now stores AV1 on disk (copy if the source was already AV1, else
-	// a one-time libsvtav1 re-encode). The mark is honest: the bytes really are
-	// AV1, and HLS serves them via single-rung copy-passthrough (remux into
-	// fMP4, no live transcode) — jank-free. HLS endpoints key videos by their
-	// library-relative path; library.Hash hashes that exact string, so the
-	// marker must use the same key.
+	// The bytes really are AV1 now; without the mark HLS live-transcodes them.
 	if rel, err := filepath.Rel(root, mp4Path); err == nil {
 		if err := SetMediaCodec(rel, CodecAV1); err != nil {
 			log.Printf("[convert] codec mark failed for %s: %v", name, err)
 		}
 	}
 
-	// Downstream per-file dispatch: each stage has its own pool and skips if
-	// its output already exists, so fan-out is safe and non-blocking. The
-	// bulk backfill loops in ProcessAll still pick up anything convert misses.
 	GenerateSpriteAsync(mp4Path, library.Hash(filepath.Base(mp4Path)))
 	GenerateThumbAsync(mp4Path)
 	jobs.AutoWhisper(mp4Path)
@@ -332,11 +308,8 @@ func mp4AudioOK(codecs []string) bool {
 	return len(codecs) > 0
 }
 
-// audioDispositionArgs marks the English audio track as the container default
-// (every other audio track's default flag cleared), so direct-MP4 playback
-// picks English. Order follows `-map 0:a` (output audio i == source audio i).
-// No-op when there's a single audio track, or no English-tagged track — then
-// ffmpeg's "first track is default" is left untouched.
+// Marks the English audio track as the container default. Order follows
+// `-map 0:a` — output audio i == source audio i.
 func audioDispositionArgs(srcPath string) []string {
 	streams, err := library.Prober.Streams(context.Background(), srcPath)
 	if err != nil {
@@ -400,9 +373,8 @@ func remuxAudio(srcPath string) error {
 		return nil
 	}
 
-	// This remux maps only video+audio, so any embedded subtitle streams are
-	// dropped from the rebuilt MP4. Extract them to sidecars first or they're
-	// gone for good (toMP4 already does this; the audio-only path didn't).
+	// This remux maps only video+audio, so embedded subs are dropped — extract
+	// sidecars first or they're gone for good.
 	extractAllSubs(srcPath, strings.TrimSuffix(srcPath, filepath.Ext(srcPath)))
 
 	tmp := srcPath + ".audio.tmp"
@@ -443,10 +415,8 @@ func remuxAudio(srcPath string) error {
 	}
 	srcInfoMap.Delete(srcPath) // rewritten in place; the probe cache is now stale
 
-	// `-c:v copy` kept the source's AV1 video, so the file on disk really is
-	// AV1 — and without the mark MediaCodec answers h264, which makes HLS
-	// decode AV1 and re-encode H.264 per segment: exactly the live transcode
-	// the AV1 path exists to avoid. toMP4 stamps its output the same way.
+	// `-c:v copy` kept the source's AV1; without the mark MediaCodec answers
+	// h264 and HLS re-encodes every segment.
 	if vc == "av1" {
 		if err := SetMediaCodec(srcPath, CodecAV1); err != nil {
 			log.Printf("[convert] codec mark failed for %s: %v", name, err)
@@ -456,8 +426,7 @@ func remuxAudio(srcPath string) error {
 	return nil
 }
 
-// fresh reports whether path exists and was modified in the last 10 minutes —
-// the signature of a file some process is still writing.
+// fresh: modified in the last 10 minutes — something is still writing it.
 func fresh(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && time.Since(fi.ModTime()) < 10*time.Minute
@@ -473,17 +442,12 @@ func remux(src, dst string, durationSec float64, name string) error {
 	vc, ac := codecs(src)
 	args := []string{"-i", src, "-map", "0:v:0", "-map", "0:a"}
 
-	// New library is stored AV1: copy if the source is already AV1, otherwise
-	// a one-time re-encode (libsvtav1; HW AV1 if ever available). This is the
-	// slow part of conversion but it's a background job and pays for itself —
-	// the stored AV1 then streams by copy-passthrough with no live transcode.
 	if vc == "av1" {
 		args = append(args, "-c:v", "copy")
 	} else {
-		// Preserve a 10-bit / HDR source as 10-bit AV1 rather than crushing it
-		// to 8-bit SDR (no zscale here for a correct tonemap anyway). Re-apply
-		// the source CICP so HDR metadata survives the re-encode on encoders
-		// that honor it (SVT-AV1 keeps the matrix; HW keeps all).
+		// Preserve a 10-bit/HDR source as 10-bit AV1 (no zscale here for a correct
+		// tonemap) and re-apply the source CICP so HDR survives on encoders that
+		// honor it.
 		si := getSrcInfo(src)
 		args = append(args, av1File(32, si.vBitDepth >= 10)...)
 		for flag, val := range map[string]string{

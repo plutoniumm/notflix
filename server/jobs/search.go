@@ -19,13 +19,11 @@ import (
 	"notflix/server/x/httpc"
 )
 
-// The Pirate Bay's JSON backend. q.php returns up to ~100 results sorted by
-// seeders; an empty result set comes back as a single sentinel row with
-// id "0" / name "No results returned".
+// TPB's JSON backend. An empty result set comes back as a single sentinel row
+// with id "0" / name "No results returned".
 const apibayURL = "https://apibay.org/q.php"
 
-// Trackers baked into magnets so newly-added torrents find peers fast
-// instead of relying on DHT bootstrap alone.
+// Baked into every magnet so new torrents find peers without waiting on DHT.
 var tpbTrackers = []string{
 	"udp://tracker.opentrackr.org:1337/announce",
 	"udp://open.stealth.si:80/announce",
@@ -103,11 +101,8 @@ func magnetFor(name, infoHash string) string {
 
 const searchTimeout = 10 * time.Second
 
-// searchFetch runs one provider request through httpc — enforced timeout,
-// status check, capped body — and hands back a reader over the finished
-// response, so the parsers stay io.Reader-shaped and nothing is left to
-// close. ctx is the caller's request context: a user who navigates away
-// cancels the fan-out instead of leaving four upstream fetches running.
+// ctx is the caller's request context: a user who navigates away cancels the
+// fan-out instead of leaving four upstream fetches running.
 func searchFetch(ctx context.Context, method, u string, body []byte) (io.Reader, error) {
 	var payload io.Reader
 	if body != nil {
@@ -169,7 +164,7 @@ func tpbSearch(ctx context.Context, q, cat string) ([]Torrent, error) {
 }
 
 // Dedupe by infohash keeping the higher-seeded entry; hashless entries pass
-// through only if they already carry a magnet. Sorted seeders-desc.
+// through only if they already carry a magnet.
 func mergeTorrents(lists ...[]Torrent) []Torrent {
 	out := []Torrent{}
 	seen := map[string]int{}

@@ -33,8 +33,7 @@
     which === "intro" ? "Skip intro" : nextish ? "Next episode" : "Skip credits",
   );
 
-  // Rendered always, hidden by `.out`, so it can leave with the same motion it
-  // arrived with. Every action is guarded — `which` is null most of the time.
+  // Always rendered, hidden by `.out`, so it leaves with the motion it arrived with.
   function act() {
     if (which === "intro") onSeek(intro![1]);
     else if (nextish) onNext();
@@ -56,8 +55,8 @@
 <style>
   .skip {
     position: fixed;
-    /* Offsets, not padding: this is pinned by right/bottom, so the inset has
-       to move the button rather than inflate it. env() is 0 without a notch. */
+    /* Offsets, not padding: pinned by right/bottom, so the inset must move the
+       button rather than inflate it. */
     right: calc(28px + env(safe-area-inset-right));
     bottom: calc(110px + var(--safe-b, env(safe-area-inset-bottom)));
     z-index: 12;

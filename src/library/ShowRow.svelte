@@ -31,8 +31,8 @@
     return s?.dir ? s : null;
   }
 
-  // Freshest signal wins: an explicit pill click this session, else the most
-  // recent of {continue-watching entry, last stored pick}, else season one.
+  // Freshest signal wins: a pill click this session, else the more recent of
+  // {continue-watching entry, stored pick}, else season one.
   const sel = $derived.by(() => {
     if (picked && seasons.some((s) => s.dir === picked)) return picked;
     let dir = "";
@@ -112,8 +112,6 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* One segmented control rather than a scatter of loose buttons: the group
-     carries the frame, each season is just a slot inside it. */
   .pills {
     margin-left: auto;
     padding: 3px;
@@ -155,9 +153,8 @@
     width: 220px;
   }
 
-  /* The season swap replaces the strip outright, so the new one is animated in
-     from its own starting state rather than by a keyframe that has to be
-     re-triggered. */
+  /* The swap replaces the strip outright, so it animates from @starting-style —
+     a keyframe would have to be re-triggered. */
   @starting-style {
     .cards {
       opacity: 0;

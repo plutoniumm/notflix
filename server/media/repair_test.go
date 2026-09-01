@@ -7,12 +7,8 @@ import (
 	"testing"
 )
 
-// TestRepairMidStreamCorruption confirms repairOne can recover an MP4 whose
-// container header is intact but whose media payload has scrambled bytes in
-// the middle (ffmpeg can probe it but decode emits errors). Copy-remux with
-// -err_detect ignore_err + regenerated PTS should rebuild it cleanly.
-// Truncation past the moov atom is a different class — unrecoverable without
-// untrunc — so we don't cover it here.
+// Covers scrambled payload with an intact header only: truncation past the
+// moov atom is a different class, unrecoverable without untrunc.
 func TestRepairMidStreamCorruption(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg not available")
@@ -33,9 +29,8 @@ func TestRepairMidStreamCorruption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read src: %v", err)
 	}
-	// Scramble ~200 bytes in the payload region, leaving the header intact.
-	// Matroska keeps the segment header near the top; the middle is cluster
-	// data ffmpeg tolerates via ignore_err.
+	// Matroska keeps its header near the top; the middle is cluster data that
+	// ignore_err tolerates.
 	mid := len(data) / 2
 	for i := 0; i < 200 && mid+i < len(data); i++ {
 		data[mid+i] ^= 0xFF
@@ -44,9 +39,7 @@ func TestRepairMidStreamCorruption(t *testing.T) {
 		t.Fatalf("write broken: %v", err)
 	}
 
-	// Sanity: the broken file should still be readable enough that repair
-	// can even try. If it fails to probe entirely, we're testing the wrong
-	// corruption class (see comment above).
+	// If it no longer probes at all, this is the unrecoverable class instead.
 	if !verifyOutput(broken) {
 		t.Skip("broken variant is unrecoverable class — needs untrunc, not ffmpeg")
 	}

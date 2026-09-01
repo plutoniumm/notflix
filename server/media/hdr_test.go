@@ -12,8 +12,8 @@ import (
 	"notflix/server/library"
 )
 
-// make10bitHDR_AV1 builds a 10-bit AV1 clip tagged BT.2020/PQ (HDR), leading
-// keyframe — the copy-eligible HDR case. Skips without libsvtav1.
+// 10-bit AV1 tagged BT.2020/PQ with a leading keyframe — the copy-eligible
+// HDR case.
 func make10bitHDR_AV1(t *testing.T, root, name string) string {
 	t.Helper()
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -82,8 +82,7 @@ func TestHLSMaster_HDR_AV1_AdvertisesTenBit(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, body)
 	}
-	// Copy-passthrough kept the 10-bit stream → CODECS must say .10, not .08
-	// (a .08 mislabel makes some players reject the HDR stream).
+	// A .08 mislabel makes some players reject the HDR stream.
 	if !strings.Contains(body, "av01.") || !strings.Contains(body, "M.10") {
 		t.Errorf("HDR AV1 master must advertise a 10-bit av01 codec: %s", body)
 	}
@@ -92,9 +91,6 @@ func TestHLSMaster_HDR_AV1_AdvertisesTenBit(t *testing.T) {
 	}
 }
 
-// TestE2E_ConvertPreservesHDR: a 10-bit HDR source through the real
-// conversion stays 10-bit AV1 with its BT.2020/PQ metadata intact (not
-// crushed to 8-bit SDR).
 func TestE2E_ConvertPreservesHDR(t *testing.T) {
 	if testing.Short() {
 		t.Skip("ffmpeg-driven; -short")
@@ -108,8 +104,7 @@ func TestE2E_ConvertPreservesHDR(t *testing.T) {
 	chdirTemp(t)
 	root := filepath.Join(t.TempDir(), "lib")
 
-	// HDR source in a non-mp4 container so convert.go re-encodes it (mkv,
-	// 10-bit hevc-ish via libx265 if present, else 10-bit AV1 in mkv).
+	// Non-mp4 container so convert.go actually re-encodes it.
 	src := filepath.Join(root, "movie.mkv")
 	if err := os.MkdirAll(root, 0755); err != nil {
 		t.Fatal(err)
@@ -140,10 +135,8 @@ func TestE2E_ConvertPreservesHDR(t *testing.T) {
 	if !strings.Contains(got, "av1") {
 		t.Errorf("converted codec not av1: %q", got)
 	}
-	// The substantive HDR guarantee: NOT crushed to 8-bit SDR. 10-bit depth
-	// and the BT.2020 matrix survive end-to-end. (This libsvtav1 build drops
-	// the PQ transfer/primaries tags regardless of explicit args — an encoder
-	// limitation, not ours; the bits themselves stay 10-bit wide-gamut.)
+	// libsvtav1 drops the PQ transfer/primaries tags whatever the args, so only
+	// the depth and the bt2020 matrix are assertable.
 	if !strings.Contains(got, "yuv420p10le") {
 		t.Errorf("HDR source must stay 10-bit, got %q (crushed to 8-bit)", got)
 	}

@@ -7,12 +7,9 @@ import (
 	"time"
 )
 
-// IsBusy gates every background pass: a partial download (aria2 .aria2 control
-// file) or an in-flight conversion (.tmp / .audio.tmp sibling) probes as
-// unreadable but is NOT corrupt — it must be skipped, then re-scans clean once
-// finished. User intent (2026-05-21): exclude converting + downloading.
-// Freshly-written files (mtime <30s) are also treated as busy — bumped mtimes
-// backward here so the sidecar semantics stay testable in isolation.
+// A partial download or in-flight conversion probes as unreadable but is NOT
+// corrupt. Mtimes are aged past the 30s fresh-file window to isolate the
+// sidecar rules from it.
 func TestIsBusySidecars(t *testing.T) {
 	dir := t.TempDir()
 	mk := func(name string) string {

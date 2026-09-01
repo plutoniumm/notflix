@@ -1,26 +1,10 @@
-/* ════════════════════════════════════════════════════════════════════════
-   Notflix design system — "the room goes dark".
-   A personal cinema: content forward, chrome recedes, artwork colour bleeds
-   into the surface around it. Boldness is spent on motion and light; the
-   surfaces themselves stay quiet.
+/* Token names are load-bearing across src/**: values may change, names may not. */
 
-   Token names are load-bearing across src/** — values may change, names may
-   not. Everything below is either a token, a contract other components code
-   against (.ambient / view-transition names / container names), or a shared
-   component class.
-   ════════════════════════════════════════════════════════════════════════ */
+/* A custom property is only animatable once @property-registered with a
+   syntax; unregistered, it is a raw token string and jumps. */
 
-/* ── registered properties ────────────────────────────────────────────────
-   A custom property can only be transitioned or animated once it is
-   registered with a syntax — an unregistered one is a raw token string and
-   jumps. Everything the app animates through a variable lives here. */
-
-/* Artwork ambient pair. Set inline per element by the components that know
-   the artwork (extracted from the thumbnail, or derived from the item key):
-     style="--art-1: oklch(62% .17 28); --art-2: oklch(48% .12 300)"
-   Defaults are the neutral house violet, so an element that never gets a
-   colour still reads as deliberate rather than broken. `inherits: true` so a
-   row can tint every card inside it with one declaration. */
+/* Artwork pair, set inline per element; inherits: true so one declaration on a
+   row tints every card inside it. */
 @property --art-1 {
   syntax: "<color>";
   inherits: true;
@@ -33,16 +17,14 @@
   initial-value: oklch(44% 0.06 272);
 }
 
-/* 0..1 light intensity. Inherited, because a pseudo-element does NOT pick up
-   a non-inherited property from the element that originates it — .ambient's
-   wash lives in ::before and would never see the hover value otherwise. */
+/* inherits: true — a pseudo-element does NOT pick up a non-inherited property
+   from its originator, and .ambient's wash lives in ::before. */
 @property --glow {
   syntax: "<number>";
   inherits: true;
   initial-value: 0;
 }
 
-/* 0..1 house-lights level for the whole page. Drops when the player opens. */
 @property --room {
   syntax: "<number>";
   inherits: true;
@@ -55,7 +37,7 @@
   initial-value: 0deg;
 }
 
-/* Stagger index, set inline as style="--i: {idx}" on list items. */
+/* Set inline as style="--i: {idx}" on list items. */
 @property --i {
   syntax: "<number>";
   inherits: true;
@@ -63,10 +45,6 @@
 }
 
 :root {
-  /* Neutrals in OKLCH: one hue (300, the house violet), evenly spaced
-     lightness, chroma rising with lightness on the backgrounds so the deep
-     end reads as ink rather than plastic. Perceptual spacing is why the ramp
-     is in OKLCH — equal L steps look equal, which hex ramps never do. */
   --tx-1: oklch(49% 0.021 300);
   --tx-2: oklch(60% 0.019 300);
   --tx-3: oklch(73% 0.015 300);
@@ -79,9 +57,7 @@
   --bg-4: oklch(25% 0.026 300);
   --bg-5: oklch(30% 0.032 300);
 
-  /* Glass and interaction states are mixed, not hand-picked, so retinting the
-     app is one edit. oklab keeps the mix perceptually neutral — sRGB mixing
-     drifts muddy through the midpoint. */
+  /* Mix in oklab — sRGB mixing drifts muddy through the midpoint. */
   --glass: color-mix(in oklab, var(--tx-5) 4%, transparent);
   --glass-2: color-mix(in oklab, var(--tx-5) 8%, transparent);
   --glass-bd: color-mix(in oklab, var(--tx-5) 9%, transparent);
@@ -89,8 +65,7 @@
   --active: color-mix(in oklab, var(--tx-5) 14%, transparent);
   --muted: color-mix(in oklab, var(--tx-1) 55%, transparent);
 
-  /* Accents. Chroma sits at the sRGB edge on purpose: on a P3 display the
-     browser resolves it wider than #ff4d6d ever could. */
+  /* Chroma sits at the sRGB edge on purpose — a P3 display resolves it wider. */
   --red: oklch(68% 0.212 15);
   --red-2: oklch(73% 0.178 42);
   --red-soft: color-mix(in oklab, var(--red) 16%, transparent);
@@ -109,7 +84,6 @@
   --sh-2: 0 4px 10px -2px oklch(0% 0 0 / 0.5), 0 2px 4px -2px oklch(0% 0 0 / 0.3);
   --sh-3: 0 12px 30px -8px oklch(0% 0 0 / 0.62), 0 4px 10px -4px oklch(0% 0 0 / 0.4);
   --sh-4: 0 24px 60px -12px oklch(0% 0 0 / 0.72), 0 8px 20px -6px oklch(0% 0 0 / 0.5);
-  /* Light the element casts in its own artwork colour. */
   --sh-art: 0 20px 50px -20px color-mix(in oklab, var(--art-1) 70%, transparent),
     0 8px 22px -12px color-mix(in oklab, var(--art-2) 50%, transparent);
 
@@ -117,9 +91,8 @@
   --ease-snap: cubic-bezier(0.2, 0.9, 0.3, 1.1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* One motion scale for the whole app. Pull durations from here, never a
-     literal — the reduced-motion block at the bottom collapses these and any
-     transition built on them goes still for free. */
+  /* Pull durations from here, never a literal — the reduced-motion block at
+     the bottom of this file collapses these and everything built on them. */
   --motion-fast: 130ms;
   --motion: 240ms;
   --motion-slow: 480ms;
@@ -128,16 +101,14 @@
   --font-display: "Bricolage Grotesque", system-ui, -apple-system, sans-serif;
   --font-body: "Manrope", system-ui, -apple-system, sans-serif;
 
-  /* notch/home-indicator insets. Zero everywhere except a standalone PWA on
-     an inset display, and only when the viewport meta says viewport-fit=cover. */
+  /* Notch/home-indicator insets: zero unless the viewport meta says
+     viewport-fit=cover. */
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
 
   color-scheme: dark;
   scrollbar-color: var(--bg-5) transparent;
 }
-
-/* ── base ───────────────────────────────────────────────────────────────── */
 
 html,
 body {
@@ -186,9 +157,8 @@ a:focus-visible,
   border-radius: var(--r-sm);
 }
 
-/* Thin tinted bars everywhere, none inside card rails. scrollbar-width is the
-   standard property (Safari only got it in 18.2), so the -webkit- pseudos stay
-   as the fallback for older WebKit rather than as the primary mechanism. */
+/* The -webkit- scrollbar pseudos below stay as the fallback for WebKit before
+   18.2, which had no scrollbar-width. */
 * {
   scrollbar-width: thin;
 }
@@ -230,12 +200,7 @@ video {
   transition: filter var(--motion-fast) linear, opacity var(--motion-fast) linear;
 }
 
-/* ── the room: ambient light ─────────────────────────────────────────────
-   The page wash is built from the same --art-1/--art-2 pair the cards use, so
-   setting them on <html> tints the whole room to whatever the user is looking
-   at. --room dims the house lights; the :has() below drops it when the player
-   mounts. Both are registered, so both animate. */
-
+/* Setting --art-1/--art-2 on <html> tints the whole page wash. */
 body::after {
   content: "";
   position: fixed;
@@ -251,14 +216,12 @@ body::after {
     radial-gradient(ellipse 90% 60% at 50% 112%,
       color-mix(in oklab, var(--red) 9%, transparent) 0%, transparent 60%);
   animation: drift 34s ease-in-out infinite alternate;
-  /* Transitioning the registered colours on the pseudo — rather than on <html>
-     where they are set — keeps a colour change to one element's style
-     recalculation instead of the whole inherited subtree. */
+  /* Transition the colours here, not on <html> where they are set: keeps a
+     change to one element's recalc instead of the whole inherited subtree. */
   transition: opacity var(--motion-slow) var(--ease-out),
     --art-1 var(--motion-slow) linear, --art-2 var(--motion-slow) linear;
 }
 
-/* Grain, so the dark surfaces read as film stock rather than plastic. */
 body::before {
   content: "";
   position: fixed;
@@ -270,21 +233,14 @@ body::before {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
-/* The room goes dark when the player is up. Player.svelte's root is .page and
-   its stage is .video-wrap; either one is enough to know a film is running. */
+/* Couples to Player.svelte's .page / .video-wrap — renaming either loses the dim. */
 body:has(.video-wrap),
 body:has(.page) {
   --room: 0.28;
 }
 
-/* ── the ambient contract ────────────────────────────────────────────────
-   .ambient paints a soft wash of --art-1/--art-2 behind an element, mixed
-   toward --bg-1 so it can never overpower the artwork it came from. Put it on
-   a surface that does NOT clip (rows, panels, hero, header) — the wash lives
-   in ::before and an ancestor's overflow:hidden will cut it off.
-   For elements that do clip (a .media-card is overflow:hidden), use .bleed:
-   box-shadow escapes the element's own overflow, so the colour still spills. */
-
+/* .ambient's wash lives in ::before, so an ancestor's overflow:hidden cuts it
+   off — on a clipping element use .bleed, whose box-shadow escapes. */
 .ambient {
   position: relative;
   isolation: isolate;
@@ -308,8 +264,6 @@ body:has(.page) {
     --art-1 var(--motion-slow) linear, --art-2 var(--motion-slow) linear;
 }
 
-/* Registered --glow is what makes these transitions rather than jumps: an
-   unregistered custom property has no type to interpolate and snaps. */
 .bleed {
   --glow: 0;
   box-shadow:
@@ -335,8 +289,6 @@ body:has(.page) {
   }
 }
 
-/* Rotating conic rim for a "now playing" marker — again only animatable
-   because --spin is registered. */
 .ring {
   position: relative;
   isolation: isolate;
@@ -357,28 +309,11 @@ body:has(.page) {
   animation: spin-ring 4s linear infinite;
 }
 
-/* ── view transitions ────────────────────────────────────────────────────
-   App.svelte navigates for real (/ → ?video=… → /manage), so this is the
-   cross-document case: `navigation: auto` opts both documents in, and the
-   pseudo-elements below are the shared choreography.
-
-   NAME CONTRACT — every component must use exactly these, and a
-   view-transition-name has to be UNIQUE PER DOCUMENT. Two elements carrying
-   the same name abort the whole transition, so the art name goes on the ONE
-   card the user activated (set it in the click handler, or on the card that
-   matches the current ?video=), never on every card in a row.
-
-     art-<key>     the media card's .thumb on the library side and the
-                   player's .video-wrap on the player side. <key> is
-                   library.Hash(basename) — the same key /images/<key>.jpg
-                   uses — so the tile the user clicked becomes the stage.
-                   Also set `view-transition-class: art` on it to pick up the
-                   shared timing below.
-     page-header   the sticky top chrome (Header.svelte, Manage's header).
-     page-body     the scrolling content under it.
-
-   Everything else cross-fades as part of `root`. */
-
+/* NAME CONTRACT: a view-transition-name must be UNIQUE PER DOCUMENT — two
+   elements sharing one abort the whole transition, so art-<key> (key =
+   library.Hash(basename), plus view-transition-class: art) goes on the ONE
+   activated card, never every card in a row. page-header = sticky top chrome,
+   page-body = the scrolling content; everything else rides `root`. */
 @view-transition {
   navigation: auto;
 }
@@ -391,9 +326,8 @@ body:has(.page) {
   animation: var(--motion-page) var(--ease-out) both fade-in-fwd;
 }
 
-/* Persistent chrome: the box morphs over the full duration while the contents
-   swap quickly underneath, which reads as one header re-labelling itself
-   rather than two headers dissolving. */
+/* Box morphs slowly, contents swap fast — one header re-labelling itself
+   rather than two dissolving. */
 ::view-transition-group(page-header) {
   animation-duration: var(--motion-page);
   animation-timing-function: var(--ease-out);
@@ -417,10 +351,9 @@ body:has(.page) {
   animation: var(--motion-page) var(--ease-out) both rise-in;
 }
 
-/* `::view-transition-group(*)` and `view-transition-class` are Chrome 125+ /
-   Safari 18. A selector list dies whole if one item is unparseable, so each
-   wildcard form gets its own rule and its own @supports — the named rules
-   above must survive on engines that don't know them. */
+/* `::view-transition-group(*)` / `view-transition-class` are Chrome 125+ /
+   Safari 18, and one unparseable item kills a whole selector list — hence a
+   separate rule and @supports each, so the named rules above survive. */
 @supports selector(::view-transition-group(*)) {
   ::view-transition-group(*) {
     animation-timing-function: var(--ease-out);
@@ -435,10 +368,8 @@ body:has(.page) {
     z-index: 20;
   }
 
-  /* A thumbnail and a 16:9 stage are different shapes. Without these the
-     snapshots are stretched to each other's box and the morph visibly
-     squashes; object-fit: cover lets the group resize while the image keeps
-     its framing. */
+  /* Thumbnail and 16:9 stage are different shapes; without these the snapshots
+     stretch to each other's box and the morph visibly squashes. */
   ::view-transition-old(.art),
   ::view-transition-new(.art) {
     height: 100%;
@@ -446,8 +377,7 @@ body:has(.page) {
   }
 }
 
-/* Reduced motion keeps the transition — a cross-fade is not the problem —
-   but drops every translation, scale and blur, and shortens it. */
+/* Reduced motion keeps the cross-fade, drops every translate/scale/blur. */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(root),
   ::view-transition-new(root),
@@ -474,13 +404,8 @@ body:has(.page) {
   }
 }
 
-/* ── entry / exit ────────────────────────────────────────────────────────
-   @starting-style gives an element a "before it existed" style, so something
-   mounted by an {#if} — or revealed from display:none — can animate in
-   instead of popping. allow-discrete is what lets display and overlay take
-   part in the transition at all; without it the element vanishes on frame one
-   and the exit never plays. */
-
+/* @starting-style is the "before it existed" style; allow-discrete is what lets
+   display/overlay transition at all — without it the exit never plays. */
 .enter {
   transition: opacity var(--motion) var(--ease-out),
     translate var(--motion) var(--ease-out), filter var(--motion) var(--ease-out);
@@ -506,8 +431,6 @@ body:has(.page) {
   }
 }
 
-/* For panels that toggle display rather than mount: .reveal is the closed
-   state, .reveal.open the open one. */
 .reveal {
   display: none;
   opacity: 0;
@@ -593,30 +516,15 @@ textarea:disabled,
   filter: saturate(0.4);
 }
 
-/* ── containers ──────────────────────────────────────────────────────────
-   Cards size themselves from the box they land in, not the viewport, so one
-   card works in a dense grid and a wide rail.
-
-     rail   the horizontal strip or grid of cards (.cards, .scroll-row)
-     card   a single tile (.media-card)
-
-   A container's own width must come from its layout — a block in normal flow,
-   an explicit width, a grid track — never from its contents: inline-size
-   containment stops contents sizing the box, so a content-sized one collapses
-   to zero. That is why the rail is .scroll-row (a block) and not .cards:
-   .cards is a flex item sized by its content and containment would flatten it.
-   Cards qualify because Home gives them 220px / 144px / a grid track. */
-
+/* A container's width must come from its layout, never its contents —
+   inline-size containment collapses a content-sized box to zero. Hence the
+   rail is .scroll-row (a block) and not .cards (a content-sized flex item). */
 .scroll-row {
   container: rail / inline-size;
 }
 
-/* ── :has() ──────────────────────────────────────────────────────────────
-   Spotlight: hovering one card dims its neighbours, so a rail resolves to the
-   thing you are pointing at. This is a parent-state effect — the row has to
-   know one of its children is hovered — which is exactly what :has() adds.
-   Hover-capable pointers only; on touch there is no "other cards", every tap
-   is a commit. */
+/* Spotlight: hovering one card dims its neighbours. Fine pointers only — on
+   touch there are no "other cards", every tap is a commit. */
 @media (hover: hover) and (pointer: fine) {
   .cards:has(.media-card:hover) .media-card:not(:hover),
   .grid:has(.media-card:hover) .media-card:not(:hover) {
@@ -625,22 +533,19 @@ textarea:disabled,
     scale: 0.985;
   }
 
-  /* Promote only the rail being pointed at, instead of every card in the
-     library holding a compositor layer for its whole life. */
+  /* will-change stays inside the :has() — otherwise every card in the library
+     holds a compositor layer for its whole life. */
   .cards:has(.media-card:hover) .media-card,
   .grid:has(.media-card:hover) .media-card {
     will-change: transform, opacity, filter;
   }
 }
 
-/* A panel lifts while something inside it holds keyboard focus. */
 .surface:has(:focus-visible),
 .glass-header:has(:focus-visible) {
   border-color: var(--glass-2);
   box-shadow: 0 0 0 1px var(--red-soft);
 }
-
-/* ── components ─────────────────────────────────────────────────────────── */
 
 .btn-ghost {
   background: var(--glass);
@@ -732,8 +637,8 @@ textarea:disabled,
   background: color-mix(in oklab, var(--red) 20%, transparent);
 }
 
-/* An opacity-0 button still takes taps. On a touch pointer every control that
-   hover would have revealed must be visible and at least 44px. */
+/* An opacity-0 button still takes taps: on touch, every hover-revealed control
+   must be visible and at least 44px. */
 @media (hover: none) {
   .btn-icon {
     opacity: 1;
@@ -835,8 +740,7 @@ textarea:disabled,
   }
 }
 
-/* Chrome-only (129+); an input that grows with its content is a nicety, so it
-   degrades to a fixed box everywhere else with nothing to fix up. */
+/* field-sizing is Chrome 129+; elsewhere it degrades to a fixed box. */
 @supports (field-sizing: content) {
   .field-grow {
     field-sizing: content;
@@ -976,10 +880,8 @@ textarea:disabled,
   box-shadow: 0 0 8px color-mix(in oklab, var(--grn) 50%, transparent);
 }
 
-/* Gradient interpolation space is Chrome 111 / Safari 16.2 and, unlike
-   color-mix(), an unparsed `in oklab` drops the whole declaration — so the
-   sRGB gradients above stand on their own and this block only upgrades the
-   ones where the hue path is actually visible. */
+/* Unlike color-mix(), an unparsed `in oklab` drops the whole declaration — so
+   the sRGB gradients above must stand alone and this block only upgrades them. */
 @supports (background: linear-gradient(in oklab, red, blue)) {
   .btn-action {
     background: linear-gradient(135deg in oklab, var(--red) 0%, var(--red-2) 100%);
@@ -1001,8 +903,6 @@ textarea:disabled,
   box-shadow: none;
   animation: stripe-shift 0.8s linear infinite;
 }
-
-/* ── utilities ──────────────────────────────────────────────────────────── */
 
 .press {
   transition: transform var(--motion-fast) ease;
@@ -1142,8 +1042,6 @@ textarea:disabled,
     scroll-padding-left: 16px;
   }
 }
-
-/* ── keyframes ──────────────────────────────────────────────────────────── */
 
 @keyframes drift {
   0% {
@@ -1332,17 +1230,14 @@ textarea:disabled,
   }
 }
 
-/* ── motion preferences ─────────────────────────────────────────────────── */
-
 @media (prefers-reduced-motion: no-preference) {
   html {
     scroll-behavior: smooth;
   }
 }
 
-/* Last block in the file so it wins. Collapsing the motion tokens takes out
-   every transition built on them; the blanket rule catches the literals in
-   component styles and the looping ambient animations. */
+/* Must stay the last block in the file so it wins; the blanket rule catches
+   the literal durations in component styles. */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --motion-fast: 1ms;

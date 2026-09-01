@@ -9,45 +9,14 @@ import (
 	"time"
 )
 
-// tailscale.go resolves a client IP to a Tailscale identity (display name +
-// hostname) by shelling out to `tailscale status --json` and caching the
-// peer table. Used by the stats pipeline to attribute watch sessions.
-//
-// Nothing about a specific tailnet is encoded here — the peer table is
-// read at runtime, refreshed every 5 min in background + lazily on cache
-// miss, so adding or removing a device picks up without code change.
-//
-// Resolution rules, in order:
-//   1. Peer.UserID → User[UserID].DisplayName, *unless* that name is the
-//      synthetic "Tagged Devices" (tagged peers strip per-user attribution
-//      from the local daemon — `tailscale whois` confirms no owner info is
-//      exposed for tagged nodes).
-//   2. Peer.HostName — always unique per-device and human-edited
-//      ("Dragon's Mac Studio", "Surtr", etc.), so it's the right per-
-//      device identifier when the real user is hidden behind a tag.
-//
-// Tags are deliberately NOT in the ladder. A tag like "tag:walle" is a
-// permission category that several distinct devices can share; collapsing
-// devices into a tag name produces useless stats.
-//
-// Self (the server itself) resolves to its own owner via UserID — the local
-// daemon sees its login user even when the device is tagged.
-//
-// Guests in the tailnet (devices shared from other accounts) already come
-// through with their own UserID + DisplayName, so no special handling.
+// Resolves a client IP to a Tailscale identity via `tailscale status --json`,
+// cached. Ladder: Peer.UserID → User.DisplayName, unless that name is the
+// synthetic "Tagged Devices" (the daemon exposes no owner for tagged nodes),
+// else the device's own name. Tags are deliberately NOT in the ladder — one
+// tag is shared by many devices, which collapses them into useless stats.
 
-// Identity is the rich, render-ready identity for one tailnet IP. The
-// stats pipeline holds these as values — every field is JSON-safe so the
-// HTTP layer can pass one through to the frontend without re-massaging.
-//
-// User is the *grouping key* for the per-user heatmap. For peers with a
-// real owner it's the user's DisplayName; for tagged peers (where the
-// local Tailscale daemon strips the owner) it's the MagicDNS short name
-// so each tagged device stays its own group instead of all collapsing
-// under "Tagged Devices".
-//
-// Device is the per-device identifier (always MagicDNS short name when
-// available, falling back to HostName). Stable; safe to use as a map key.
+// User is the grouping key for per-user stats: the real DisplayName, or the
+// per-device short name for tagged peers whose owner the daemon strips.
 type Identity struct {
 	User   string   `json:"user"`   // grouping key (real user OR per-device for tagged)
 	Device string   `json:"device"` // MagicDNS short name (e.g. "dragon"); per-device
@@ -92,13 +61,8 @@ const (
 	tsExecMax      = 5 * time.Second
 )
 
-// TailscaleInit warms the cache once and then keeps it warm in the
-// background. Lazy refresh in TailscaleIdentity still covers the
-// add-device-and-immediately-play case (it triggers on cache miss), but
-// the periodic refresh means a removed device falls out within ~5 min
-// without anyone calling. Safe to call multiple times; safe to call when
-// the tailscale CLI is missing — refreshTailscale logs nothing on error
-// and leaves the previous map intact.
+// Warms the cache and keeps it warm, so a removed device falls out within
+// ~5min. Safe when the tailscale CLI is missing — the old map is kept.
 func TailscaleInit() {
 	refreshTailscale()
 	go func() {
@@ -110,21 +74,15 @@ func TailscaleInit() {
 	}()
 }
 
-// TailscaleIdentity resolves an IP to a rich Identity. Returns the zero
-// value (all fields empty) if the IP isn't in the tailnet peer table.
-// Cheap to call repeatedly; the peer table is cached and refresh is
-// throttled.
+// Zero value if the IP isn't in the tailnet peer table.
 func TailscaleIdentity(ip string) Identity {
 	if ip == "" {
 		return Identity{}
 	}
-	// Normalise: strip ::ffff: IPv4-in-IPv6 prefix and brackets.
 	ip = strings.TrimPrefix(ip, "::ffff:")
 	ip = strings.TrimPrefix(strings.TrimSuffix(ip, "]"), "[")
 
-	// Browsing from the server host itself comes in as 127.0.0.1 / ::1 —
-	// none of which appear in the peer table. Resolve those to Self so the
-	// owner's plays don't all bucket under "unknown".
+	// The server host browses in as 127.0.0.1/::1, which is in no peer table.
 	if ip == "127.0.0.1" || ip == "::1" || ip == "localhost" {
 		ensureTSCache()
 		tsMu.RLock()
@@ -159,10 +117,8 @@ func ensureTSCache() {
 }
 
 func refreshTailscale() {
-	// Claim the refresh slot, then drop the lock: TailscaleIdentity runs
-	// inline on the stats path of every watch-progress ping, so holding the
-	// write lock across the CLI call meant a restarting tailscaled stalled
-	// every ping and piled up gin workers. Bounded exec for the same reason.
+	// Claim the slot then drop the lock: this runs inline on every watch ping,
+	// so holding the write lock across the CLI call piled up gin workers.
 	tsMu.Lock()
 	if time.Since(tsLastLoad) < tsCacheTTL {
 		tsMu.Unlock()
@@ -207,15 +163,6 @@ func refreshTailscale() {
 	tsMu.Unlock()
 }
 
-// resolveIdentity builds the rich Identity for one peer.
-//
-// User (grouping key):
-//   - real DisplayName when the local daemon exposes a real owner
-//   - else the MagicDNS short name (per-device), so each tagged device
-//     stays its own group instead of all collapsing under one tag
-//
-// Device is always the MagicDNS short name (cleaner than the raw
-// HostName for display), falling back to HostName if DNSName is empty.
 func resolveIdentity(p *tsPeer, users map[string]tsUser) Identity {
 	device := magicShortName(p.DNSName)
 	if device == "" {
@@ -244,15 +191,12 @@ func resolveIdentity(p *tsPeer, users map[string]tsUser) Identity {
 			return out
 		}
 	}
-	// Tagged / unknown owner → use the device as the group key so distinct
-	// tagged peers stay distinct.
+	// Tagged / unknown owner → group by device so tagged peers stay distinct.
 	out.User = device
 	return out
 }
 
-// magicShortName extracts the leaf label from a Tailscale MagicDNS name
-// ("dragon.lamancha-koi.ts.net." → "dragon"). Returns "" if the input
-// doesn't look like a MagicDNS FQDN.
+// "dragon.lamancha-koi.ts.net." → "dragon".
 func magicShortName(dnsName string) string {
 	if dnsName == "" {
 		return ""
@@ -264,7 +208,7 @@ func magicShortName(dnsName string) string {
 	return name
 }
 
-// json's map key is the stringified int; sprintf-free formatter.
+// json map keys are stringified ints; sprintf-free.
 func itoa(n int64) string {
 	if n == 0 {
 		return "0"

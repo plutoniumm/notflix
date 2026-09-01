@@ -1,10 +1,6 @@
-// Ambilight tests. Run: node --test tools/ambient.test.ts
-//
-// The colour reduction is pure, so it can be driven with synthetic ImageData.
-// The sampler can't be pointed at a real decoder, but every rule that keeps it
-// off the CPU — stop on pause, stop on hidden, never start under reduced
-// motion, die silently on a tainted canvas — is scheduler behaviour, and that
-// runs unmodified here against a stub video.
+// The sampler can't be pointed at a real decoder, so the stop conditions that
+// keep it off the CPU (pause, hidden tab, reduced motion, tainted canvas) run
+// against a stub video instead.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -84,16 +80,13 @@ test("a two-hue frame yields two separated hues", () => {
   const [a, b] = analyze(splice(fill(90, [220, 30, 40]), fill(54, [40, 60, 230])));
   const [ha, hb] = [hueOf(css(a)), hueOf(css(b))];
 
-  // Larger field wins first slot; the second must be a genuinely different
-  // colour, not a near-duplicate of the first.
+  // Larger field wins the first slot; the second must not be a near-duplicate.
   assert.ok(near(ha, 0), `first should be red, got ${css(a)}`);
   assert.ok(near(hb, 225), `second should be blue, got ${css(b)}`);
   assert.ok(!near(ha, hb, 60), "the pair collapsed into one hue");
 });
 
 test("chroma beats area", () => {
-  // Mostly flat grey with a small vivid accent — the accent is the light in
-  // the room, the grey is the wall.
   const [a] = analyze(splice(fill(130, [96, 96, 100]), fill(14, [255, 120, 0])));
   assert.ok(near(hueOf(css(a)), 28), `expected orange, got ${css(a)}`);
 });
@@ -112,8 +105,6 @@ test("output is always a parseable CSS colour", () => {
   const [a, b] = analyze(fill(144, [12, 200, 210]));
   for (const c of [css(a), css(b)]) assert.match(c, /^rgb\(\d+ \d+ \d+\)$/);
 });
-
-// --- scheduler ---
 
 class FakeVideo {
   paused = true;
@@ -192,7 +183,6 @@ test("sampling stops while the document is hidden", async () => {
   await wait(40);
   assert.equal(seen.length, at, "kept sampling with the tab hidden");
 
-  // A play event arriving while hidden must not restart it either.
   v.emit("play");
   await wait(40);
   assert.equal(seen.length, at, "restarted while hidden");

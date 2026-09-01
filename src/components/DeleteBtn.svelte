@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Two-step delete. The parent owns the armed key (one at a time, auto-
-  // disarming) — a single tap on a phone must never take a file off the disk.
+  // Two-step: the parent owns the armed key. One tap must never delete a file.
   let {
     armed = false,
     title = "Delete",
@@ -22,8 +21,6 @@
 </button>
 
 <style>
-  /* Armed has to read as a different button, not a hover state — it is one tap
-     from an irreversible delete. */
   .armed {
     opacity: 1;
     color: #fff;

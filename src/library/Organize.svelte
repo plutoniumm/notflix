@@ -249,8 +249,6 @@
     }
   }
 
-  /* The plan is a proposal, so it reads as a set of destinations with their
-     contents indented under them, not as a flat list of checkboxes. */
   .plan {
     max-height: 46vh;
     overflow-y: auto;

@@ -5,13 +5,9 @@ import (
 	"math/bits"
 )
 
-// Audio fingerprinting for intro/outro detection, Haitsma-Kalker style:
-// low-rate mono PCM is cut into overlapping Hann-windowed frames, each frame's
-// spectrum is folded into 33 log-spaced band energies, and each frame becomes
-// 32 bits — the sign of the band-energy delta along both frequency and time.
-// The bits are robust to the lossy re-encodes episodes go through, so the
-// same opening theme in two episodes matches with low bit error even when the
-// files came from different rips.
+// Haitsma-Kalker audio fingerprint: low-rate mono PCM → Hann-windowed frames
+// → 33 log-spaced band energies → 32 bits per frame from the sign of the
+// band-energy delta. Robust to the lossy re-encodes episodes go through.
 
 const (
 	fpRate  = 5512
@@ -23,9 +19,7 @@ const (
 	fpGoodBits = 13   // ≤13/32 bits differ → frames considered matching (random ≈ 16)
 	fpGapSec   = 2.0  // tolerated dropout inside a run (dialogue over the theme)
 	fpDensity  = 0.55 // per-frame score pivot: good frames earn 1-this, bad ones lose this
-	fpStrong   = 0.75 // a span must score like ≥minSec of audio matching at this rate —
-	// otherwise a shorter-but-perfect stray match (one shared sentence) could
-	// pad itself past the minimum length with garbage frames
+	fpStrong   = 0.75 // a span must score like ≥minSec matching at this rate, so a short perfect match can't pad itself out
 )
 
 var (
@@ -58,8 +52,7 @@ var (
 	}()
 )
 
-// fft is an in-place iterative radix-2 Cooley-Tukey transform. len(re) must
-// be a power of two.
+// fft is in-place radix-2 Cooley-Tukey; len(re) must be a power of two.
 func fft(re, im []float64) {
 	n := len(re)
 	for i, j := 1, 0; i < n; i++ {
@@ -108,10 +101,8 @@ func bandEnergies(pcm []int16, offset int) []float64 {
 	return e
 }
 
-// Fingerprint converts PCM to one uint32 per frame hop. Frame t's bit b is
-// set when the (frequency, time) double-delta of band energy is positive —
-// the first frame has no predecessor, so frame i covers samples starting at
-// (i+1)*fpHop and its timestamp is fpTime(i).
+// Fingerprint returns one uint32 per frame hop. Frame i has no predecessor at
+// offset 0: it covers samples from (i+1)*fpHop, timestamped by fpTime(i).
 func Fingerprint(pcm []int16) []uint32 {
 	nFrames := (len(pcm) - fpWin) / fpHop
 	if nFrames < 2 {
@@ -138,12 +129,9 @@ func fpTime(frame int) float64 {
 	return float64(frame+1) * fpHop / fpRate
 }
 
-// densestSpan finds the maximum-score subarray of length ≥ minLen, where a
-// good frame scores 1-fpDensity and a bad one -fpDensity. Matching audio
-// (good rate well above fpDensity) accumulates score with length while
-// non-matching stretches bleed it, so the optimal bounds hug the real signal
-// instead of letting a strong core subsidize garbage tails — the failure
-// mode of a plain min-density-over-the-span criterion.
+// densestSpan maximizes score (good frame +1-fpDensity, bad -fpDensity) over
+// spans ≥ minLen — under a plain min-density criterion a strong core
+// subsidizes garbage tails.
 func densestSpan(good []bool, minLen int) (start, end int, score float64) {
 	n := len(good)
 	if n < minLen {
@@ -180,9 +168,7 @@ func densestSpan(good []bool, minLen int) (start, end int, score float64) {
 	return start, end, score
 }
 
-// bestRun scores the dense stretches of matching frames in `good`. The slice
-// is split into segments at dropouts longer than gap frames, and the best
-// span of any segment wins. Returns score 0 when nothing qualifies.
+// bestRun returns the best span across segments split at gap-length dropouts.
 func bestRun(good []bool, gap, minLen int) (start, end int, score float64) {
 	segStart, lastGood := -1, -1
 	flush := func(s, e int) {
@@ -210,11 +196,9 @@ func bestRun(good []bool, gap, minLen int) (start, end int, score float64) {
 	return
 }
 
-// matchFingerprints slides b against a over every alignment and returns the
-// best-scoring common audio run, as half-open frame bounds in a's timeline.
-// Comparing alignments by score (not run length) matters: an off-by-one-hop
-// alignment still matches loosely and can produce a longer-but-sloppier run
-// than the true alignment.
+// matchFingerprints slides b over a and returns the best-scoring common run in
+// a's timeline. Compare alignments by score, not run length: an off-by-one-hop
+// alignment matches loosely and yields a longer but sloppier run.
 func matchFingerprints(a, b []uint32, minSec float64) (start, end int, ok bool) {
 	minLen := int(minSec * fpFPS)
 	gap := int(fpGapSec * fpFPS)

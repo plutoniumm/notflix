@@ -1,9 +1,8 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
-  // Arrow chrome around a horizontally scrolling strip. The caller supplies the
-  // scrolling element itself (`.cards`) so each row keeps its own layout — a
-  // plain flex strip, Home's column-major grid, ShowRow's animated swap.
+  // The caller supplies the scrolling element itself — scroll() finds it as the
+  // arrow's sibling, so it must stay the only child between the two buttons.
   let { children }: { children: Snippet } = $props();
 
   function scroll(btn: HTMLElement, dir: number) {
@@ -35,8 +34,6 @@
 </div>
 
 <style>
-  /* The strip runs off both edges of the page rather than stopping at a hard
-     crop, so a row reads as continuous rather than as a boxed carousel. */
   .fade {
     top: 0;
     bottom: 0;

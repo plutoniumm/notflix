@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// The whole point of the package: a bad status is an error, never bytes the
-// caller can mistake for content (the "write the 404 page to disk" bug).
+// A bad status is an error, never bytes the caller can mistake for content
+// (the "wrote the 404 page to disk" bug).
 func TestStatusIsAnError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -37,8 +37,7 @@ func TestStatusIsAnError(t *testing.T) {
 	}
 }
 
-// A peer that accepts the connection and never answers is exactly the
-// Tailscale-asleep case; the call must come back on its own deadline.
+// A peer that accepts the connection and never answers = Tailscale asleep.
 func TestTimeoutIsEnforced(t *testing.T) {
 	block := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

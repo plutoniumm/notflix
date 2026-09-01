@@ -118,8 +118,6 @@
     padding: 8px 16px 8px 40px;
   }
 
-  /* The container extension is the file's identity here — a fixed-width
-     monospace slug keeps a long list scannable down one column. */
   .tag {
     width: 34px;
     padding: 2px 0;
@@ -153,8 +151,7 @@
     opacity: 0;
     transition: opacity var(--motion, 0.18s) var(--ease-out);
   }
-  /* An opacity-0 wrapper still takes taps — on touch these were an invisible
-     rename and an invisible delete sitting under the row. */
+  /* opacity 0 still takes taps — on touch these were invisible rename/delete. */
   @media (hover: none) {
     .actions {
       opacity: 1;

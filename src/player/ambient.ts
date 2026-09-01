@@ -1,11 +1,6 @@
-// Ambilight: sample the picture into a 16x9 offscreen canvas, reduce it to two
-// dominant colours and hand them back as CSS colours for --art-1 / --art-2.
-//
-// The whole point is that this must never compete with decode, so: a tiny
-// canvas (144 px total), a sample gate measured in hundreds of ms,
-// requestVideoFrameCallback where it exists (it does not fire while the video
-// is not presenting frames, so a paused or offscreen video costs nothing), and
-// a hard stop on pause / hidden / reduced-motion.
+// Ambilight: a 16x9 canvas sample reduced to two colours for --art-1/--art-2.
+// Must never compete with decode: rVFC idles while the video isn't presenting,
+// and the loop hard-stops on pause / hidden / reduced-motion.
 
 export type RGB = [number, number, number];
 
@@ -13,8 +8,7 @@ const W = 16;
 const H = 9;
 const BUCKETS = 12;
 const SAMPLE_MS = 260;
-// Per-sample step toward the target. Small enough that a cut between two very
-// different shots reads as a wash sliding over rather than a strobe.
+// Per-sample step; higher strobes on a cut instead of washing over.
 const SMOOTH = 0.3;
 const NEUTRAL: RGB = [34, 29, 44];
 
@@ -63,9 +57,7 @@ export function toRGB(h: number, s: number, l: number): RGB {
   ];
 }
 
-// Lift the sample into something that reads as light rather than mud, without
-// flattening it: saturation gets a push, lightness is only clamped. A dark
-// scene must stay dark or the room stops responding to the film.
+// Saturation pushed, lightness only clamped — a dark scene must stay dark.
 function punch([r, g, b]: RGB): RGB {
   const [h, s, l] = hsl(r, g, b);
 
@@ -80,9 +72,7 @@ export function css([r, g, b]: RGB): string {
   return `rgb(${r} ${g} ${b})`;
 }
 
-// Two dominant colours from raw RGBA. Hue-bucketed and weighted by chroma so a
-// small vivid highlight beats a large desaturated field — letterbox bars and
-// grey walls are most of most frames and would otherwise win every vote.
+// Chroma-weighted, or letterbox bars and grey walls win every vote.
 export function analyze(px: Uint8ClampedArray | number[]): [RGB, RGB] {
   const wt = new Float64Array(BUCKETS);
   const acc = new Float64Array(BUCKETS * 3);
@@ -131,8 +121,7 @@ export function analyze(px: Uint8ClampedArray | number[]): [RGB, RGB] {
     return [m, m];
   }
 
-  // Second colour has to sit at least 60 degrees away or the pair collapses
-  // into one wash with two names.
+  // Second colour needs 60 degrees of separation or the pair collapses into one wash.
   let second = -1;
   for (let k = 0; k < BUCKETS; k++) {
     if (wt[k] <= 0 || k === first) continue;
@@ -144,8 +133,7 @@ export function analyze(px: Uint8ClampedArray | number[]): [RGB, RGB] {
   const a = punch(at(first));
   if (second >= 0) return [a, punch(at(second))];
 
-  // Monochrome frame: derive the partner by rotating the same hue a little and
-  // dropping it, so the two lamps still differ enough to read as depth.
+  // Monochrome frame: rotate and darken the same hue so the two lamps differ.
   const [h, s, l] = hsl(a[0], a[1], a[2]);
 
   return [a, toRGB((h + 0.06) % 1, s * 0.8, Math.max(0.05, l * 0.62))];
@@ -285,9 +273,7 @@ export class Ambient {
       this.samples++;
       this.#sink(css(this.#cur[0]), css(this.#cur[1]));
     } catch {
-      // A tainted canvas throws on every read and never recovers, so stop for
-      // good instead of raising once per frame. The surround simply stays at
-      // whatever it last held.
+      // A tainted canvas throws on every read and never recovers — stop for good.
       this.#dead = true;
       this.#halt();
     }

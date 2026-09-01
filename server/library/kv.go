@@ -18,9 +18,8 @@ const kvPath = "./cache/kv.json"
 
 var kvMu sync.RWMutex
 
-// readLocked loads the store; the caller must already hold kvMu (either
-// mode). An absent file is an empty store, but a present-and-malformed one
-// is an error the caller must respect — see update.
+// readLocked requires the caller to hold kvMu. An absent file is an empty
+// store; a present-but-malformed one is an error the caller must respect.
 func readLocked() (map[string]any, error) {
 	m := map[string]any{}
 	if err := atom.LoadJSON(kvPath, &m); err != nil {
@@ -52,11 +51,9 @@ func kvRead() map[string]any {
 	return m
 }
 
-// update is the ONLY write path: it holds one exclusive lock across the
-// read, the mutation and the write. Reading under RLock and writing under a
-// separate Lock (the old shape) lost every concurrent set but the last —
-// the whole store is one JSON blob. A malformed store aborts the write
-// rather than replacing thousands of keys with the one being set.
+// update is the ONLY write path: one exclusive lock across read, mutate and
+// write. The store is one JSON blob, so RLock-read + separate Lock-write lost
+// every concurrent set but the last. A malformed store aborts the write.
 func update(fn func(map[string]any)) error {
 	kvMu.Lock()
 	defer kvMu.Unlock()
@@ -73,20 +70,16 @@ func update(fn func(map[string]any)) error {
 	return atom.SaveJSON(kvPath, store)
 }
 
-// KVGetValue is the in-process counterpart to KVGet. Returns nil if the key
-// is absent; caller decides what to do with the type.
 func KVGetValue(key string) any {
 	return kvRead()[key]
 }
 
-// KVSetValue is the in-process counterpart to KVSet.
 func KVSetValue(key string, value any) error {
 	return update(func(store map[string]any) { store[key] = value })
 }
 
-// DirRecency maps a library dir to the most-recent `watched:<param>.at`
-// timestamp (ms) seen for any video under it. Dirs with no watch history are
-// absent. Drives the LRU ordering of the Home video list.
+// DirRecency maps a library dir to the newest watched:<param>.at (ms) under
+// it; drives the LRU ordering of the Home list.
 func DirRecency() map[string]float64 {
 	store := kvRead()
 	out := make(map[string]float64)

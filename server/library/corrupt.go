@@ -13,10 +13,8 @@ import (
 var corruptMu sync.RWMutex
 var corruptSet = map[string]bool{}
 
-// IsTorrentBusy, when set, reports whether a path is currently claimed by
-// an aria2 torrent (active/waiting/stopped-not-yet-purged). Wired from
-// main.go against the maintained jobs torrent-paths cache. Nil in tests
-// and before jobs.Aria2Init has run — treated as "no torrent claim".
+// IsTorrentBusy reports whether aria2 currently claims a path. Wired from
+// main.go; nil in tests and before Aria2Init — treated as "no claim".
 var IsTorrentBusy func(path string) bool
 
 func IsCorrupt(absPath string) bool {
@@ -35,16 +33,8 @@ func CorruptPaths() []string {
 	return paths
 }
 
-// IsBusy reports whether a path should be exempt from library-side work
-// (convert, thumbs, sprite, corrupt-scan) right now. Reasons:
-//   - aria2 currently owns the file (via injected IsTorrentBusy callback)
-//   - a control-file sidecar is present (.aria2 download, .tmp/.audio.tmp
-//     conversion) — the file is mid-write
-//   - the file was modified in the last 30 seconds — probably still being
-//     written by aria2 or ffmpeg before its rename
-//
-// This is the single "hands off, come back later" gate for background work.
-// If you're wondering "should I skip this file?", ask IsBusy.
+// IsBusy is the single "hands off, come back later" gate for background work:
+// aria2 owns it, a .aria2/.tmp sidecar exists, or it was written in the last 30s.
 func IsBusy(path string) bool {
 	if IsTorrentBusy != nil && IsTorrentBusy(path) {
 		return true
@@ -60,9 +50,8 @@ func IsBusy(path string) bool {
 	return false
 }
 
-// ScanCorrupt probes every video file in lib.Roots; any path that ffprobe
-// can't open (truncated download, missing moov atom, etc.) is added to the
-// in-memory set. Replaces the previous set atomically when done.
+// ScanCorrupt flags every video ffprobe can't open (truncated download,
+// missing moov atom) and replaces the previous set atomically.
 func ScanCorrupt(lib *Library) {
 	next := map[string]bool{}
 	var nextMu sync.Mutex
@@ -82,8 +71,7 @@ func ScanCorrupt(lib *Library) {
 			if ext != ".mp4" && ext != ".mkv" && ext != ".mov" {
 				return nil
 			}
-			// Skip files that are still downloading or mid-conversion — they
-			// fail to probe but aren't corrupt; they re-scan clean once done.
+			// Mid-write files fail to probe but aren't corrupt; they re-scan clean.
 			if IsBusy(path) {
 				return nil
 			}

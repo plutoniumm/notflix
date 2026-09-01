@@ -46,9 +46,7 @@ func Thumbnail(c *gin.Context, lib *library.Library) {
 	c.File(path)
 }
 
-// SpriteManifestHandler returns the trickplay manifest for a key
-// (library.Hash of the file's basename). 404 → no sprite yet; the frontend
-// silently degrades scrub-hover to a time-only tooltip.
+// key = library.Hash(basename). 404 → no sprite yet; the player degrades.
 func SpriteManifestHandler(c *gin.Context) {
 	key := c.Param("key")
 	_, mfst := spritePaths(key)

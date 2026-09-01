@@ -1,8 +1,3 @@
-// Heuristic torrent-name parser — no LLM. Scene/P2P names are dot/underscore
-// separated with a fairly fixed token vocabulary, so regex extraction is
-// reliable. parseName splits the muddled name into a clean title plus the
-// structured fields the Explore UI sorts and filters on.
-
 export type Parsed = {
   title: string;
   year?: number;
@@ -10,27 +5,24 @@ export type Parsed = {
   episode?: number;
   kind?: string; // "OVA" | "ONA" | "Batch" | "Specials"
   pack?: boolean; // full season / complete series / batch / episode range
-  res?: string; // "1080p"
+  res?: string;
   resRank: number; // sortable: 2160>1080>720>480>0
-  source?: string; // "BluRay"
-  codec?: string; // "x265"
-  audio?: string; // "DDP5.1"
-  hdr?: string; // "HDR10" | "DV"
-  bit?: string; // "10bit"
+  source?: string;
+  codec?: string;
+  audio?: string;
+  hdr?: string;
+  bit?: string;
   langs: string[];
   group?: string;
 };
 
 const RES = /\b(4320p|2160p|1440p|1080p|720p|576p|480p|360p)\b|\b(4k|uhd)\b/i;
-// (?!\d) instead of \b so a "v2"/title char right after the number doesn't
-// veto the match (e.g. "S01E10v2"); \d{1,3} still caps the episode digits.
+// (?!\d) not \b, so "S01E10v2" still matches; \d{1,3} caps the episode digits.
 const SE = /\bS(\d{1,2})[ ._]?E(\d{1,3})(?!\d)/i;
 const SXE = /\b(\d{1,2})x(\d{2,3})(?!\d)/i;
-// \b alone sits happily between an apostrophe and the s, so a possessive
-// before a number ("Ocean's 11") read as season 11 and folded unrelated films
-// into one fake show row. Reject a quote — real markers never follow one.
+// \b sits happily between an apostrophe and the s, so "Ocean's 11" read as
+// season 11 and faked a show row. Real markers never follow a quote.
 const SEASON = /(?<!['‘’ʼ])\bS(?:eason)?[ ._-]?(\d{1,2})\b/i;
-// "4th Season", "2nd-season".
 const SEASON_ORD = /\b(\d{1,2})(?:st|nd|rd|th)[ ._-]?season\b/i;
 const EP = /\b(?:Episode|Ep|E)[ ._-]?(\d{1,3})(?!\d)/i;
 const YEAR = /\b(19\d{2}|20\d{2})\b/g;
@@ -42,23 +34,18 @@ const AUDIO =
 const HDR = /\b(hdr10\+?|hdr|dolby[._ ]?vision|dovi|\bdv\b|sdr)\b/i;
 const BIT = /\b(10[._ ]?bit|8[._ ]?bit)\b/i;
 const PACK = /\b(complete|collection|batch|season[._ ]?\d{1,2}|s\d{1,2}[._ ]?(?:complete|full)|all[._ ]?seasons)\b/i;
-// Episode number stuck to an anime kind token: "OVA 6", "OVA-09", "ONA 3".
 const KIND_EP = /\b(?:ova|ona|oad)\b[ ._-]*(\d{1,3})\b/i;
 const GROUP = /-\s*([A-Za-z0-9]{2,})\s*$/;
 const SITE = /^\s*(?:\[[^\]]*\]|\([^)]*\)|www\.[^\s]+|[A-Za-z0-9-]+\.(?:com|net|org|me|cc|info|tv)|metadata)\s*[-_. ]*/i;
 const EXT = /\.(mp4|mkv|avi|mov|webm|flv|wmv|m4v|mpe?g|m2ts|ts|3gp|ogv|vob|rmvb|divx)$/i;
 const MAX_LEN = 600; // cap input so no pathological string can stall a regex
-// Leading fansub group: [SubsPlease] / [Erai-raws] / [sage] — kept as the
-// release group when no trailing -GROUP is present.
+// Leading fansub group — used when no trailing -GROUP is present.
 const LEADGRP = /^\s*\[([A-Za-z][A-Za-z0-9._-]{1,18})\]/;
-// Anime-specific. OVA/ONA/OAD/Specials/Batch are never standalone tokens in
-// real film titles, so they're safe to treat as structured markers.
+// Safe as markers: these are never standalone tokens in real film titles.
 const KIND = /\b(ova|ona|oad|specials|batch)\b/i;
-// Episode-range batch: "1-26", "(01-10)", "S01-S09". The look-arounds reject
-// a longer hyphen-number chain so a title like "9-1-1" is not read as a range.
+// The look-arounds reject a longer hyphen-number chain, so "9-1-1" is no range.
 const RANGE = /(?<![\d-])S?(\d{1,3})\s*[-–]\s*S?(\d{1,3})\b(?![-\d])/;
-// Bare anime episode: "Show - 10", "Show - 1095" (absolute numbering). The
-// number must not look like a year and must not be a resolution.
+// Bare anime episode ("Show - 1095"): callers must veto years and resolutions.
 const DASH_EP = /\s[-–]\s*(\d{1,4})(?=\s|$|[\[(._-])/;
 
 const LANGS: [RegExp, string][] = [
@@ -127,8 +114,7 @@ function norm(t: string): string {
     .trim();
 }
 
-// Keep token shape readable: DDP5.1, DTS-HD, x265 — only normalise the
-// scene separators, never collapse the meaningful dots/dashes.
+// Only normalise scene separators — the dots/dashes in DDP5.1, DTS-HD are meaningful.
 function tidy(t?: string): string | undefined {
   if (!t) return undefined;
   return t.replace(/_/g, ".").replace(/\s{2,}/g, " ").trim();
@@ -142,9 +128,8 @@ function bare(title: string): Parsed {
   return { title, resRank: 0, langs: [] };
 }
 
-// Public entry point. Nothing a torrent tracker (or a corrupt filename) can
-// send must ever throw — a parse failure degrades to "raw name as title",
-// never an exception that blanks the results list.
+// Must never throw: a parse failure degrades to "raw name as title" rather
+// than blanking the results list.
 export function parseName(input: unknown): Parsed {
   let raw = typeof input === "string" ? input : input == null ? "" : String(input);
   raw = raw.replace(/[\x00-\x1f\x7f]+/g, " ").trim();
@@ -162,8 +147,7 @@ export function parseName(input: unknown): Parsed {
 function parseImpl(input: string): Parsed {
   const raw = input.replace(EXT, "");
   const leadGrp = raw.match(LEADGRP)?.[1];
-  // Underscore is a \w char, so "_OVA_" defeats every \b…\b marker — anime
-  // fansub names are underscore-separated, so fold _ and + to spaces up front.
+  // Underscore is a \w char, so "_OVA_" defeats every \b…\b marker.
   const name = raw.replace(SITE, "").replace(/[+_]/g, " ").trim();
 
   const res = (name.match(RES)?.[0] ?? "")
@@ -183,9 +167,8 @@ function parseImpl(input: string): Parsed {
 
   const kind = name.match(KIND)?.[1]?.toUpperCase();
 
-  // A real range ("01-26", "S01-S09") is a batch and wins over the bare
-  // " - NN" reading (its first number would otherwise look like an episode).
-  // But a known season + " - NN" ("S1 - 02") is a single episode, not a pack.
+  // A real range is a batch and beats the bare " - NN" episode reading; but a
+  // known season + " - NN" ("S1 - 02") is a single episode, not a pack.
   const rg = name.match(RANGE);
   const isRange = !!rg && !isYearish(+rg[1]) && !isYearish(+rg[2]);
   let rangePack = false;
@@ -215,18 +198,15 @@ function parseImpl(input: string): Parsed {
     if (re.test(name) && !langs.includes(label)) langs.push(label);
   }
 
-  // Title = everything before the earliest structured marker. Anime alt
-  // titles come after a slash ("Attack on Titan / Shingeki…") — keep the
-  // first. Strip closed brackets, then any bracket left dangling by the cut.
+  // Title = everything before the earliest marker. Alt titles come after a
+  // slash — keep the first, then drop any bracket left dangling by the cut.
   const cut = firstIdx(name, SE, SXE, SEASON_ORD, SEASON, EP, KIND, RANGE, DASH_EP, RES, SOURCE, CODEC);
   let head = (cut === -1 ? name : name.slice(0, cut))
     .split("/")[0]
     .replace(BRACKETS, " ")
     .replace(DANGLE, " ");
 
-  // For movies the title ends right before the release year — take the LAST
-  // year in the head (so "Blade Runner 2049 2017" keeps "2049" in the title),
-  // and drop it plus any trailing junk ("… 2024 MULTi").
+  // Take the LAST year in the head, so "Blade Runner 2049 2017" keeps "2049".
   let year: number | undefined;
   const ym = [...head.matchAll(YEAR)].filter((m) => isYearish(+m[0]));
   if (ym.length) {
@@ -236,8 +216,7 @@ function parseImpl(input: string): Parsed {
   }
   head = norm(head);
 
-  // Marker-prefixed files ("S01E04 Don't Stop the Dance.mp4") leave an empty
-  // head — fall back to the episode title that sits after the markers.
+  // Marker-prefixed files leave an empty head — use the title after the markers.
   if (!head) {
     const tail = name
       .replace(SE, " ")
@@ -253,8 +232,8 @@ function parseImpl(input: string): Parsed {
     head = norm((c2 === -1 ? tail : tail.slice(0, c2)).split("/")[0].replace(BRACKETS, " "));
   }
 
-  // Series rarely carry the year before the SxxExx marker — pull it from
-  // anywhere in the name for display, without touching the title.
+  // Series rarely carry the year before SxxExx — take it from anywhere, for
+  // display only, without touching the title.
   if (year === undefined) {
     const any = [...name.matchAll(YEAR)].filter((m) => isYearish(+m[0]));
     if (any.length) year = +any[any.length - 1][0];
@@ -279,9 +258,7 @@ function parseImpl(input: string): Parsed {
   };
 }
 
-// Season identity for a library DIRECTORY name: parsed title plus either a
-// season number or an episode-range batch ("Bleach 112-139"). Range keeps
-// parseImpl's isYearish veto so "City Hunter (1987-88)" never reads as one.
+// Range keeps parseImpl's isYearish veto so "City Hunter (1987-88)" is no range.
 export function parseDirSeason(dir: string): {
   title: string;
   season?: number;

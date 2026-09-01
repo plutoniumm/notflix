@@ -23,8 +23,7 @@ window.addEventListener("error", (e) => {
 });
 
 if ("serviceWorker" in navigator) {
-  // Only a reload the user asked for. A new worker taking control used to
-  // reload the page on its own, which yanks the video out mid-playback.
+  // Reload only when asked: a worker taking control on its own yanks the video out mid-playback.
   let swapping = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (swapping) window.location.reload();

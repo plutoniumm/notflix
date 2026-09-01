@@ -28,7 +28,6 @@ func TestBestRun(t *testing.T) {
 		t.Error("run shorter than minLen should not match")
 	}
 
-	// A run that is mostly gaps must fail the density check even if bridged.
 	sparse := make([]bool, 100)
 	for i := 0; i < 100; i += 4 {
 		sparse[i] = true
@@ -51,8 +50,8 @@ func TestMatchFingerprints(t *testing.T) {
 		b[i] = rng.Uint32()
 	}
 
-	// Plant a shared ~20s segment at a[10s:30s] == b[5s:25s], with 3 bits of
-	// per-frame noise to mimic codec differences.
+	// Shared 20s segment at a[10s:30s] == b[5s:25s], with 3 bits of per-frame
+	// noise to mimic codec differences.
 	planted := int(20 * fpFPS)
 	aOff, bOff := int(10*fpFPS), int(5*fpFPS)
 	for i := 0; i < planted; i++ {
@@ -72,7 +71,6 @@ func TestMatchFingerprints(t *testing.T) {
 		t.Fatalf("got frames [%d,%d), want ≈[%d,%d)", s, e, aOff, aOff+planted)
 	}
 
-	// The same segment shortened below the 15s floor must be rejected.
 	a2 := make([]uint32, nA)
 	b2 := make([]uint32, nB)
 	for i := range a2 {
@@ -89,9 +87,8 @@ func TestMatchFingerprints(t *testing.T) {
 	}
 }
 
-// makeEpisode renders an audio-only mp4 from concatenated lavfi segments.
-// Each segment is a complete lavfi source including its d= duration; shared
-// segments across files produce the matchable intro/outro audio.
+// Each segment is a complete lavfi source including its d= duration; segments
+// shared across files are what makes the intro/outro matchable.
 func makeEpisode(t *testing.T, path string, segments ...string) {
 	t.Helper()
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -117,8 +114,8 @@ func makeEpisode(t *testing.T, path string, segments ...string) {
 	os.Chtimes(path, old, old)
 }
 
-// Marks are keyed by basename so a moved episode keeps them; marks written
-// before that are still read at their old dir-qualified key.
+// Keyed by basename so a moved episode keeps its marks; legacy dir-qualified
+// keys must still read.
 func TestSkipVal_SurvivesMove(t *testing.T) {
 	chdirTemp(t)
 

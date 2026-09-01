@@ -7,9 +7,7 @@ import (
 	"testing"
 )
 
-// aria2CleanupTargets gates file deletion on torrent remove. The critical
-// invariant: never return the download root itself (that would nuke the whole
-// library root), and never escape it.
+// Invariant: never return (or escape) the download root itself — that would nuke the library root.
 func TestAria2CleanupTargets(t *testing.T) {
 	root := "/Volumes/Ravan"
 
@@ -62,8 +60,7 @@ func TestAria2CleanupTargets(t *testing.T) {
 	}
 }
 
-// cleanupDirs feeds the non-recursive sweep. Deepest-first matters: a
-// subfolder has to go before its parent can.
+// Deepest-first: a subfolder has to go before its parent can.
 func TestCleanupDirs(t *testing.T) {
 	root := "/Volumes/Ravan"
 	got := cleanupDirs(root, []string{
@@ -87,9 +84,8 @@ func TestCleanupDirs(t *testing.T) {
 	}
 }
 
-// Removing a torrent must erase only that torrent. The organizer reuses
-// existing folders, so a download dir routinely holds unrelated media — which
-// the old os.RemoveAll took with it.
+// The organizer reuses existing folders, so a download dir holds unrelated
+// media — which the old os.RemoveAll took with it.
 func TestRemoveDownloadSparesUnrelated(t *testing.T) {
 	root := t.TempDir()
 	folder := filepath.Join(root, "Documentaries")

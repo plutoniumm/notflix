@@ -47,10 +47,8 @@
   let fx = $state(loadFx());
   let sheet = $state<HTMLElement>();
 
-  // The top layer is the right home for a sheet that sits over everything:
-  // Escape and light-dismiss come with it, and it can never be trapped by an
-  // ancestor's stacking context or backdrop-filter. Where it is missing the
-  // sheet is an ordinary fixed panel driven by `.show`, exactly as before.
+  // The top layer brings Escape and light-dismiss and can't be trapped by an
+  // ancestor's stacking context; without it, `.show` drives a plain fixed panel.
   const popOk =
     typeof HTMLElement !== "undefined" && "popover" in HTMLElement.prototype;
 
@@ -159,8 +157,8 @@
     top: 0;
     right: 0;
     bottom: 0;
-    /* The UA popover sheet sets `inset: 0`; without this the element is
-       over-constrained and pins to the left edge instead of the right. */
+    /* The UA popover sets `inset: 0`; without left:auto the element is
+       over-constrained and pins to the left edge. */
     left: auto;
     z-index: 14;
     width: min(300px, 86vw);
@@ -179,9 +177,8 @@
     transform: translateX(0);
   }
 
-  /* In the top layer the UA hides a closed popover outright, so the slide has
-     to survive a discrete display change. Both directions animate; the
-     fallback path above never sees these rules. */
+  /* The UA hides a closed popover outright, so the slide has to survive a
+     discrete display change. The fallback path never sees these rules. */
   .tune:popover-open {
     transform: translateX(0);
   }
@@ -245,7 +242,6 @@
   .row input {
     width: 100%;
     accent-color: var(--red);
-    /* The slider is the panel's only real target; 44px of it on touch. */
     min-height: 24px;
   }
   @media (hover: none) {

@@ -1,15 +1,11 @@
-// Run: node --test tools/fmt.test.ts   (node >= 23 strips the types itself)
-//
-// Guards the drift that made this module necessary: three duration
-// formatters, two byte formatters and two relative-time formatters that
-// disagreed with each other on the same screen.
+// Pins the drift that made fmt.ts necessary: three duration, two byte and two
+// relative-time formatters disagreeing with each other on the same screen.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { ago, bytes, dur, durWords, pct, rate } from "../src/core/fmt.ts";
 
-// The three implementations fmt.ts replaced, kept verbatim so the bugs they
-// shipped stay pinned to a failing-then-fixed expectation.
+// The implementations fmt.ts replaced, kept verbatim so their bugs stay pinned.
 const legacy = {
   fmtTime(s: number) {
     const h = Math.floor(s / 3600);

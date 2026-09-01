@@ -15,10 +15,8 @@ import (
 	"notflix/server/library"
 )
 
-// parseSRT / parseVTT strip the UTF-8 BOM (U+FEFF) before delegating — many
-// SRTs (esp. Windows-saved YIFY/EVO rips) start with EF BB BF, which makes
-// martinlindhe/subtitles fail with `strconv.Atoi: parsing "<BOM>1"` on the
-// header line. Cheap defensive strip applied at every parse site.
+// Strip the UTF-8 BOM before parsing: many Windows-saved SRTs start with
+// EF BB BF, which makes martinlindhe/subtitles fail on the header line.
 func parseSRT(s string) (subtitles.Subtitle, error) {
 	s = strings.TrimPrefix(s, "\ufeff")
 	s = strings.TrimLeft(s, " \t\r\n\x00")
@@ -46,11 +44,6 @@ func parseVTT(s string) (subtitles.Subtitle, error) {
 	return subtitles.NewFromVTT(s)
 }
 
-// NormalizeSubs walks every root and ensures all .srt and .vtt files are
-// served as WebVTT:
-//   - .srt → parsed and rewritten as .vtt, original removed
-//   - .vtt without a WEBVTT header → reparsed as SRT and rewritten in place
-//   - .vtt with a WEBVTT header → left alone (browsers are forgiving)
 func NormalizeSubs(lib *library.Library) {
 	var converted, fixed, failed atomic.Int64
 

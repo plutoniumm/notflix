@@ -56,9 +56,8 @@
     clearTimeout(armTimer);
   });
 
-  // Deletes are two-step: the first tap arms, a second within ARM_MS commits.
-  // These buttons sit inches apart in a dense list on a phone, and the server
-  // deletes off the disk.
+  // Two-step: first tap arms, a second within ARM_MS commits. They sit inches
+  // apart on a phone and the server deletes off the disk.
   function arm(key: string) {
     armed = key;
     clearTimeout(armTimer);
@@ -124,9 +123,7 @@
         jobs = (await api.conversions({ silent: true })) ?? [];
         procStatus = (await api.processStatus({ silent: true })) ?? null;
         const isProc = !!procStatus?.running;
-        // ScanCorrupt rebuilds the corrupt set on every process run; refetch
-        // the list when a run finishes so files that completed (and are no
-        // longer corrupt) drop off the top section.
+        // ScanCorrupt rebuilds the corrupt set per run — refetch when one ends.
         if (wasProcessing && !isProc) await reloadData();
         wasProcessing = isProc;
         processingLib = isProc;
@@ -463,8 +460,6 @@
     text-align: right;
   }
 
-  /* One severity treatment, applied at the panel edge — the header does not
-     also turn red, so the file names stay the loudest thing in the block. */
   .panel.bad {
     border-color: color-mix(in oklab, var(--red) 45%, transparent);
     box-shadow: inset 2px 0 0 var(--red);

@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// TestPipelineRecover confirms PipelineInit treats any persisted "running"
-// step as interrupted: the step is dropped from the ledger and returned so
-// the caller can clean up partial output. "done" and "failed" survive.
 func TestPipelineRecover(t *testing.T) {
 	dir := t.TempDir()
 	orig := plFilePath

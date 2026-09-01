@@ -1,7 +1,4 @@
 <script lang="ts">
-  // Standard progress bar. Renders the global .bar-track/.bar-fill standard so
-  // every progress UI is structurally identical; variant picks the accent
-  // (default red, success green→cyan, striped animated). Value is clamped.
   let {
     value = 0,
     variant = "default",

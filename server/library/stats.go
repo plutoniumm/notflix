@@ -15,8 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ipInfo is the per-IP rollup inside aggregate. Package-scoped so it can be
-// passed to buildIPTiles without an awkward anonymous struct.
 type ipInfo struct {
 	user  string
 	host  string
@@ -24,35 +22,26 @@ type ipInfo struct {
 	vps   map[string]bool
 }
 
-// rawSession is one continuous-playback span emitted by aggregate's flush
-// path; buildGantt slices these into per-day bars.
+// rawSession is one continuous-playback span; buildGantt slices it per day.
 type rawSession struct {
 	ip, user, vp   string
 	startAt, endAt int64
 }
 
-// stats.go writes a tiny append-only log of every watch save and aggregates
-// it on demand for the Wrapped-style /api/stats/summary endpoint. No new
-// frontend POST: it piggybacks on the existing `watched:<vp>` KV writes via
-// statsTee, called from KVSet for any payload that smells like a watch
-// progress record ({t, at} optionally with dur).
+// An append-only log of every watch save, aggregated on demand. There is no
+// frontend POST — statsTee piggybacks on the watched:<vp> KV writes.
 
 const statsPath = "./cache/stats.jsonl"
 
-// Per-ping the player records 2s of wall-clock time, so cap each ping's
-// counted seconds at this when summing watch time. Larger gaps look like
-// pause/seek/buffering and split sessions.
+// The player pings every 2s, so cap each ping's counted seconds here; larger
+// gaps are pause/seek/buffering and split the session.
 const pingCapMs = 3000
 
-// More than this between two pings for the same video → call it a new
-// session for streak / longest-binge accounting.
+// A gap larger than this between two pings for one video starts a new session.
 const sessionGapMs = 30_000
 
-// Device is the render-ready identity attached to each watch ping when
-// IdentityFromIP can resolve the client IP. Mirrors jobs.Identity field-
-// for-field; declared separately here so the library package stays free
-// of any `jobs` import (jobs imports library, not the other way around —
-// same pattern as jobs.OnDownloads).
+// Device mirrors jobs.Identity field-for-field, declared here so library never
+// imports jobs (jobs imports library, not the other way around).
 type Device struct {
 	User   string   `json:"user"`
 	Device string   `json:"device"`
@@ -63,9 +52,7 @@ type Device struct {
 	Online bool     `json:"online"`
 }
 
-// IdentityFromIP, when set, maps a client IP to a rich Device. Wired in
-// main.go to jobs.TailscaleIdentity; stays nil under tests so the path
-// degrades to the empty Device.
+// IdentityFromIP is wired in main.go to jobs.TailscaleIdentity; nil in tests.
 var IdentityFromIP func(ip string) Device
 
 type statsEvent struct {
@@ -73,19 +60,15 @@ type statsEvent struct {
 	T    float64 `json:"t,omitempty"`
 	Dur  float64 `json:"dur,omitempty"`
 	At   int64   `json:"at"`
-	User string  `json:"user,omitempty"` // Tailscale display name; "" if unresolved
-	Host string  `json:"host,omitempty"` // device hostname; for tooltip / disambiguation
-	IP   string  `json:"ip,omitempty"`   // client IP — the canonical per-device key
+	User string  `json:"user,omitempty"`
+	Host string  `json:"host,omitempty"`
+	IP   string  `json:"ip,omitempty"`
 }
 
 var statsMu sync.Mutex
 
-// statsTee is called from KVSet for every {key, value} that looks like a
-// `watched:<vp>` write. It silently no-ops on anything it can't parse — the
-// stats log is best-effort.
-//
-// clientIP is the request's remote address (gin's c.ClientIP()), used to
-// resolve a Tailscale identity via IdentityFromIP. Pass "" to skip.
+// statsTee logs every watched:<vp> KV write and silently no-ops on anything it
+// can't parse — the log is best-effort. An empty clientIP skips identity.
 func statsTee(key string, value any, clientIP string) {
 	if !strings.HasPrefix(key, "watched:") {
 		return
@@ -96,7 +79,7 @@ func statsTee(key string, value any, clientIP string) {
 	}
 	m, ok := value.(map[string]any)
 	if !ok || m == nil {
-		return // null = "clear this entry"; nothing to log
+		return // null clears the entry
 	}
 	t, _ := m["t"].(float64)
 	at, _ := m["at"].(float64)
@@ -139,7 +122,7 @@ func readStatsSince(cutoffMs int64) []statsEvent {
 
 	var out []statsEvent
 	sc := bufio.NewScanner(f)
-	// Some lines can be long-ish (paths can be deep); bump the buffer.
+	// Paths can be deep; bump the scanner buffer.
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
 		var ev statsEvent
@@ -159,10 +142,8 @@ type topItem struct {
 	Hours float64 `json:"hours"`
 }
 
-// ipTile = per-IP row rendered as a chip. Each distinct client IP gets one
-// tile. Device / OS / Login / Tags come from the live Tailscale peer
-// table (resolved at read time, not stored in the event), so renaming a
-// device or moving it under a different user shows up immediately.
+// ipTile is one per-IP chip. Device/OS/Login/Tags come from the live Tailscale
+// table at read time, so a renamed device shows up immediately.
 type ipTile struct {
 	IP     string   `json:"ip"`
 	User   string   `json:"user"`
@@ -177,16 +158,14 @@ type ipTile struct {
 	Videos int      `json:"videos"`
 }
 
-// dayBars is one calendar day's worth of session bars for the Gantt chart.
-// Date is "YYYY-MM-DD" in server-local time; bars are sorted by StartHour.
-// Sessions that cross midnight get split into two bars by the aggregator,
-// one on each day, so each bar always falls within [0, 24).
+// A session crossing midnight is split into one bar per day by the aggregator,
+// so every bar falls within [0, 24).
 type sessionBar struct {
 	IP        string  `json:"ip"`
 	User      string  `json:"user"`
 	Label     string  `json:"label"`
 	VP        string  `json:"vp"`
-	StartHour float64 `json:"startHour"` // 0..24
+	StartHour float64 `json:"startHour"`
 	DurHours  float64 `json:"durHours"`
 }
 type dayBars struct {
@@ -194,15 +173,13 @@ type dayBars struct {
 	Bars []sessionBar `json:"bars"`
 }
 
-// userHeatmap is a per-user 7×24 grid where each cell is coloured by which
-// device dominated that time slot. Cells holds the dominant IP per cell
-// ("" if no activity), Intensity holds the raw ping count for the alpha
-// channel. Rendered as one grid per user on the frontend.
+// userHeatmap is a per-user 7×24 grid; Cells holds the dominant device IP per
+// slot ("" = no activity), Intensity the raw ping count for the alpha channel.
 type userHeatmap struct {
-	User      string       `json:"user"`
-	IPs       []ipTile     `json:"ips"`       // this user's devices, hours desc
-	Cells     [7][24]string `json:"cells"`    // dominant IP per (dow, hour); "" = empty
-	Intensity [7][24]int    `json:"intensity"` // total pings per cell
+	User      string        `json:"user"`
+	IPs       []ipTile      `json:"ips"`
+	Cells     [7][24]string `json:"cells"`
+	Intensity [7][24]int    `json:"intensity"`
 }
 
 type StatsSummary struct {
@@ -223,12 +200,8 @@ type StatsSummary struct {
 	FilteredIP     string        `json:"filteredIP,omitempty"` // echoed when ?ip= narrowed the slice
 }
 
-// StatsSummaryHandler aggregates the log into Wrapped-style numbers.
-// Query:
-//   ?range=week|month|year|all  (default year)
-//   ?ip=<addr>                  — narrow to one client IP; topIPs still
-//                                 reflects everyone in the window so the
-//                                 chips stay clickable.
+// StatsSummaryHandler: ?range=week|month|year|all (default year), ?ip=<addr>
+// narrows to one IP while topIPs still lists everyone so chips stay clickable.
 func StatsSummaryHandler(c *gin.Context) {
 	rng := c.DefaultQuery("range", "year")
 	ip := c.Query("ip")
@@ -250,8 +223,8 @@ func StatsSummaryHandler(c *gin.Context) {
 
 	events := readStatsSince(cutoff.UnixMilli())
 
-	// Always compute the full-window IP breakdown so the chips show every
-	// device even when one is selected. Filtering happens after.
+	// Full-window breakdown first, so the chips still list every device when
+	// one is selected.
 	all := aggregate(events, rng, cutoff, now)
 	if ip == "" {
 		c.JSON(http.StatusOK, all)
@@ -264,14 +237,12 @@ func StatsSummaryHandler(c *gin.Context) {
 		}
 	}
 	out := aggregate(filtered, rng, cutoff, now)
-	out.TopIPs = all.TopIPs // preserve the chip list
+	out.TopIPs = all.TopIPs
 	out.FilteredIP = ip
 	c.JSON(http.StatusOK, out)
 }
 
-// matchesIP handles the synthetic "no-ip-recorded" bucket: ?ip=unknown
-// matches every event with an empty IP field (those came from pre-feature
-// pings or hosts where c.ClientIP() came back blank).
+// ?ip=unknown is the synthetic bucket: every event with no IP recorded.
 func matchesIP(e statsEvent, want string) bool {
 	if want == "unknown" {
 		return e.IP == ""
@@ -279,8 +250,7 @@ func matchesIP(e statsEvent, want string) bool {
 	return e.IP == want
 }
 
-// aggregate walks the event stream (ungrouped) and produces a StatsSummary.
-// Split out for testability — no I/O.
+// aggregate does no I/O — it stays pure so it can be tested directly.
 func aggregate(events []statsEvent, rng string, cutoff, now time.Time) StatsSummary {
 	sum := StatsSummary{Range: rng, TopShows: []topItem{}, TopIPs: []ipTile{}, Gantt: []dayBars{}, UserHeatmaps: []userHeatmap{}}
 	if len(events) == 0 {
@@ -289,9 +259,7 @@ func aggregate(events []statsEvent, rng string, cutoff, now time.Time) StatsSumm
 		return sum
 	}
 
-	// Per-IP device card: filled from the live Tailscale table at read
-	// time. Caching the lookup once per IP (instead of per-ping) makes the
-	// hot loop a single map read.
+	// Resolve each IP once, not per ping.
 	deviceByIP := map[string]Device{}
 	if IdentityFromIP != nil {
 		seen := map[string]bool{}
@@ -303,10 +271,8 @@ func aggregate(events []statsEvent, rng string, cutoff, now time.Time) StatsSumm
 			deviceByIP[e.IP] = IdentityFromIP(e.IP)
 		}
 	}
-	// Re-resolve user/host from the live Tailscale peer table for every
-	// event that has an IP. A fallback-ladder change retroactively fixes
-	// every entry with an IP, instead of leaving a stale snapshot. Events
-	// with no IP keep their stored user/host as the best-we-can-do.
+	// Re-resolve from the live peer table so a ladder change retroactively fixes
+	// old events; entries with no IP keep their stored user/host.
 	for i := range events {
 		if events[i].IP == "" {
 			continue
@@ -316,16 +282,12 @@ func aggregate(events []statsEvent, rng string, cutoff, now time.Time) StatsSumm
 		}
 	}
 
-	// Group by vp, sort each by `at`, sum watched-time using pingCapMs +
-	// session detection.
 	byVP := map[string][]statsEvent{}
 	for _, e := range events {
 		byVP[e.VP] = append(byVP[e.VP], e)
 	}
 
-	// Per-IP buckets. The synthetic "unknown" bucket holds pings whose IP
-	// field was never populated (pre-feature entries or hosts where
-	// c.ClientIP() came back blank).
+	// The synthetic "unknown" bucket holds pings whose IP was never populated.
 	ipMap := map[string]*ipInfo{}
 	ipKey := func(ip string) string {
 		if ip == "" {
@@ -340,8 +302,7 @@ func aggregate(events []statsEvent, rng string, cutoff, now time.Time) StatsSumm
 			v = &ipInfo{vps: map[string]bool{}}
 			ipMap[key] = v
 		}
-		// Last non-empty user/host wins — handles a peer renaming or
-		// moving between tags within the window without dropping the row.
+		// Last non-empty wins, so a rename mid-window doesn't drop the row.
 		if user != "" {
 			v.user = user
 		}
@@ -352,12 +313,8 @@ func aggregate(events []statsEvent, rng string, cutoff, now time.Time) StatsSumm
 		v.vps[vp] = true
 	}
 
-	// Resolve the *canonical* user-per-IP up front (one pass). Then the
-	// main loop buckets heatmap cells under that canonical user instead of
-	// the per-event stored value. Without this, an IP that ever appeared
-	// with an empty user (legacy pings) would spawn an orphan "unknown"
-	// heatmap alongside the real one — visible as a ghost row with no
-	// devices in it.
+	// Canonical user per IP, up front: an IP that ever appeared with an empty
+	// user would otherwise spawn a ghost "unknown" heatmap beside the real one.
 	canonicalUserForIP := map[string]string{}
 	for _, e := range events {
 		if e.User != "" {
@@ -371,9 +328,7 @@ func aggregate(events []statsEvent, rng string, cutoff, now time.Time) StatsSumm
 	sessions := 0
 	longestSessionMs := int64(0)
 
-	// Per-user × (dow, hour, ip) ping counts. At emit time we pick the
-	// dominant ip per cell and the total to produce a userHeatmap each.
-	// Bumps use the canonical user for the IP — see canonicalUserForIP.
+	// Per-user × (dow, hour, ip) ping counts; emit picks the dominant ip per cell.
 	heatCells := map[string][7][24]map[string]int{}
 	bumpCell := func(ip string, dow, hour int) {
 		uk := canonicalUserForIP[ipKey(ip)]
@@ -394,9 +349,7 @@ func aggregate(events []statsEvent, rng string, cutoff, now time.Time) StatsSumm
 		cell[ipKey(ip)]++
 	}
 
-	// Per-day session bars for the Gantt chart. We collect (ip, user, vp,
-	// start_at, end_at) tuples as sessions close, then split midnight-
-	// crossing spans below before emitting the dayBars slice.
+	// Sessions are collected as they close, then split at midnight below.
 	var rawSessions []rawSession
 
 	cutoffDay := startOfDay(cutoff)
@@ -409,9 +362,7 @@ func aggregate(events []statsEvent, rng string, cutoff, now time.Time) StatsSumm
 	for vp, evs := range byVP {
 		sort.Slice(evs, func(i, j int) bool { return evs[i].At < evs[j].At })
 
-		// Walk pairs; first ping seeds a session with pingCapMs. A session
-		// is bound to the (vp, ip) pair — if you switch devices mid-movie
-		// it counts as two sessions (visible side-by-side on the Gantt).
+		// A session is bound to (vp, ip): switching devices mid-movie counts as two.
 		var sessionStart, sessionLast, sessionMs int64
 		var sessionIP, sessionUser string
 		flushSession := func() {
@@ -489,16 +440,9 @@ func aggregate(events []statsEvent, rng string, cutoff, now time.Time) StatsSumm
 	return sum
 }
 
-// buildUserHeatmaps emits one userHeatmap per user with activity, ordered
-// by total hours desc so the heaviest user appears first. Each cell's
-// dominant IP is the one with the most pings in that slot; ties broken
-// arbitrarily but deterministically (first IP iterated). The full per-user
-// IP tile list is included so the frontend can render a legend without
-// re-joining against TopIPs.
-//
-// IPs is guaranteed non-nil even when the user has no resolved devices in
-// the window (e.g. legacy pings without an IP field) — the frontend
-// {#each} would throw on a JSON null.
+// buildUserHeatmaps emits one heatmap per user, heaviest first; each cell's
+// dominant IP is the one with the most pings there. IPs is never nil even for
+// a user with no resolved devices — the frontend {#each} throws on a JSON null.
 func buildUserHeatmaps(cells map[string][7][24]map[string]int, allIPs []ipTile) []userHeatmap {
 	ipsByUser := map[string][]ipTile{}
 	for _, t := range allIPs {
@@ -533,7 +477,6 @@ func buildUserHeatmaps(cells map[string][7][24]map[string]int, allIPs []ipTile) 
 		}
 		out = append(out, uh)
 	}
-	// Heaviest user first — sum of tile hours is a cheap proxy.
 	sort.Slice(out, func(i, j int) bool {
 		var hi, hj float64
 		for _, t := range out[i].IPs {
@@ -547,11 +490,8 @@ func buildUserHeatmaps(cells map[string][7][24]map[string]int, allIPs []ipTile) 
 	return out
 }
 
-// buildIPTiles emits one tile per distinct IP. Each tile is enriched from
-// the live Tailscale device table when an entry exists for the IP; for
-// pre-IP historical events (deviceByIP empty for that IP), it falls back
-// to the stored user/host snapshot in ipInfo. Multi-device users get
-// "<user> #N" labels; single-device users keep just "<user>".
+// buildIPTiles enriches each IP from the live Tailscale table, falling back to
+// the stored user/host snapshot for events logged before IPs were recorded.
 func buildIPTiles(ipMap map[string]*ipInfo, deviceByIP map[string]Device) []ipTile {
 	tiles := make([]ipTile, 0, len(ipMap))
 	for ip, v := range ipMap {
@@ -570,10 +510,8 @@ func buildIPTiles(ipMap map[string]*ipInfo, deviceByIP map[string]Device) []ipTi
 	}
 	sort.Slice(tiles, func(i, j int) bool { return tiles[i].Hours > tiles[j].Hours })
 
-	// Number IPs per user. Single-IP users get no "#N" suffix; prefer the
-	// MagicDNS device name as the suffix when available so two devices for
-	// one user become e.g. "Nilesh Sharma · admin-vqkeuu90r" instead of
-	// "Nilesh Sharma #1".
+	// Single-IP users get no suffix; prefer the MagicDNS device name over a
+	// "#N" number when two devices share a user.
 	count := map[string]int{}
 	for _, t := range tiles {
 		count[t.User]++
@@ -593,11 +531,8 @@ func buildIPTiles(ipMap map[string]*ipInfo, deviceByIP map[string]Device) []ipTi
 	return tiles
 }
 
-// buildGantt slices each raw session into per-day bars (splitting any span
-// that crosses midnight) and returns the most recent 30 days, newest first.
-// label is plucked from the matching ipTile so the frontend doesn't need
-// to redo the IP→label mapping. Empty days are skipped to keep the chart
-// dense — caller renders only what comes back.
+// buildGantt slices each session into per-day bars (splitting midnight spans),
+// newest first. Empty days are skipped.
 const ganttMaxDays = 30
 
 func buildGantt(raw []rawSession, tiles []ipTile) []dayBars {
@@ -633,7 +568,7 @@ func buildGantt(raw []rawSession, tiles []ipTile) []dayBars {
 	for d := range byDay {
 		dates = append(dates, d)
 	}
-	sort.Sort(sort.Reverse(sort.StringSlice(dates))) // newest first
+	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
 	if len(dates) > ganttMaxDays {
 		dates = dates[:ganttMaxDays]
 	}
@@ -646,11 +581,8 @@ func buildGantt(raw []rawSession, tiles []ipTile) []dayBars {
 	return out
 }
 
-// splitByLocalDay walks a [startAt, endAt] span in server-local time and
-// returns one segment per calendar day it touches. Each segment carries the
-// "YYYY-MM-DD" key plus the ms offsets from local-midnight of day 0; the
-// caller derives startHour by `startMs % day` so the segment is normalised
-// against its own day even when the span spans the year.
+// splitByLocalDay returns one segment per calendar day the span touches. The
+// ms offsets are from local-midnight of day 0, so callers take startMs % day.
 type ganttSeg struct {
 	dayKey         string
 	startMs, endMs int64 // ms since local midnight of dayKey

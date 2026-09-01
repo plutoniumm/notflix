@@ -33,12 +33,9 @@ const showKey = (title: string) =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
-// Collapse the season directories of one show into a single row. A show
-// forms only from ≥2 dirs whose parsed titles match exactly (normalized) and
-// that each carry a season number or episode range — marker-less dirs, loose
-// movies (".") and single mega-dirs ("JoJo Seasons 1-4") stay plain rows.
-// A show row sits at its best member's position, inheriting the server's
-// LRU ordering; ungrouped rows pass through untouched.
+// A show forms only from ≥2 dirs whose parsed titles match exactly and that
+// each carry a season number or episode range; anything looser stays a plain
+// row. The show row sits at its best member's position, keeping server order.
 export function groupRows(data: VideoData): HomeRow[] {
   const parsed = data
     .filter((g) => g.files?.length)
@@ -97,9 +94,8 @@ export function groupRows(data: VideoData): HomeRow[] {
   return out;
 }
 
-// Tolerate either the current ordered array OR a legacy {dir: files} object
-// map (a stale cached bundle ↔ new server, or vice-versa, during rollout) —
-// and guarantee every group's `files` is an array so iteration never throws.
+// Tolerates the legacy {dir: files} object map (stale cached bundle ↔ new
+// server) and guarantees every group's `files` is an array.
 function normalizeVideoData(raw: any): VideoData {
   if (Array.isArray(raw)) {
     return raw.filter(
@@ -114,9 +110,6 @@ function normalizeVideoData(raw: any): VideoData {
   return [];
 }
 
-// HomeData owns Home's reactive view-model: the video tree, "Continue
-// Watching" row, downloaded-set, in-progress downloads, offline indicator.
-// Mount: call `start()` for the unsubscribe; on navigation away call that.
 export class HomeData {
   data = $state<VideoData>([]);
   continues = $state<ContinueItem[]>([]);
@@ -125,17 +118,11 @@ export class HomeData {
   conversions = $state<Job[]>([]);
   loading = $state(true);
   offline = $state(false);
-  // Disks the server currently has mounted. Surfaced in the empty-state
-  // (so the user can distinguish "server has no roots" from "roots exist
-  // but no videos in them") and used as the download-target picker when
-  // a torrent search runs from the home bar.
   disks = $state<DiskInfo[]>([]);
 
-  // The server already orders groups LRU (recently-watched dirs first);
-  // groupRows drops empties and folds multi-season shows into one row.
+  // The server already orders groups LRU (recently-watched dirs first).
   rows = $derived(groupRows(this.data));
 
-  // Begin loading. Returns a function to dispose subscriptions.
   start(): () => void {
     const recordsP = Down.all().catch((err) => {
       console.warn("[Down.all]", err);
@@ -144,12 +131,8 @@ export class HomeData {
 
     (async () => {
       try {
-        // api.videoList() returns null on network/HTTP failure (request()
-        // catches and returns null). Distinguish that from a successful but
-        // empty response — an empty library is NOT offline; it just means
-        // the server has roots but no videos in them (or no roots at all).
-        // Conflating the two used to show "Offline" every time the server
-        // came up with no volumes attached.
+        // api.videoList() returns null on failure; an empty list is NOT
+        // offline — a server with no volumes attached would read as offline.
         const [raw, disks] = await Promise.all([
           api.videoList({ silent: true }),
           api.manage.diskInfo({ silent: true }),
@@ -183,8 +166,6 @@ export class HomeData {
 
     Down.recover().catch((err) => console.warn("[Down.recover]", err));
 
-    // Surface active ffmpeg conversions (the user-useful progress) on the
-    // default screen — same poll cadence as Manage.
     const stopJobs = usePoll(
       async () => {
         const j = await api.conversions({ silent: true });
@@ -217,7 +198,6 @@ export class HomeData {
     };
   }
 
-  // Remove an item from Continue Watching (server + local).
   removeContinue(dir: string, name: string) {
     const param = join(dir, name);
     kv.set(`watched:${param}`, null);
@@ -226,7 +206,6 @@ export class HomeData {
     );
   }
 
-  // Cancel an in-progress PWA download.
   async cancelDownload(videoParam: string): Promise<string | null> {
     try {
       await Down.del(videoParam);
@@ -237,7 +216,6 @@ export class HomeData {
     }
   }
 
-  // Filter the tree by query — returns null when the query is empty.
   filter(q: string): { dir: string; name: string; key: string }[] | null {
     const trimmed = q.trim().toLowerCase();
     if (!trimmed) return null;

@@ -17,17 +17,15 @@
     children: Snippet;
   } = $props();
 
-  // Mounted always, hidden by `.out`, so the panel leaves with the motion it
-  // arrived with instead of being yanked out of the DOM. Dismissal only
-  // listens while it is actually open.
+  // Always mounted, hidden by `.out`, so the panel leaves with the motion it
+  // arrived with. Dismissal only listens while it is open.
   $effect(() => {
     if (!open) return;
 
-    // onClose is only read inside these closures, so the effect depends on
-    // `open` alone — a re-rendered parent must not tear the listeners down.
+    // onClose is read only inside the closures, so the effect depends on `open`
+    // alone — a re-rendered parent must not tear the listeners down.
     const drop = clickOutside(() => onClose());
-    // Escape closes, which a click-outside listener alone never gave keyboard
-    // users. Capture, so the player's own keydown handler doesn't see it.
+    // Capture, so the player's own keydown handler doesn't also see Escape.
     const esc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.stopPropagation();
@@ -120,7 +118,6 @@
     color: var(--red);
   }
 
-  /* Section headings share the panel scale with the tune sheet's .pnl-hd. */
   .dropdown :global(.section-hd) {
     padding: 11px 12px 6px;
     font-family: var(--font-display);

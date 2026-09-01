@@ -1,7 +1,5 @@
-/* atomic.css is imported after global.css, so anything here wins a specificity
-   tie with the design system. This rule used to hard-set a system font stack
-   and silently beat global.css's --font-body: the app loaded Manrope and then
-   rendered in San Francisco. Pull from the tokens instead. */
+/* Imported AFTER global.css, so anything here wins a specificity tie: a
+   hard-coded font stack here once silently beat global.css's --font-body. */
 body {
   margin: 0;
   width: 100%;
@@ -523,21 +521,19 @@ textarea:focus {
   text-wrap: pretty;
 }
 
-/* Stop a scroll from chaining to the page (and, on the body, from arming
-   pull-to-refresh) once the inner box hits its end. */
+/* Stops a scroll chaining to the page — and, on the body, pull-to-refresh. */
 .oc {
   overscroll-behavior: contain;
 }
 
-/* Make any box a size container. Its own width has to come from its layout,
-   never its contents — inline-size containment stops contents sizing the box,
-   and a content-sized one collapses. */
+/* The box's width must come from its layout, never its contents — inline-size
+   containment collapses a content-sized box. */
 .ct {
   container-type: inline-size;
 }
 
-/* Children share one grid cell, so they stack without position: absolute
-   taking them out of flow — the layer keeps contributing its size. */
+/* One shared grid cell, not position: absolute — each layer still contributes
+   its size. */
 .stack {
   display: grid;
 }

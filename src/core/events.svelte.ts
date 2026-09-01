@@ -11,8 +11,6 @@ export const ORGANIZE_POLL_MS = 2000;
 export const TICK_MS = 1000;
 export const ARM_MS = 3000;
 
-// Formatters live in core/fmt; re-exported under their historical names so
-// player callers keep one import site.
 export { dur as fmtTime, ago as fmtAgo } from "./fmt";
 
 export class PlayerState {

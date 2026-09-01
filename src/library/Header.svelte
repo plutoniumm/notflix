@@ -90,8 +90,6 @@
     animation: shimmer 1.4s linear infinite;
   }
 
-  /* Three columns so every disk lines up on label, meter and headroom —
-     the point of the readout is comparing them, not reading each one. */
   .disks {
     margin-left: auto;
     display: grid;
@@ -105,8 +103,8 @@
     border-radius: 999px;
     background: rgb(255 255 255 / 0.07);
   }
-  /* The scale lives on the bar and the fill is a window onto it, so a nearly
-     full disk reads red at the edge without any branch in the markup. */
+  /* The scale lives on the bar and the fill is a clip window onto it, so
+     fullness maps to colour with no branch in the markup. */
   .meter-fill {
     inset: 0;
     border-radius: 999px;

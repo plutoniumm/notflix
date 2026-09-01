@@ -54,10 +54,8 @@ export function Touch(
     } else {
       last = now;
       prev = x;
-      // A single tap anywhere toggles playback. Gating this on the centre
-      // third left the outer two thirds inert, which reads as a dead player.
-      // The timer outlasts the 300ms double-tap window so a seek gesture in
-      // the outer thirds can never also toggle play.
+      // The timer must outlast the 300ms double-tap window, or a seek gesture
+      // in the outer thirds also toggles play.
       if (tapTimer) clearTimeout(tapTimer);
       tapTimer = setTimeout(() => {
         tapTimer = null;
@@ -168,14 +166,10 @@ export function Hotkeys(
 
 const AV1 = 'video/mp4; codecs="av01.0.05M.08"';
 
-// Capability hint for /api/hls/master: the server serves the h264 ladder
-// instead of the AV1-only master when this says no. MediaSource is
-// authoritative wherever MSE exists (desktop, Android Chrome); iPhone Safari
-// typically has no MSE and plays HLS natively, so the element's own
-// canPlayType is the right probe there — it answers "", "maybe" or "probably",
-// and only "" means no. `??` not `||`, because isTypeSupported legitimately
-// returns false. Anything undeterminable answers NO: h264 always plays, a
-// wrong yes is a black screen.
+// Capability hint for /api/hls/master (no → h264 ladder). MSE is authoritative
+// where it exists; iPhone Safari has none, so canPlayType is the probe there
+// ("" means no). `??` not `||` — isTypeSupported legitimately returns false.
+// Undeterminable answers NO: a wrong yes is a black screen.
 export function av1Ok(): boolean {
   try {
     return (
