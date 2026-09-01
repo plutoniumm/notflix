@@ -4,25 +4,27 @@
   let { level, visible }: any = $props();
 </script>
 
-<div class="pill p-fix f-col al-ct g10 p10 rx20 o-0" class:visible>
+<div class="pill pl-pane f-col al-ct g10 p10 o-0" class:visible>
   <Icon name="volume" />
 
-  <div class="track rx2 flow-h p-rel">
-    <div class="fill p-abs rx2" style="height:{level * 100}%"></div>
+  <div class="track flow-h p-rel">
+    <div class="fill p-abs" style="height:{level * 100}%"></div>
   </div>
+
+  <span class="pct pl-num">{Math.round(level * 100)}</span>
 </div>
 
 <style>
   .pill {
-    left: 20px;
+    position: fixed;
+    left: calc(20px + env(safe-area-inset-left));
     top: 50%;
     transform: translateY(-50%);
     z-index: 10;
-    background: #0009;
-    backdrop-filter: blur(6px);
+    border-radius: var(--r-xl);
     color: var(--tx-5);
     pointer-events: none;
-    transition: opacity 0.5s ease;
+    transition: opacity var(--m-slow, 520ms) var(--ease-out);
   }
   .pill.visible {
     opacity: 1;
@@ -31,14 +33,24 @@
 
   .track {
     width: 4px;
-    height: 80px;
-    background: #fff4;
+    height: 84px;
+    border-radius: 99px;
+    background: rgba(255, 255, 255, 0.18);
   }
   .fill {
     bottom: 0;
     left: 0;
     right: 0;
-    background: var(--tx-5);
-    transition: height 0.1s;
+    border-radius: 99px;
+    background: linear-gradient(
+      to top,
+      color-mix(in oklab, var(--tx-5) 70%, var(--art-1)),
+      var(--tx-5)
+    );
+    transition: height var(--m-fast, 130ms) var(--ease-out);
+  }
+  .pct {
+    font-size: 11px;
+    color: var(--tx-3);
   }
 </style>

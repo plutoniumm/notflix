@@ -24,7 +24,7 @@ export function Touch(
   const handler = (e: TouchEvent) => {
     if (
       (e.target as HTMLElement).closest(
-        ".vjs-control-bar, .bar, .dock, .rail, .tune",
+        ".vjs-control-bar, .bar, .dock, .rail, .tune, .skip",
       )
     )
       return;

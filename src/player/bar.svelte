@@ -10,7 +10,9 @@
     embed,
     videoParam,
     title,
+    tuneOpen = false,
     runWhisper,
+    onTune,
     onToggleSubs,
     onSelectLocal,
     onSelectEmbedded,
@@ -22,7 +24,9 @@
     embed: boolean;
     videoParam: string;
     title: string;
+    tuneOpen?: boolean;
     runWhisper: () => void;
+    onTune: () => void;
     onToggleSubs: () => void;
     onSelectLocal: (file: string, label: string) => void;
     onSelectEmbedded: (idx: number, lang: string) => Promise<void>;
@@ -33,7 +37,7 @@
 </script>
 
 {#if !embed}
-  <div class="bar p-fix f al-ct g10" class:hidden={view.state.hideUI}>
+  <div class="bar f al-ct g10" class:hidden={view.state.hideUI}>
     <a href="/" class="back cc rx5 sh-0" aria-label="Back">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M15 6l-6 6 6 6" />
@@ -45,57 +49,66 @@
     <div class="chips f g5 sh-0 al-ct">
       {#if view.audio.tracks.length > 1}
         <div class="btn-wrap p-rel">
-          <!-- svelte-ignore a11y_consider_explicit_label -->
           <button
             class="ibtn cc rx5 ptr p5"
+            aria-label="Audio track"
             class:active={view.audio.open}
             onclick={() => view.audio.toggle()}
           >
             <Icon name="audio" />
           </button>
-          {#if view.audio.open}
-            <AudioPicker
-              tracks={view.audio.tracks}
-              activeTrack={view.audio.active}
-              onSelect={onSelectAudio}
-              onClose={() => view.audio.close()}
-            />
-          {/if}
+          <AudioPicker
+            open={view.audio.open}
+            tracks={view.audio.tracks}
+            activeTrack={view.audio.active}
+            onSelect={onSelectAudio}
+            onClose={() => view.audio.close()}
+          />
         </div>
       {/if}
 
       <div class="btn-wrap p-rel">
-        <!-- svelte-ignore a11y_consider_explicit_label -->
         <button
           class="ibtn cc rx5 ptr p5"
+          aria-label="Subtitles"
           class:active={view.subs.open || view.state.hasSubs}
           onclick={onToggleSubs}
         >
           <Icon name="captions" />
         </button>
 
-        {#if view.subs.open}
-          <SubsDropdown
-            info={view.subs.info}
-            onlineResults={view.subs.onlineResults}
-            searching={view.subs.searching}
-            activeSub={view.subs.activeSub}
-            {onSelectLocal}
-            {onSelectEmbedded}
-            {onSelectOnline}
-            {onSubsOff}
-            onClose={() => view.subs.close()}
-          />
-        {/if}
+        <SubsDropdown
+          open={view.subs.open}
+          info={view.subs.info}
+          onlineResults={view.subs.onlineResults}
+          searching={view.subs.searching}
+          activeSub={view.subs.activeSub}
+          {onSelectLocal}
+          {onSelectEmbedded}
+          {onSelectOnline}
+          {onSubsOff}
+          onClose={() => view.subs.close()}
+        />
       </div>
 
-      <!-- svelte-ignore a11y_consider_explicit_label -->
       <button
         class="ibtn cc rx5 ptr p5"
+        aria-label="Transcribe with Whisper"
         class:pulse={!!view.state.wMsg}
         onclick={runWhisper}
       >
         <Icon name="whisper" />
+      </button>
+
+      <!-- The tune sheet was hotkey-only (`v`), which is unreachable on a
+           phone. -->
+      <button
+        class="ibtn cc rx5 ptr p5"
+        aria-label="Picture and audio"
+        class:active={tuneOpen}
+        onclick={onTune}
+      >
+        <Icon name="settings" />
       </button>
 
       <Down {videoParam} {title} />
@@ -106,6 +119,7 @@
 
 <style>
   .bar {
+    position: fixed;
     top: 0;
     left: 0;
     right: 0;
@@ -118,16 +132,27 @@
     padding-right: max(16px, env(safe-area-inset-right));
     background: linear-gradient(
       to bottom,
-      rgba(7, 6, 10, 0.7) 0%,
-      rgba(7, 6, 10, 0.3) 60%,
+      rgba(3, 2, 6, 0.72) 0%,
+      rgba(3, 2, 6, 0.28) 62%,
       transparent 100%
     );
-    backdrop-filter: blur(12px) saturate(140%);
-    -webkit-backdrop-filter: blur(12px) saturate(140%);
-    transition: opacity 0.3s var(--ease-out);
-    animation: slide-down 0.34s var(--ease-out);
+    backdrop-filter: blur(14px) saturate(150%);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    transition:
+      opacity var(--m, 260ms) var(--ease-out),
+      transform var(--m, 260ms) var(--ease-out);
   }
-  .bar.hidden { opacity: 0; pointer-events: none; }
+  @starting-style {
+    .bar {
+      opacity: 0;
+      transform: translateY(-22%);
+    }
+  }
+  .bar.hidden {
+    opacity: 0;
+    transform: translateY(-14%);
+    pointer-events: none;
+  }
 
   .spacer { flex: 1; }
 
@@ -135,11 +160,16 @@
     color: var(--tx-4);
     min-width: 36px;
     min-height: 36px;
-    transition: color 0.18s var(--ease-out), background 0.18s var(--ease-out),
-      transform 0.16s var(--ease-snap);
+    transition:
+      color var(--m-fast, 130ms) var(--ease-out),
+      background var(--m-fast, 130ms) var(--ease-out),
+      transform var(--m-fast, 130ms) var(--ease-snap);
   }
   .back:hover { color: var(--tx-5); background: var(--glass); }
   .back:active { transform: scale(0.92); }
+  @media (hover: none) {
+    .back { min-width: 44px; min-height: 44px; }
+  }
 
   .btn-wrap { display: flex; align-items: center; }
 
@@ -149,10 +179,10 @@
     border: 1px solid transparent;
     border-radius: var(--r-md) !important;
     transition:
-      color 0.18s var(--ease-out),
-      background 0.18s var(--ease-out),
-      border-color 0.18s var(--ease-out),
-      transform 0.16s var(--ease-snap);
+      color var(--m-fast, 130ms) var(--ease-out),
+      background var(--m-fast, 130ms) var(--ease-out),
+      border-color var(--m-fast, 130ms) var(--ease-out),
+      transform var(--m-fast, 130ms) var(--ease-snap);
     min-width: 38px;
     min-height: 38px;
   }
@@ -180,9 +210,5 @@
   @keyframes pulse {
     0%, 100% { color: var(--tx-3); }
     50% { color: var(--red); filter: drop-shadow(0 0 6px var(--red-glow)); }
-  }
-  @keyframes slide-down {
-    from { opacity: 0; transform: translateY(-20%); }
-    to   { opacity: 1; transform: translateY(0); }
   }
 </style>

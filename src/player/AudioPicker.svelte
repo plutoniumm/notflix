@@ -9,11 +9,13 @@
   };
 
   let {
+    open,
     tracks,
     activeTrack,
     onSelect,
     onClose,
   }: {
+    open: boolean;
     tracks: AudioTrack[];
     activeTrack: number;
     onSelect: (track: number) => void;
@@ -35,7 +37,7 @@
   }
 </script>
 
-<Dropdown {onClose}>
+<Dropdown {open} {onClose}>
   <div class="section-hd">Audio</div>
   {#each tracks as t}
     <button
