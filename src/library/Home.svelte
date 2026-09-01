@@ -9,6 +9,7 @@
   import { HomeData } from "./homeData.svelte";
   import { parseName, epTag, type Parsed } from "./torrentName";
   import Continues from "./Continues.svelte";
+  import Recommended from "./Recommended.svelte";
   import ShowRow from "./ShowRow.svelte";
   import MediaCard from "../components/MediaCard.svelte";
   import Blurb from "../components/Blurb.svelte";
@@ -413,6 +414,7 @@
         downloadedSet={home.downloadedSet}
         onRemove={removeContinue}
       />
+      <Recommended downloadedSet={home.downloadedSet} />
       {#each home.rows as row (row.kind === "dir" ? row.dir : row.key)}
         {#if row.kind === "show"}
           <ShowRow

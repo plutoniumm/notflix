@@ -84,6 +84,49 @@ func KVDelete(key string) error {
 	return update(func(store map[string]any) { delete(store, key) })
 }
 
+// Watch is one `watched:<param>` progress record: T is the last saved
+// position in seconds, Dur the video's duration when the player knew it
+// (older records have none), At the wall clock of the save in ms.
+type Watch struct {
+	T   float64
+	Dur float64
+	At  float64
+}
+
+// Watched returns every watch record in the store, keyed by video param.
+//
+// A cleared entry is stored as JSON null — that is how the UI removes a
+// Continue Watching card — and comes back as a zero Watch rather than being
+// dropped. The title was still opened at some point, which is what a caller
+// asking "has this been seen" needs to know, and a zero T keeps it below
+// every watched threshold so it can never count as finished.
+func Watched() map[string]Watch {
+	store := kvRead()
+	out := make(map[string]Watch)
+
+	for k, v := range store {
+		if !strings.HasPrefix(k, "watched:") {
+			continue
+		}
+
+		w := Watch{}
+
+		m, _ := v.(map[string]any)
+		if m == nil {
+			out[strings.TrimPrefix(k, "watched:")] = w
+
+			continue
+		}
+
+		w.T, _ = m["t"].(float64)
+		w.Dur, _ = m["dur"].(float64)
+		w.At, _ = m["at"].(float64)
+		out[strings.TrimPrefix(k, "watched:")] = w
+	}
+
+	return out
+}
+
 // DirRecency maps a library dir to the newest watched:<param>.at (ms) under
 // it; drives the LRU ordering of the Home list.
 func DirRecency() map[string]float64 {

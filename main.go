@@ -212,6 +212,7 @@ func main() {
 	router.GET("/api/hls/avoffset", func(c *gin.Context) { media.HLSAVOffset(c, lib) })
 
 	router.GET("/api/skip", func(c *gin.Context) { media.SkipInfo(c, lib) })
+	router.GET("/api/reco", func(c *gin.Context) { jobs.RecoHandler(c, lib) })
 
 	router.POST("/api/organize/plan", func(c *gin.Context) { jobs.OrganizePlan(c, lib) })
 	router.GET("/api/organize/status", jobs.OrganizeStatus)
