@@ -84,6 +84,12 @@ func KVSetValue(key string, value any) error {
 	return update(func(store map[string]any) { store[key] = value })
 }
 
+// KVDelete removes a key through the same single write path, so a delete
+// racing a set cannot lose the set.
+func KVDelete(key string) error {
+	return update(func(store map[string]any) { delete(store, key) })
+}
+
 // DirRecency maps a library dir to the most-recent `watched:<param>.at`
 // timestamp (ms) seen for any video under it. Dirs with no watch history are
 // absent. Drives the LRU ordering of the Home video list.

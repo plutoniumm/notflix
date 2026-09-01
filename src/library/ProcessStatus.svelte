@@ -20,7 +20,9 @@
     repair: "Repair",
     thumbs: "Thumbnails",
     sprites: "Trickplay sprites",
+    posters: "Poster frames",
     whisper: "Subtitles (Whisper)",
+    skips: "Intro/outro detection",
   };
 
   const elapsed = (ms: number) => (ms < 1000 ? "<1s" : durWords(ms / 1000));

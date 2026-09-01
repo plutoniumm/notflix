@@ -55,7 +55,7 @@ Frontend tests run on bare `node` (it strips the TypeScript itself). `fmt.test.t
 
 **Pipeline ledger** (`server/library/pipeline.go` → `cache/pipeline.json`) records per-file, per-step state (`running`/`done`/`failed`). On boot `PipelineInit` resets surviving `running` entries to missing (interrupted → redo) and returns them so `main.go` can delete truncated `.tmp` output before the redo lands.
 
-**`ProcessAll`** (`server/media/convert.go`) is the master background sweep, guarded by a CAS so it can't overlap. Order: `CleanAll` alone first (tree-mutating rename/move/flatten, so later phases walk a settled tree), then convert / scan+repair / thumbs / sprites / whisper fan out concurrently, then skip detection. Each phase has its own pool and skips busy files. `toMP4` also dispatches sprite/thumb/whisper per-file as each conversion lands, so a file gains its thumbnail while the next is still transcoding. Progress is a fixed-order phase state machine in `server/media/status.go`, polled by `ProcessStatus.svelte` via `/api/process/status`.
+**`ProcessAll`** (`server/media/convert.go`) is the master background sweep, guarded by a CAS so it can't overlap. Order: `CleanAll` alone first (tree-mutating rename/move/flatten, so later phases walk a settled tree), then convert / scan+repair / thumbs+sprites / whisper / skips fan out concurrently. `posters` is chained after thumbs **and** sprites in the same goroutine: it reads the sprite sheet and overwrites the thumbnail, so running it alongside a thumbs pass writing the same path would stomp a chosen poster with a fixed-timestamp grab. Each phase has its own pool and skips busy files. `toMP4` also dispatches sprite/thumb/whisper per-file as each conversion lands, so a file gains its thumbnail while the next is still transcoding. Progress is a fixed-order phase state machine in `server/media/status.go`, polled by `ProcessStatus.svelte` via `/api/process/status`.
 
 **Video streaming** has two paths:
 1. Direct MP4 → HTTP 206 range requests (`server/media/player.go`)
@@ -79,6 +79,8 @@ Frontend tests run on bare `node` (it strips the TypeScript itself). `fmt.test.t
 
 **Trickplay sprites** (`server/media/sprite.go`): one frame per 10s, 160px wide, 10 columns → `images/{key}.sprite.jpg` + `.sprite.json` manifest served by `/api/sprite/:key`. Key = `library.Hash(basename)`, same as thumbnails. Idempotent.
 
+**Poster selection** (`server/media/poster.go`): the thumbnail used to be one ffmpeg grab at `duration/2 ± 5s`, which landed on a black frame, a fade or the credits for **5.7% of the live library** (measured over all 1958 sheets). The candidates are already on disk — the sprite sheet is one frame per 10s — so the `posters` phase decodes that sheet instead of running any new ffmpeg pass and scores every tile classically: mean/stddev of luma, Hasler-Süsstrunk colourfulness, mean absolute luma gradient. Hard-rejects near-black, near-white, near-uniform and detail-free frames; trims the first and last 5% (logos, credits). That alone takes the reject rate to 0.1% and the p10 score from 0.298 to 0.772. The top 6 well-separated survivors then go to a vision model (`qwen3.8-flash-next`, one `/api/generate` with an `images` array) which answers `{"pick": N}` — **strictly optional**: `visionReady` probes and loads once per sweep, calls are serialised through a 1-wide gate (ollama runs one request per model, so parallel calls only queue and then all time out together), and three consecutive failures disable the stage for the sweep. Any failure ships the classical winner. There is no cheap classical text detector — luma-bin dominance, colour coverage and edge-band skew were all measured and none separate a title card from a scene — which is exactly the judgement the vision stage is there to make. The winner is written with one full-res `-ss` grab at its timestamp (the 160px crop is the fallback), atomically via `x/atom`. Mark is `poster:<hash>` on the **basename** hash like `codec:`/`skip:`; presence = chosen. `media.RepickPoster(abs)` / `media.PosterRedo` re-run one file.
+
 **Skip detection** (`server/media/skip.go`): episodes in a folder share intro/outro audio, so head/tail PCM fingerprints are cross-matched against a sibling. Needs ≥2 episodes; matches must run ≥15s and ≤300s. Persisted as `skip:<hash>` in KV, keyed on the **basename** like `codec:` (a dir-qualified key orphans the moment `CleanAll`/Organize moves the file, which silently re-ran PCM fingerprinting on already-scanned episodes); presence = scanned. The player turns these into skip buttons and does a seamless in-place next-episode swap (keeps Chrome's autoplay allowance). The thresholds are empirically tuned — don't "simplify" them.
 
 **Subtitle waterfall** (`server/media/subs.go` + `src/player/subs.ts`): local VTT → SRT → embedded extraction → OpenSubtitles (hash, then title) → Subdl (title) → Whisper. `SubResult.Provider` distinguishes "os" from "subdl"; `GetSubs` branches on it. `subnormalize.go` defensively strips BOM/leading junk at every parse site — Windows-saved SRTs otherwise fail with `strconv.Atoi: parsing "<BOM>1"`.
@@ -99,7 +101,7 @@ Frontend tests run on bare `node` (it strips the TypeScript itself). `fmt.test.t
 - **aria2c** — optional, JSON-RPC on localhost:6800
 - **yt-dlp** — optional, non-torrent URL downloads
 - **faster-whisper** — optional, Python package in conda `global` env
-- **ollama** — optional, subtitle translation
+- **ollama** — optional, subtitle translation and poster selection
 - **tailscale** — optional, `tailscale status --json` for stats attribution
 
 ## Environment Variables (`.env`)
@@ -107,5 +109,6 @@ Frontend tests run on bare `node` (it strips the TypeScript itself). `fmt.test.t
 - `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USER`, `OPENSUBTITLES_PASS`
 - `SUBDL_API_KEY` — optional fallback; unset skips that waterfall step silently
 - `OLLAMA_HOST`, `OLLAMA_MODEL` — defaults `http://100.117.92.56:11434`, `aya-expanse:8b`
+- `POSTER_VISION_MODEL` — vision model for poster selection, default `qwen3.8-flash-next:125b-a6b-nvfp4` (the only image-capable model on the host; the Gemma builds reject `images`). Shares `OLLAMA_HOST`. `POSTER_VISION=0` turns the stage off without touching the network — the classical pick then ships unchanged.
 
 `WHISPER_MODEL` still appears in `.env` but is no longer read — the whisper model comes from the `?model=` query param (default `base`).
