@@ -1,8 +1,6 @@
-// Package atom writes files so a reader never sees a half-written one:
-// content goes to a temp file in the destination directory, then a rename
-// swaps it in. A crash mid-write leaves the previous file intact instead of
-// a truncated one. Leaf package — imports nothing internal, so anything can
-// use it.
+// Package atom writes files so a reader never sees a half-written one: content
+// goes to a temp file in the destination dir, then a rename swaps it in. A
+// crash mid-write leaves the previous file intact. Imports nothing internal.
 package atom
 
 import (
@@ -58,10 +56,8 @@ func SaveJSON(path string, v any) error {
 	return WriteFile(path, data, 0644)
 }
 
-// LoadJSON reports a missing file as os.ErrNotExist and a malformed one as
-// the unmarshal error. Callers must keep those apart: absent means "start
-// empty", malformed means "do not overwrite". A zero-length file counts as
-// absent — there is nothing in it to lose.
+// LoadJSON keeps absent (os.ErrNotExist → "start empty") apart from malformed
+// (unmarshal error → "do not overwrite"). A zero-length file counts as absent.
 func LoadJSON(path string, v any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {

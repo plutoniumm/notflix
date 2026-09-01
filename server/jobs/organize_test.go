@@ -163,10 +163,8 @@ func TestValidMoves(t *testing.T) {
 	}
 }
 
-// /apply takes {file,root,folder} straight from the request body. The
-// model-index indirection that keeps a hallucinated path out of a move only
-// covers /plan, so a posted move that isn't in the stored plan has to be
-// refused — otherwise /apply is an arbitrary file-mover.
+// The model-index indirection only covers /plan; /apply takes paths straight
+// from the body, so a move absent from the stored plan must be refused.
 func TestOrganizeApplyRejectsUnplanned(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -214,10 +212,8 @@ func TestOrganizeApplyRejectsUnplanned(t *testing.T) {
 	}
 }
 
-// 7% of the library is -[YTS.MX] releases, and filepath.Glob reads their "["
-// as a character class: the old sidecar lookup matched nothing, with a nil
-// error, so applying a plan stranded the .srt at the root for the junk sweep
-// to reap.
+// filepath.Glob reads the "[" in -[YTS.MX] releases as a character class:
+// the old sidecar lookup matched nothing, with a nil error, stranding .srts.
 func TestSidecarsBracketedName(t *testing.T) {
 	dir := t.TempDir()
 	video := "Movie [2020] 1080p BluRay x264-[YTS.MX].mp4"

@@ -38,11 +38,8 @@ func CleanHLSCache(lib *library.Library) {
 		return
 	}
 
-	// AllVideos skips a root it can't read, so an unmounted drive reads as
-	// "those titles no longer exist" and this pass would delete every cache
-	// dir belonging to it — including whatever is streaming right now, which
-	// then 404s mid-playback. A root that isn't there is an unknown, not an
-	// absence: sit the pass out entirely.
+	// A root that can't be read is an unknown, not an absence: AllVideos would
+	// report its titles as gone and this pass would delete live cache dirs.
 	for _, root := range lib.Roots {
 		if _, err := os.ReadDir(root); err != nil {
 			log.Printf("[hls-clean] root %s unreadable (%v) — skipping pass", root, err)
@@ -50,8 +47,7 @@ func CleanHLSCache(lib *library.Library) {
 		}
 	}
 
-	// A census that comes back completely empty is a broken census, not an
-	// empty library: acting on it deletes every cache dir there is.
+	// An empty census is a broken census, not an empty library.
 	live := lib.LiveHashes()
 	if len(live) == 0 {
 		return

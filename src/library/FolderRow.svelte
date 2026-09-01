@@ -199,8 +199,6 @@
     border-radius: var(--r-lg) var(--r-lg) 0 0;
   }
 
-  /* State reads off a single rail at the edge rather than three competing
-     background colours: nothing, converting, or unplayable. */
   .folder::before {
     content: "";
     position: absolute;
@@ -298,8 +296,6 @@
     animation: breathe 1.8s ease-in-out infinite;
   }
 
-  /* Size, share and count on one baseline with tabular figures, so a column of
-     folders can be scanned down rather than read one at a time. */
   .stat {
     margin-left: auto;
     display: flex;
@@ -339,8 +335,7 @@
     box-shadow: 0 0 0 4px var(--red-soft);
   }
 
-  /* Native disclosure animation — Chrome only, and the folder opens correctly
-     without it everywhere else. */
+  /* Chrome-only disclosure animation; the folder opens correctly without it. */
   @supports selector(::details-content) {
     .folder {
       interpolate-size: allow-keywords;

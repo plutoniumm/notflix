@@ -5,11 +5,8 @@ import (
 	"testing"
 )
 
-// Regression (2026-05-20): every Ollama batch failed with "unexpected end of
-// JSON input" because the model's content was non-JSON (or empty). The fix
-// uses format=json + an {"out":[…]} object wrapper, with a bare-array and a
-// line-by-line fallback. These cases lock those three paths and a couple of
-// real-world failure modes we want to keep tolerating.
+// Regression (2026-05-20): non-JSON model content broke every batch. Fix =
+// format=json + {"out":[…]} wrapper, with bare-array and line-by-line fallbacks.
 func TestParseTranslation(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -96,7 +93,7 @@ func TestStripListMarker(t *testing.T) {
 		"* b":        "b",
 		"• c":        "c",
 		"plain text": "plain text",
-		"1abc":       "1abc", // no marker char after digits → unchanged
+		"1abc":       "1abc",
 	}
 	for in, want := range cases {
 		if got := stripListMarker(in); got != want {

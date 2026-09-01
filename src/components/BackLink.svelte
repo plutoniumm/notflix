@@ -1,7 +1,4 @@
 <script lang="ts">
-  // The "←" header back link — was byte-identical (markup + .back/.back:hover
-  // CSS) in Search and Manage's Header. Self-contained so no Svelte scoping
-  // breakage (unlike trying to extract the whole <header>).
   let { href = "/" }: { href?: string } = $props();
 </script>
 

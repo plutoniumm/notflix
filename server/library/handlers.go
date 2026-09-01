@@ -30,9 +30,8 @@ type DirSize struct {
 	Root  string `json:"root"`
 }
 
-// DirGroup is one Home row. The list is emitted as an ordered array (not a
-// map) so the server controls row order — JSON object key order is lost
-// across Go marshal + JS parse, and numeric dir names would reorder.
+// DirGroup is one Home row. Emitted as an ordered array, not a map: JSON
+// object key order is lost across Go marshal + JS parse.
 type DirGroup struct {
 	Dir   string              `json:"dir"`
 	Files []map[string]string `json:"files"`
@@ -90,9 +89,9 @@ func VideoList(c *gin.Context, lib *Library) {
 	}
 	sort.Slice(dirs, func(i, j int) bool {
 		if ri, rj := rec[dirs[i]], rec[dirs[j]]; ri != rj {
-			return ri > rj // most-recently-watched first
+			return ri > rj
 		}
-		return dirs[i] < dirs[j] // unwatched / ties: alphabetical
+		return dirs[i] < dirs[j]
 	})
 
 	groups := make([]DirGroup, 0, len(dirs))
@@ -161,10 +160,8 @@ func DiskInfo(c *gin.Context, lib *Library) {
 		total := stat.Blocks * uint64(stat.Bsize)
 		free := stat.Bavail * uint64(stat.Bsize)
 
-		// Apply UI-only cap. For capped roots the "used" portion is the
-		// actual bytes living in that root (not "real total - real free"),
-		// since the underlying filesystem is shared with the rest of the
-		// boot disk.
+		// A capped root shares its filesystem, so "used" must be the bytes
+		// actually living in it, not "real total - real free".
 		if cap, ok := lib.Caps[root]; ok && cap > 0 {
 			used := dirBytes(root)
 			total = cap
@@ -186,9 +183,6 @@ func DiskInfo(c *gin.Context, lib *Library) {
 	c.JSON(http.StatusOK, out)
 }
 
-// dirBytes sums the size of every regular file under root (recursive).
-// Used by DiskInfo to compute the "used" portion for capped roots that
-// share their filesystem with other data.
 func dirBytes(root string) uint64 {
 	var total uint64
 	_ = filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
@@ -240,9 +234,8 @@ func DirSizes(c *gin.Context, lib *Library) {
 	c.JSON(http.StatusOK, out)
 }
 
-// filepath.Glob reads "[" as a character class and Go ships no escaper, so
-// a bracketed release name ("Movie [2020] 1080p") silently matches nothing
-// and its language sidecars get orphaned. Scan the directory instead.
+// filepath.Glob reads "[" as a character class and Go ships no escaper, so a
+// bracketed release name silently matches nothing (err == nil). Scan instead.
 func sideVtts(base string) []string {
 	dir, prefix := filepath.Split(base)
 	entries, _ := os.ReadDir(dir)
@@ -340,9 +333,8 @@ func DirDelete(c *gin.Context, lib *Library) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// VideoDelete resolves exactly one absolute path through FindFile: that is
-// both the traversal guard and the reason a rel path present in two roots
-// no longer deletes the copy in every root.
+// The single FindFile resolution is both the traversal guard and the reason a
+// rel path present in two roots no longer deletes the copy in every root.
 func VideoDelete(c *gin.Context, lib *Library) {
 	abs := lib.FindFile(c.Param("filename"))
 	if abs == "" {

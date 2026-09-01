@@ -21,7 +21,6 @@
     ps: PlayerState;
     title: string;
     speed?: number;
-    // Loaded ranges, in seconds, straight off the tech's TimeRanges.
     buffered?: [number, number][];
     intro?: [number, number] | null;
     outro?: [number, number] | null;
@@ -32,9 +31,7 @@
     onNext?: () => void;
     onPip?: () => void;
     onFullscreen: () => void;
-    // Renderer for the trickplay preview tile. Receives the hovered
-    // timestamp in seconds, returns inline CSS for a 160-wide tile (or
-    // empty string when no sprite is available).
+    // Hovered second -> inline CSS for the tile, "" when there is no sprite.
     trickplay?: (sec: number) => string;
   } = $props();
 
@@ -53,8 +50,7 @@
 
   const dur = $derived(ps.duration);
   const cur = $derived(ps.currentTime);
-  // ps.pct is rounded to whole percent, which on a two-hour film is a 72s
-  // stair-step. The hero control gets the unrounded figure.
+  // ps.pct is rounded to whole percent — a 72s stair-step on a two-hour film.
   const pct = $derived(dur > 0 ? (cur / dur) * 100 : 0);
   const headPct = $derived(
     s.scrubbing && dur > 0 ? (s.hoverSec / dur) * 100 : pct,
@@ -93,10 +89,8 @@
     return s.hoverSec;
   }
 
-  // Pointer events cover mouse and touch in one path; the mouse-only version
-  // left dragging dead on every touch device (a tap seeked via the synthesized
-  // compatibility click, a drag did nothing) and never showed the preview
-  // tile. Capture keeps the move stream on the track once the drag starts.
+  // Pointer events cover mouse and touch in one path; a mouse-only version
+  // leaves dragging dead on touch. Capture keeps the move stream on the track.
   function onDown(e: PointerEvent) {
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     s.scrubbing = true;
@@ -110,8 +104,7 @@
     track(e);
   }
 
-  // Two seeks per drag (press + release). Seeking on every move aborts and
-  // restarts the in-flight HLS segment fetch dozens of times a second.
+  // Two seeks per drag: seeking on every move thrashes the in-flight HLS fetch.
   function onUp(e: PointerEvent) {
     if (!s.scrubbing) return;
     if (dragged) onSeek(s.hoverSec);
@@ -248,9 +241,8 @@
     left: 0;
     right: 0;
     z-index: 10;
-    /* No padding of its own, so the inset can be the padding — and it insets
-       the scrub track too, which keeps the track box and its hit-test
-       aligned. There is no --safe-l/r token, so those stay raw env(). */
+    /* No padding of its own, so the inset is the padding — and it insets the
+       scrub track too, keeping the track box and its hit-test aligned. */
     padding-bottom: var(--safe-b, env(safe-area-inset-bottom));
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
@@ -319,8 +311,6 @@
     box-shadow: 0 0 10px -1px var(--red-glow);
   }
 
-  /* Detected intro/credits, legible in the timeline rather than only as a
-     button that appears out of nowhere. */
   .mark {
     background: repeating-linear-gradient(
       -45deg,
@@ -362,9 +352,8 @@
     pointer-events: none;
   }
 
-  /* Deliberately not .pnl: the tip tracks the pointer, and a backdrop-filter
-     that moves re-blurs its backdrop every frame. Opaque is cheaper and, over
-     a preview tile, indistinguishable. */
+  /* Deliberately not .pnl: the tip tracks the pointer, and a moving
+     backdrop-filter re-blurs its backdrop every frame. */
   .tip {
     position: absolute;
     left: var(--hx);

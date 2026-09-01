@@ -1,10 +1,6 @@
-// Trickplay sprite client. One sprite per video — a single JPG tiled
-// `cols × rows` with `interval`-second steps, plus a manifest from
-// `/api/sprite/:key`. The dock's scrub hover calls `tile(sec)` to get an
-// inline CSS string that crops the right cell from the sprite.
-//
-// Reactive on purpose: `manifest` is $state, so the dock's $derived tile
-// re-runs once the fetch lands and the preview pops in without a page nudge.
+// Trickplay sprite client: one JPG tiled `cols × rows`, manifest from
+// `/api/sprite/:key`, `tile(sec)` returns inline CSS cropping one cell.
+// `manifest` is $state (hence .svelte.ts) so the dock's tile re-runs on load.
 
 export interface SpriteManifest {
   interval: number;

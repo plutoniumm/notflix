@@ -6,14 +6,9 @@ import (
 	"time"
 )
 
-// Locks the resolver behaviour: real user wins, MagicDNS short name is
-// used for the Device field, tagged peers fall through to the device name
-// as the grouping User. Nothing here ties to a real tailnet — production
-// reads the live peer table from the CLI.
 func TestResolveIdentity(t *testing.T) {
-	// "Tagged Devices" is the literal DisplayName Tailscale uses for the
-	// synthetic user that owns tagged nodes; matches verbatim or the
-	// real-user branch fires anyway.
+	// "Tagged Devices" is Tailscale's literal DisplayName for the synthetic
+	// owner of tagged nodes; must match verbatim or the real-user branch fires.
 	users := map[string]tsUser{
 		"1": {DisplayName: "real-user", LoginName: "real@example.com"},
 		"2": {DisplayName: "Tagged Devices"},
@@ -63,8 +58,7 @@ func TestResolveIdentity(t *testing.T) {
 	})
 }
 
-// Normalisation: IPv4-in-IPv6 prefix gets stripped; unknown IP returns
-// the zero Identity. Uses RFC 5737 documentation IPs.
+// 192.0.2.x / 203.0.113.x are RFC 5737 documentation IPs.
 func TestTailscaleIdentity_Normalises(t *testing.T) {
 	const v4 = "192.0.2.10"
 	tsMu.Lock()

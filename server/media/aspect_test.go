@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// makeAnamorphicMP4 builds a 2s clip STORED 640x480 but tagged SAR 4:3, so its
-// true display aspect is (640*4)/(480*3) = 16:9 — i.e. anamorphic, the class
-// of file (e.g. 2.39:1 scope films) that rendered vertically stretched.
+// Stored 640x480 but tagged SAR 4:3, so the display aspect is
+// (640*4)/(480*3) = 16:9 — the anamorphic class that rendered stretched.
 func makeAnamorphicMP4(t *testing.T, root, name string) string {
 	t.Helper()
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -57,8 +56,7 @@ func TestGetSrcInfo_DerivesDisplayAspectFromSAR(t *testing.T) {
 		t.Errorf("display aspect = %.4f, want ≈1.7778 (16:9)", si.vDAR)
 	}
 
-	// 480p rung must deanamorphize to ~854 wide (16:9) with square pixels,
-	// not the 640 storage width.
+	// 854 = the 16:9 display width at 480p, not the 640 storage width.
 	if got, want := scaleFilter(si, 480), "scale=854:480:flags=lanczos,setsar=1"; got != want {
 		t.Errorf("scaleFilter = %q, want %q", got, want)
 	}
@@ -67,10 +65,8 @@ func TestGetSrcInfo_DerivesDisplayAspectFromSAR(t *testing.T) {
 	}
 }
 
-// TestE2E_AnamorphicSegmentIsDeanamorphized runs the real segment encoder and
-// asserts the produced TS is square-pixel at the display width — the actual
-// fix for the "stretched vertically" bug (players ignore in-stream SAR on
-// hls.js-transmuxed MPEG-TS).
+// hls.js-transmuxed MPEG-TS ignores in-stream SAR, so the segment itself has
+// to come out square-pixel at the display width.
 func TestE2E_AnamorphicSegmentIsDeanamorphized(t *testing.T) {
 	if testing.Short() {
 		t.Skip("ffmpeg-driven; -short")
@@ -92,9 +88,7 @@ func TestE2E_AnamorphicSegmentIsDeanamorphized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ffprobe: %v", err)
 	}
-	// First non-empty record: "W,H,SAR". Square pixels report SAR as "1:1"
-	// or, in MPEG-TS where it's simply unspecified, "N/A" — both mean the
-	// coded grid IS the display grid (no anamorphic stretch).
+	// MPEG-TS leaves SAR unspecified, so square pixels read "1:1" or "N/A".
 	var line string
 	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if l = strings.TrimSpace(l); l != "" {

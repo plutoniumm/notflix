@@ -6,8 +6,8 @@ import { toast } from "./../core/toast.svelte";
 const OFFLINE_CACHE = "notflix-offline-v1";
 const READY_MS = 3000;
 
-// serviceWorker.ready never settles when nothing is registered, so a bare
-// await hangs the caller forever — no spinner, no timeout, no error.
+// serviceWorker.ready never settles when nothing is registered — a bare await
+// hangs the caller forever, with no error.
 function swReady(): Promise<ServiceWorkerRegistration | null> {
   if (!("serviceWorker" in navigator)) return Promise.resolve(null);
 
@@ -26,10 +26,8 @@ export function isSupported(): boolean {
 
 let handle: IDB | null = null;
 
-// Opened on first use, never at module scope: `indexedDB` throws where site
-// data is blocked, and dl.ts is imported by both Home and Player — an eager
-// open takes the whole bundle down with a blank page. Absent DB = no
-// downloads, which is exactly true.
+// First use, never module scope: `indexedDB` throws where site data is blocked
+// and an eager open would blank both Home and Player. No DB = no downloads.
 function db(): IDB | null {
   if (!handle && globalThis.indexedDB)
     handle = new IDB("notflix-offline", 1, (idb) => {
@@ -170,8 +168,7 @@ class Downloads {
         console.warn("[Down.start] no Content-Length — downloading with unknown size");
       }
 
-      // Over-quota fetches fail late and land as a generic "error" record, so
-      // refuse up front while the number is still explainable.
+      // Over-quota fetches fail late as a generic "error" record — refuse up front.
       const { used, quota } = await this.storage();
       const free = quota - used;
       if (quota && src.size > free)
@@ -239,7 +236,7 @@ class Downloads {
     return Math.round((bgReg.downloaded / bgReg.downloadTotal) * 100);
   }
 
-  // A "done" record is not proof the bytes are still there: browsers evict
+  // A "done" record is not proof the bytes survive — browsers evict
   // non-persisted caches (iOS after ~7 unused days).
   async has(videoParam: string): Promise<boolean> {
     const record = await this.get(videoParam);

@@ -21,9 +21,8 @@ import (
 	"notflix/server/library"
 )
 
-// subHTTP is every outbound subtitle call (search, download link, payload).
-// http.DefaultClient has NO timeout, so a provider or CDN that accepts the
-// connection and then stalls pins the Gin handler (and its goroutine) forever.
+// http.DefaultClient has NO timeout: a provider that accepts the connection and
+// then stalls pins the Gin handler forever. Every subtitle call uses this.
 var subHTTP = &http.Client{Timeout: 60 * time.Second}
 
 type embedTrack struct {
@@ -77,11 +76,9 @@ func whisperVTTOf(path string) string {
 	return path[:len(path)-len(ext)] + ".whisper.vtt"
 }
 
-// vttSiblings lists the "<base>.<lang>.vtt" sidecars sitting next to path.
-// filepath.Glob is unusable here: a bracket in a release name ("Movie [2020]
-// 1080p") is a character class to Glob, so every -[YTS.MX] title matched
-// nothing — with a nil error, so the player just showed no sidecar tracks.
-// Go has no glob escaper; scan the dir instead.
+// filepath.Glob is unusable here: a bracket in a release name ("[YTS.MX]") is a
+// character class, so it matches nothing and returns err == nil. Go has no glob
+// escaper — scan the dir instead.
 func vttSiblings(path string) []localTrack {
 	prefix := filepath.Base(path[:len(path)-len(filepath.Ext(path))]) + "."
 	ents, _ := os.ReadDir(filepath.Dir(path))
@@ -363,9 +360,8 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 	}
 	defer sr.Body.Close()
 
-	// Unchecked, an HTML error page from the CDN gets parsed as an SRT and
-	// saved as the sidecar — a "subtitle" no player can show and nothing
-	// retries, because the file now exists.
+	// Unchecked, an HTML error page parses as SRT and is saved as the sidecar —
+	// nothing retries, because the file now exists.
 	if sr.StatusCode != http.StatusOK {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("subtitle download HTTP %d", sr.StatusCode)})
 		return

@@ -17,8 +17,7 @@ import (
 	"notflix/server/library"
 )
 
-// makeAV1GOP generates a secs-long AV1 (8-bit yuv420p) + aac clip with an
-// exact gop-second keyframe interval, so the segment grid is predictable.
+// Exact gop-second keyframe interval, so the segment grid is predictable.
 func makeAV1GOP(t *testing.T, root, name string, secs, gop int) string {
 	t.Helper()
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -48,7 +47,6 @@ func makeAV1GOP(t *testing.T, root, name string, secs, gop int) string {
 	return out
 }
 
-// extinfs pulls the EXTINF durations out of an m3u8 body.
 func extinfs(t *testing.T, body string) []float64 {
 	t.Helper()
 	var ds []float64
@@ -102,14 +100,10 @@ func writtenSegs(t *testing.T, dir string) int {
 	return n
 }
 
-// TestE2E_AV1GridMatchesFFmpeg is the regression for the two-grids bug: the
-// playlist derived its EXTINFs from a RELATIVE rule ("first keyframe ≥ 4s
-// after the last cut") while ffmpeg's hls muxer cuts on an ABSOLUTE grid
-// (pts ≥ 4s × segments_written). On a uniform GOP longer than the target both
-// rules agree, which is why it shipped; on a 3s-GOP source the playlist
-// declared 6 × 6s segments for the 9 ffmpeg actually wrote — seg 1 served
-// [6,9) where the playlist promised [6,12), and the last 12s were unreachable.
-// Each rendition must be declared exactly as its own continuous pass writes it.
+// Two-grids bug: the playlist cut on a RELATIVE rule (first keyframe ≥4s after
+// the last cut), ffmpeg's hls muxer on an ABSOLUTE one (pts ≥ 4s × segs written).
+// They agree only when the GOP exceeds the target; on a 3s GOP the playlist
+// declared 6 segments for the 9 written and the last 12s were unreachable.
 func TestE2E_AV1GridMatchesFFmpeg(t *testing.T) {
 	if testing.Short() {
 		t.Skip("ffmpeg-driven; -short")
@@ -147,8 +141,8 @@ func TestE2E_AV1GridMatchesFFmpeg(t *testing.T) {
 			}
 
 			for i := range ff {
-				// The tail EXTINF rides the container duration, which can run
-				// a frame past the video stream's own end.
+				// The tail EXTINF rides the container duration, a frame past
+				// the video stream's own end.
 				tol := 0.02
 				if i == len(ff)-1 {
 					tol = 0.2
@@ -164,9 +158,8 @@ func TestE2E_AV1GridMatchesFFmpeg(t *testing.T) {
 				}
 			}
 
-			// The audio pass has no keyframes to snap to, so it rides a
-			// uniform grid of its own. It may keep a sub-frame runt past the
-			// declared end, but the playlist must never come up long.
+			// No keyframes to snap to, so audio rides its own uniform grid: a
+			// sub-frame runt may hang past the end, but never come up long.
 			step := audioStep(si)
 			if err := ensureAV1Audio(src, hash, 0, step); err != nil {
 				t.Fatal(err)
@@ -189,8 +182,7 @@ func TestE2E_AV1GridMatchesFFmpeg(t *testing.T) {
 	}
 }
 
-// TestMuxerBounds_AbsoluteGrid pins the rule itself, with the numbers the
-// empirical ffmpeg run produced for a 36s / 3s-GOP source.
+// want is what a real ffmpeg run produced for a 36s / 3s-GOP source.
 func TestMuxerBounds_AbsoluteGrid(t *testing.T) {
 	var kfs []float64
 	for s := 0.0; s < 36; s += 3 {

@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// PhaseState is the lifecycle of a single ProcessAll phase.
 type PhaseState string
 
 const (
@@ -21,11 +20,10 @@ type PhaseInfo struct {
 	Ended   int64      `json:"endedAt,omitempty"`
 	Total   int        `json:"total,omitempty"` // 0 = unknown
 	Done    int        `json:"done"`
-	Note    string     `json:"note,omitempty"` // free-form current-activity text
+	Note    string     `json:"note,omitempty"`
 }
 
-// ProcessStatus is the snapshot the UI polls. Phases stay in fixed order so
-// the timeline is stable across renders.
+// Phases stay in fixed order so the UI timeline is stable across renders.
 type ProcessStatus struct {
 	Running bool        `json:"running"`
 	Started int64       `json:"startedAt,omitempty"`
@@ -48,8 +46,6 @@ func freshPhases() []PhaseInfo {
 	return out
 }
 
-// StatusReset marks a new ProcessAll run. Called at the start of every run so
-// the previous run's phase timings don't linger in the UI mid-cycle.
 func StatusReset() {
 	statusMu.Lock()
 	defer statusMu.Unlock()
@@ -95,9 +91,6 @@ func PhaseEnd(name string) {
 	}
 }
 
-// PhaseInc increments the total-seen and done-so-far counters. Pass 0 for
-// either delta to leave it unchanged. Total may grow lazily as a walking
-// stage discovers work; the UI renders "done / total" honestly either way.
 func PhaseInc(name string, deltaTotal, deltaDone int) {
 	statusMu.Lock()
 	defer statusMu.Unlock()
@@ -107,8 +100,6 @@ func PhaseInc(name string, deltaTotal, deltaDone int) {
 	}
 }
 
-// PhaseSet is the absolute counterpart for phases that know their total up
-// front (repair knows CorruptPaths() size before it starts).
 func PhaseSet(name string, total, done int) {
 	statusMu.Lock()
 	defer statusMu.Unlock()
@@ -126,8 +117,6 @@ func PhaseNote(name, note string) {
 	}
 }
 
-// GetStatus returns a deep-enough snapshot for JSON serialization. The
-// caller mutates neither the returned struct nor the phase slice.
 func GetStatus() ProcessStatus {
 	statusMu.Lock()
 	defer statusMu.Unlock()

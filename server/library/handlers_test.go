@@ -11,8 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// libTemp chdirs into a fresh temp dir with cache/kv.json holding `kv`, so
-// DirRecency/VideoList read isolated state. Returns the lib root.
+// Chdirs into a temp dir holding `kv` as cache/kv.json, so KV reads stay isolated.
 func libTemp(t *testing.T, kv map[string]any) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -55,9 +54,8 @@ func TestDirRecency_MaxPerDirFromWatchedKeys(t *testing.T) {
 
 func TestVideoList_OrdersDirsByRecency(t *testing.T) {
 	root := filepath.Join(libTemp(t, map[string]any{
-		"watched:Beta/x.mp4":  watched(9000), // most recent
-		"watched:Alpha/x.mp4": watched(5000), // older
-		// Charlie + "." (top-level) never watched → alphabetical tail
+		"watched:Beta/x.mp4":  watched(9000),
+		"watched:Alpha/x.mp4": watched(5000),
 	}), "media")
 
 	for _, d := range []string{"Alpha", "Beta", "Charlie"} {

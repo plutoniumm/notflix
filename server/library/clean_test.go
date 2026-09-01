@@ -7,8 +7,7 @@ import (
 	"time"
 )
 
-// touch writes rel under root with a modtime old enough to clear both the
-// IsBusy 30s window and the sweep's 1h quiet period.
+// Modtime is aged past both the IsBusy 30s window and the sweep's 1h quiet period.
 func touch(t *testing.T, root, rel string) string {
 	t.Helper()
 	path := filepath.Join(root, rel)
@@ -33,8 +32,8 @@ func exists(path string) bool {
 	return err == nil
 }
 
-// The sweep deletes only known junk. Containers the allowlist never heard of
-// (.m2ts remuxes) and artwork used to be removed an hour after they landed.
+// Bug: containers the allowlist never heard of (.m2ts) and artwork were
+// deleted an hour after they landed.
 func TestCleanAll_KeepsUnknownExtensions(t *testing.T) {
 	root := t.TempDir()
 	keep := []string{"Disc/movie.m2ts", "Disc/movie.vob", "Disc/poster.jpg", "Disc/movie.srt", "Disc/notes.doc"}
@@ -58,8 +57,7 @@ func TestCleanAll_KeepsUnknownExtensions(t *testing.T) {
 	}
 }
 
-// "No video we recognise" is not "nothing of value": a directory of .m2ts
-// used to be nuked wholesale.
+// Bug: a directory holding only unrecognised video (.m2ts) was nuked wholesale.
 func TestCleanAll_NeverNukesNonEmptyDir(t *testing.T) {
 	root := t.TempDir()
 	touch(t, root, "Bluray/00001.m2ts")
@@ -80,8 +78,7 @@ func TestCleanAll_NeverNukesNonEmptyDir(t *testing.T) {
 	}
 }
 
-// Three same-named siblings had exactly one conflict slot, so the third
-// silently overwrote the second.
+// Bug: one conflict slot only, so a third same-named sibling overwrote the second.
 func TestFlatDir_KeepsEveryNameCollision(t *testing.T) {
 	root := t.TempDir()
 	for _, sub := range []string{"a", "b", "c"} {
@@ -98,7 +95,6 @@ func TestFlatDir_KeepsEveryNameCollision(t *testing.T) {
 	}
 }
 
-// A single nested video flattens up to the root and its emptied dir goes.
 func TestCleanAll_FlattensSingleVideo(t *testing.T) {
 	root := t.TempDir()
 	touch(t, root, "Movie.2024/Movie.2024.mkv")

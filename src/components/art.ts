@@ -1,7 +1,5 @@
-// Every card publishes two colours pulled out of its own artwork, and the
-// surface around it is tinted from them. A deterministic seed derived from the
-// key paints instantly (and covers a missing thumbnail); the real sample
-// replaces it once the image has actually decoded.
+// A deterministic seed from the key paints instantly (and covers a missing
+// thumbnail); the sampled colours replace it once the image has decoded.
 
 type Pair = { a: string; b: string };
 
@@ -20,8 +18,8 @@ const idle: (cb: () => void) => void =
     ? (cb) => requestIdleCallback(() => cb(), { timeout: 500 })
     : (cb) => setTimeout(cb, 24);
 
-// One readback per idle slice. A library row can mount thirty images at once
-// and getImageData is synchronous — batching them all would stall the scroll.
+// One readback per idle slice: getImageData is synchronous and a row mounts
+// thirty images at once.
 function drain() {
   if (draining || !queue.length) return;
   draining = true;
@@ -65,8 +63,7 @@ function surface() {
   return ctx;
 }
 
-// The accent is the most chromatic pixel that is neither crushed nor blown —
-// those two ends carry no usable hue and a frame is mostly one or the other.
+// Most chromatic pixel that is neither crushed nor blown — those ends carry no hue.
 function sample(img: HTMLImageElement): Pair | null {
   const c = surface();
   if (!c || !img.naturalWidth || !img.naturalHeight) return null;
@@ -160,10 +157,8 @@ export function art(node: HTMLElement, key: string) {
   };
 }
 
-// A view-transition-name has to be unique in the document, and the same video
-// is routinely on screen twice (Continue Watching plus its own row). Only the
-// tile the user actually activated carries the name, so the morph has exactly
-// one old snapshot to pair with the player's poster.
+// view-transition-name must be unique per document and the same video is
+// routinely on screen twice — only the activated tile carries the name.
 export function morph(el: HTMLElement | null, key: string) {
   if (named && named !== el) named.style.removeProperty("view-transition-name");
 

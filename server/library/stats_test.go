@@ -8,11 +8,9 @@ import (
 	"time"
 )
 
-// statsTee should write a JSON line for `watched:<vp>` keys with a map
-// value, and silently skip nulls / unrelated keys / non-map values.
 func TestStatsTee(t *testing.T) {
 	dir := t.TempDir()
-	// statsPath is a package const; cd into tempdir so the relative path lands there.
+	// statsPath is a package const — cd so the relative path lands in the tempdir.
 	prev, _ := os.Getwd()
 	t.Cleanup(func() { os.Chdir(prev) })
 	os.Chdir(dir)
@@ -40,17 +38,14 @@ func TestStatsTee(t *testing.T) {
 	}
 }
 
-// Realistic ping stream: 2s cadence within a session, > 30s gaps between
-// sessions. Aggregator must sum ~ session length, split sessions on gap,
-// attribute hours to dir + vp, and bucket the right day in the heatmap.
+// 2s ping cadence within a session; a gap over 30s starts a new one.
 func TestAggregate_TwoSessionsOneVP(t *testing.T) {
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.Local)
 	cutoff := now.AddDate(0, 0, -7)
 
 	vp := "Alpha/ep1.mp4"
-	base := now.Add(-2 * time.Hour).UnixMilli() // 2h ago
+	base := now.Add(-2 * time.Hour).UnixMilli()
 
-	// Session A: 30 pings × 2s = ~60s of watching.
 	var events []statsEvent
 	for i := range 30 {
 		events = append(events, statsEvent{VP: vp, At: base + int64(i*2000), T: float64(60 + i*2)})
@@ -69,9 +64,8 @@ func TestAggregate_TwoSessionsOneVP(t *testing.T) {
 	if s.Sessions != 2 {
 		t.Fatalf("sessions = %d want 2", s.Sessions)
 	}
-	// 30 pings × 2s + 10 pings × 2s = 80s = 1.33 min ≈ 0.022 h.
-	// First ping of each session gets pingCapMs (3s) instead of 2s, so:
-	// A = 3 + 29×2 = 61s; B = 3 + 9×2 = 21s; total = 82s ≈ 0.0228 h.
+	// First ping of a session counts pingCapMs (3s), not 2s: 3+29×2 = 61s and
+	// 3+9×2 = 21s → 82s ≈ 0.0228 h.
 	if s.Hours < 0.020 || s.Hours > 0.025 {
 		t.Fatalf("hours = %f want ~0.022", s.Hours)
 	}
@@ -83,8 +77,7 @@ func TestAggregate_TwoSessionsOneVP(t *testing.T) {
 	}
 }
 
-// A 40s ping gap WITHIN a vp should be treated as a session break (no
-// double-counted span). Verifies the pingCapMs guard catches buffer/seek.
+// A 40s gap within one vp is a session break, not a 40s watched span.
 func TestAggregate_GapClampsTime(t *testing.T) {
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.Local)
 	cutoff := now.AddDate(0, 0, -7)
@@ -92,7 +85,7 @@ func TestAggregate_GapClampsTime(t *testing.T) {
 
 	events := []statsEvent{
 		{VP: "x.mp4", At: base, T: 100},
-		{VP: "x.mp4", At: base + 40_000, T: 102}, // 40s gap → new session, seeded with cap
+		{VP: "x.mp4", At: base + 40_000, T: 102},
 	}
 	s := aggregate(events, "week", cutoff, now)
 	if s.Sessions != 2 {
@@ -104,10 +97,8 @@ func TestAggregate_GapClampsTime(t *testing.T) {
 	}
 }
 
-// Property test: N distinct IPs all attributed to the same user must each
-// get their own tile labelled "user #1" .. "user #N", ordered by hours
-// desc (#1 = heaviest). Single-IP users skip the suffix. Empty IP buckets
-// as "unknown". Driven by a loop so there's no hand-written fixture row.
+// Tiles for one user's N IPs are labelled "user #1".."user #N" by hours desc;
+// a single-IP user skips the suffix.
 func TestAggregate_PerIPLabelling(t *testing.T) {
 	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.Local)
 	cutoff := now.AddDate(0, 0, -7)
@@ -153,8 +144,6 @@ func TestAggregate_PerIPLabelling(t *testing.T) {
 	}
 }
 
-// Switching IPs mid-stream for the same video must split into two sessions
-// on the Gantt (a "watch transfer" between devices = distinct bars).
 func TestAggregate_GanttSplitsOnIPChange(t *testing.T) {
 	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.Local)
 	cutoff := now.AddDate(0, 0, -7)
@@ -178,8 +167,7 @@ func TestAggregate_GanttSplitsOnIPChange(t *testing.T) {
 	}
 }
 
-// Streak detection: three consecutive days of activity, one off-day, then
-// two more → longest = 3.
+// 3 consecutive days, an off-day, then 2 more → longest 3, active 5.
 func TestAggregate_Streak(t *testing.T) {
 	now := time.Date(2026, 5, 23, 23, 0, 0, 0, time.Local)
 	cutoff := now.AddDate(0, 0, -30)

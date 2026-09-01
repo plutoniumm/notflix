@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// AllVideos feeds LiveHashes, which decides whose HLS cache gets deleted —
-// a video it can't see loses its cache mid-stream. It used to stop two
-// levels down.
+// Bug: the walk stopped two levels down. AllVideos feeds LiveHashes, so a
+// video it can't see loses its HLS cache mid-stream.
 func TestAllVideos_WalksFullDepth(t *testing.T) {
 	root := t.TempDir()
 	rels := []string{
@@ -46,9 +45,8 @@ func TestAllVideos_WalksFullDepth(t *testing.T) {
 	}
 }
 
-// A sibling whose name merely extends a root's ("/Volumes/AomineEvil" vs
-// root "/Volumes/Aomine") is not inside that root — a bare prefix test says
-// it is, and FindRoot then hands callers the wrong root for the path.
+// "/Volumes/AomineEvil" is not inside root "/Volumes/Aomine" — a bare prefix
+// test says it is, and FindRoot hands back the wrong root.
 func TestFindRoot_SiblingRootIsNotContained(t *testing.T) {
 	base := t.TempDir()
 	aomine := filepath.Join(base, "Aomine")

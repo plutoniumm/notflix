@@ -21,10 +21,8 @@ var subExts = map[string]bool{
 	".vtt": true, ".srt": true, ".ass": true, ".ssa": true,
 }
 
-// junkExts is a DENYLIST, and deliberately so: the sweep used to delete
-// anything missing from the known-video/sub/keep allowlist, which meant any
-// container the list hadn't heard of (a .m2ts Blu-ray remux, say) was
-// destroyed an hour after it landed. Only what is named here is removed.
+// junkExts is a DENYLIST and must stay one: sweeping on an allowlist miss
+// destroyed containers the list hadn't heard of (a .m2ts remux) an hour in.
 var junkExts = map[string]bool{
 	".part": true, ".!qb": true, ".crdownload": true, ".download": true,
 	".aria2__temp": true, ".tmp": true,
@@ -34,10 +32,8 @@ var junkExts = map[string]bool{
 	".htm": true, ".html": true,
 }
 
-// keepSuffixes are compound suffixes (multi-dot) that an extension lookup
-// can't match against filepath.Ext (which only returns the trailing
-// extension). Kept literally in the tree so recovery paths — .corrupt.bak
-// from repair — are never nuked by the junk sweep.
+// keepSuffixes are compound suffixes filepath.Ext can't match — recovery
+// files like .corrupt.bak must survive the junk sweep.
 var keepSuffixes = []string{".corrupt.bak"}
 
 func CleanAll(roots []string) {
@@ -76,9 +72,7 @@ func cleanRoot(root string) {
 		}
 
 		// A recently-written file is someone's live output (an in-flight
-		// ffmpeg .tmp — possibly from an encoder orphaned by a restart).
-		// Deleting it unlinks the path under the writer and the finished
-		// file is lost. Only sweep files that have gone quiet.
+		// ffmpeg .tmp): deleting it unlinks the path under the writer.
 		if fi, err := d.Info(); err == nil && time.Since(fi.ModTime()) < time.Hour {
 			return nil
 		}
@@ -109,9 +103,8 @@ func cleanRoot(root string) {
 	}
 }
 
-// activeDirs walks root and marks every directory that contains a "busy"
-// file (torrent-owned / sidecar / freshly-written) — the single-source-of-
-// -truth IsBusy check. Those directories are exempt from clean/flatten.
+// activeDirs marks every dir holding an IsBusy file; those are exempt from
+// clean/flatten.
 func activeDirs(root string) map[string]bool {
 	dirs := map[string]bool{}
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -234,10 +227,8 @@ func flatDir(dir string, videoPaths, subPaths []string) {
 	}
 }
 
-// pruneEmpty removes dir only once nothing is left in it, depth first. It
-// replaces the RemoveAll this code used to do: "no video we recognise" is
-// not the same as "nothing of value", and a failed move leaves the file
-// sitting right where the RemoveAll would have taken it out.
+// pruneEmpty replaces a RemoveAll: "no video we recognise" is not "nothing
+// of value", and a failed move leaves the file right where it sits.
 func pruneEmpty(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -280,9 +271,7 @@ func safeMoveDst(dir, name string) string {
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(name, ext)
 
-	// One fixed "_conflict" slot silently overwrote the third sibling of the
-	// same name (three 01.mkv episodes flattened to two survivors), so keep
-	// counting until a name nothing owns comes free.
+	// One fixed "_conflict" slot silently overwrote the third same-named sibling.
 	for i := 2; ; i++ {
 		dst = filepath.Join(dir, fmt.Sprintf("%s_%d%s", base, i, ext))
 		if _, err := os.Stat(dst); err != nil {

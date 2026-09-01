@@ -16,15 +16,12 @@
 
   type State = "idle" | "downloading" | "done" | "error";
 
-  // BackgroundFetch is a secure-context API. Over Tailscale HTTP (the
-  // typical access pattern here) the API surface is missing, and Safari
-  // doesn't ship it at all. We use it ONLY to surface "already saved as
-  // PWA" badges when applicable; the actual download path is a plain
-  // <a download> link that works everywhere.
+  // BackgroundFetch needs a secure context (absent over plain-HTTP Tailscale)
+  // and Safari lacks it entirely — badge only; the real download is <a download>.
   const bgfetch = isSupported();
   const show = $derived(videoParam.endsWith(".mp4"));
-  // ?dl=1 makes the server send Content-Disposition: attachment so Safari
-  // saves instead of opening its inline player.
+  // ?dl=1 -> Content-Disposition: attachment, so Safari saves instead of opening
+  // its inline player.
   const fileURL = $derived(`/video/${videoParam}?dl=1`);
 
   let state = $state<State>("idle");
@@ -48,8 +45,8 @@
           ? "error"
           : "downloading";
     if (state === "downloading" && record.bgFetchId) {
-      // usePoll skips ticks while the tab is hidden — this used to hit
-      // IndexedDB every 500ms in a backgrounded tab forever.
+      // usePoll skips ticks while hidden — this used to hit IndexedDB every
+      // 500ms in a backgrounded tab forever.
       stopPoll = usePoll(async () => {
         // Down.progress is NaN while BackgroundFetch has no downloadTotal yet.
         const p = await Down.progress(record.bgFetchId!);
@@ -65,8 +62,8 @@
     progress = 0;
   }
 
-  // videoParam changes under this component during the in-place next-episode
-  // swap, so the offline state has to be re-read, not just read on mount.
+  // videoParam changes under this component during the in-place episode swap,
+  // so the offline state must be re-read, not just read on mount.
   $effect(() => {
     const vp = videoParam;
     state = "idle";

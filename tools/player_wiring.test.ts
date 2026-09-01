@@ -1,13 +1,11 @@
-// Wiring assertions for the player's mobile/PWA fixes. Everything here is
-// checked against COMPILED component output (or module source for the plain
-// .ts files) — none of it can exercise a real touchscreen, so it guards the
-// wiring, not the behaviour. Run: node tools/player_wiring.test.ts
+// Asserts on the text of COMPILED component output (or module source for the
+// plain .ts files) — it guards the wiring, not the behaviour.
 import { readFileSync } from "node:fs";
 import { register } from "node:module";
 import { compile } from "svelte/compiler";
 
-// Source imports are extensionless (Vite bundler resolution); teach Node to
-// retry with .ts so the real modules load unmodified.
+// Source imports are extensionless (Vite resolution); retry with .ts so the
+// real modules load unmodified.
 register(
   "data:text/javascript," +
     encodeURIComponent(`
@@ -23,8 +21,8 @@ register(
   import.meta.url,
 );
 
-// Runes are compile-time in Svelte but plain calls syntactically, so an
-// identity shim lets the real modules import under bare Node.
+// Runes are compile-time in Svelte but plain calls syntactically; an identity
+// shim lets the real modules import under bare Node.
 (globalThis as any).$state = Object.assign((v: any) => v, {
   snapshot: (v: any) => v,
 });
@@ -46,7 +44,6 @@ function built(f: string) {
   return { source, js: out.js.code, css: out.css?.code ?? "" };
 }
 
-// --- scrub bar: pointer events cover mouse and touch in one path ---
 const dock = built("dock.svelte");
 for (const ev of ["pointerdown", "pointermove", "pointerup", "pointercancel", "pointerleave"])
   check(`dock listens for ${ev}`, dock.js.includes(ev));
@@ -56,14 +53,13 @@ check("dock captures the pointer", dock.js.includes("setPointerCapture"));
 check("dock releases the pointer", dock.js.includes("releasePointerCapture"));
 check("dock track opts out of browser gestures", dock.css.includes("touch-action: none"));
 
-// One seek on press, one on release — never one per move, which restarts the
-// in-flight HLS segment fetch dozens of times a second.
+// One seek on press, one on release: a seek per move restarts the in-flight
+// HLS segment fetch dozens of times a second.
 const moveBody = dock.source.match(/function onMove\([^)]*\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
 check("dock onMove found", moveBody.length > 0);
 check("dock onMove does not seek", !moveBody.includes("onSeek("));
 check("dock seeks exactly twice", (dock.source.match(/\bonSeek\(/g) ?? []).length === 2);
 
-// --- Player: inline playback, safe area, leave-saves, no PiP on visibility ---
 const player = built("Player.svelte");
 check("video tag is playsinline", player.js.includes("playsinline"));
 check("videojs opts set playsinline", player.source.includes("playsinline: true"));
@@ -79,7 +75,6 @@ check("falls back to direct mp4 on decode error", /err\.code === 3 \|\| err\.cod
 check("videoList is silent", player.source.includes("videoList({ silent: true })"));
 check("audio info is silent", player.source.includes("info(param, { silent: true })"));
 
-// --- safe-area insets (inert until viewport-fit=cover lands in index.html) ---
 check("bar pads the notch", built("bar.svelte").css.includes("env(safe-area-inset-top)"));
 check("dock pads the home indicator", dock.css.includes("env(safe-area-inset-bottom)"));
 check("dock pads the landscape notch", dock.css.includes("env(safe-area-inset-left)"));
@@ -87,13 +82,11 @@ const skip = built("skip.svelte");
 check("skip clears the home indicator", skip.css.includes("env(safe-area-inset-bottom)"));
 check("skip clears the landscape notch", skip.css.includes("env(safe-area-inset-right)"));
 
-// --- Up Next rail: tappable, and gone where it would only eat taps ---
 const rail = built("related.svelte");
 check("rail toggles on click", /onclick[\s\S]{0,80}open\s*=\s*!open/.test(rail.source));
 check("rail hides without hover", /@media \(hover: none\)[\s\S]{0,80}display: none/.test(rail.css));
 check("rail clears the landscape notch", rail.css.includes("left: env(safe-area-inset-left)"));
 
-// --- plain modules ---
 const ux = src("ux.ts");
 check(
   "hotkeys take a fullscreen callback",
@@ -103,7 +96,7 @@ check("no container.requestFullscreen", !ux.includes("container.requestFullscree
 check("PiP is gesture-driven", ux.includes("export function togglePip"));
 check("PiP has the WebKit path", ux.includes("webkitSetPresentationMode"));
 // A tap outside the centre third used to do nothing, which reads as a dead
-// player; the play/pause timer is now unconditional.
+// player; the play/pause timer must stay unconditional.
 check(
   "single tap toggles anywhere",
   !/if \(x > w \/ 3 && x < \(2 \* w\) \/ 3\) \{\s*if \(tapTimer\)/.test(ux),
@@ -115,21 +108,19 @@ check("avsync is gated off iOS", avsync.includes("IS_IOS"));
 check("avsync exposes availability", avsync.includes("get on()"));
 check("avsync resumes on playing", avsync.includes('addEventListener("playing"'));
 
-// --- AV1 capability hint on the master request ---
 check("master URL carries the av1 hint", /master\?file=\$\{[^}]+\}&av1=\$\{av1\}/.test(player.source));
-// The server recognises only the literal "1"/"0" — anything else (including a
-// stringified boolean) falls through to its User-Agent heuristic.
+// The server honours only the literal "1"/"0" — anything else (a stringified
+// boolean included) falls through to its User-Agent heuristic.
 check("hint is a literal 1 or 0", player.source.includes("const av1 = av1Ok() ? 1 : 0"));
-// Master only: it hands out URLs for whichever codec it resolved, so the
-// choice propagates to variant/segment/init on its own.
+// Master only: it hands out URLs for the codec it resolved, so the choice
+// propagates to variant/segment/init on its own.
 check("hint is on the master request only", (player.source.match(/av1=/g) ?? []).length === 1);
 
 const AV1 = 'video/mp4; codecs="av01.0.05M.08"';
 const { av1Ok } = await import("../src/player/ux.ts");
 
-// canPlayType answers "", "maybe" or "probably" — only "" means no. The
-// undeterminable cases must answer 0, since h264 always plays but a wrong
-// yes is a black screen.
+// canPlayType answers "", "maybe" or "probably" — only "" means no, and the
+// undeterminable cases must answer no: a wrong yes is a black screen.
 function probe(mse: unknown, canPlay: unknown): boolean {
   (globalThis as any).window =
     mse === "absent" ? {} : { MediaSource: { isTypeSupported: () => mse } };

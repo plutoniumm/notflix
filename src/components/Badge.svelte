@@ -1,9 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
-  // Inline label/chip. Variants mirror the previously-duplicated styles 1:1
-  // (Search chips/tag/quality/group, Subs provider badge) so the rendered
-  // look is unchanged.
   let {
     variant = "chip",
     class: klass = "",

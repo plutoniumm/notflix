@@ -20,17 +20,10 @@ import (
 	"notflix/server/x/httpc"
 )
 
-// Organize is the LLM-assisted library categorizer. The model only ever sees
-// an indexed list of loose root-level files and existing folder names, and
-// answers with {index → folder} — filenames never round-trip through the
-// model, so a hallucinated path can't corrupt a move. The plan endpoint is a
-// pure dry run; nothing touches disk until the user approves a subset and
-// posts it back to apply. A single completion is flaky — blank or truncated
-// answers happen — so the plan runs several classifications and merges them
-// by per-file vote before validating. Plan generation is a background job:
-// POST /plan starts it, GET /status polls the stage — Ollama serializes the
-// runs anyway, so they execute sequentially and run 3 is skipped when the
-// first two already agree.
+// The model only ever sees an indexed file list + existing folder names and
+// answers {index → folder} — filenames never round-trip, so a hallucination
+// can't corrupt a move. Nothing touches disk until the user approves a subset.
+// A single completion is flaky, so runs are merged by per-file vote.
 
 type OrgItem struct {
 	File string `json:"file"` // basename, lives at the root level
@@ -44,8 +37,8 @@ type OrgMove struct {
 	Folder string `json:"folder"`
 }
 
-// organizeItems lists loose videos at each root's top level. Videos already
-// inside folders are curated groupings (series, franchises) — left alone.
+// Loose videos at each root's top level only; anything already in a folder is
+// a curated grouping and is left alone.
 func organizeItems(lib *library.Library) []OrgItem {
 	var out []OrgItem
 	for _, root := range lib.Roots {
@@ -59,9 +52,7 @@ func organizeItems(lib *library.Library) []OrgItem {
 	return out
 }
 
-// existingFolders maps root-base → folder → video count, so the model can
-// route loose files into folders that already exist and the validator can
-// count existing occupants toward the ≥2 minimum.
+// root-base → folder → video count; the count feeds validMoves' ≥2 rule.
 func existingFolders(lib *library.Library) map[string]map[string]int {
 	out := map[string]map[string]int{}
 	for _, root := range lib.Roots {
@@ -124,14 +115,10 @@ Return ONLY a JSON object: {"moves":[{"i":<file index>,"folder":"<folder name>"}
 		string(foldersJSON), string(filesJSON))
 }
 
-// Generous — a whole-library prompt on a cold model — but finite: an asleep
-// ollama host accepts the connection and never answers, which used to hang a
-// plan run forever.
+// Generous (whole-library prompt, cold model) but finite: an asleep ollama
+// host accepts the connection and never answers.
 const organizeTimeout = 10 * time.Minute
 
-// organizeChat is a single JSON-mode chat completion against the shared
-// ollama host. One prompt, one answer — no batching. Model availability is
-// checked once by the job runner, not per call.
 func organizeChat(prompt string) (string, error) {
 	req := map[string]any{
 		"model":      ollamaModel(),
@@ -180,11 +167,8 @@ func parseOrganize(content string) ([]orgAssign, error) {
 	return obj.Moves, nil
 }
 
-// mergeAssigns fuses several classification runs by per-index vote: the
-// folder most runs agree on wins, ties resolved toward earlier runs so all
-// files of a group keep one coherent folder name. An index only one run
-// assigned still passes through — that's the point, flaky runs leave gaps
-// the others fill.
+// Per-index vote, ties toward earlier runs. An index only one run assigned
+// still passes through — flaky runs leave gaps the others fill.
 func mergeAssigns(runs [][]orgAssign) []orgAssign {
 	votes := map[int]map[string]int{}
 	best := map[int]string{}
@@ -224,11 +208,8 @@ func folderOK(name string) bool {
 	return !strings.ContainsAny(name, `/\`)
 }
 
-// validMoves filters raw model output down to executable moves: sane folder
-// names, in-range indices, and no folder that would end up holding a single
-// video (CleanAll would flatten it right back to the root on the next run).
-// existing counts folder occupants per root-base so topping up an existing
-// folder with one more file survives.
+// A folder that would hold a single video is dropped — CleanAll flattens it
+// straight back to the root. existing counts occupants already in the folder.
 func validMoves(items []OrgItem, assigns []orgAssign, existing map[string]map[string]int) []OrgMove {
 	type group struct{ root, folder string }
 	byGroup := map[group][]OrgMove{}
@@ -266,8 +247,7 @@ const (
 	organizeConverge = 0.8
 )
 
-// assignMap dedups a run to {index → folder}, first non-blank assignment per
-// index winning — the same dedup mergeAssigns applies when voting.
+// First non-blank assignment per index wins — the dedup mergeAssigns votes on.
 func assignMap(run []orgAssign) map[int]string {
 	m := map[int]string{}
 	for _, a := range run {
@@ -282,9 +262,8 @@ func assignMap(run []orgAssign) map[int]string {
 	return m
 }
 
-// runsAgree measures agreement between two runs: identical assignments over
-// the union of indices either run covered. At ≥ organizeConverge the third
-// run adds nothing the vote would change, so the job skips it.
+// Identical assignments over the union of indices either run covered; at
+// ≥organizeConverge the third run can't change the vote, so it's skipped.
 func runsAgree(a, b []orgAssign) float64 {
 	am, bm := assignMap(a), assignMap(b)
 	union := len(am)
@@ -314,8 +293,8 @@ type orgStatus struct {
 	Error string    `json:"error"`
 }
 
-// The one organize job. A finished plan stays in orgState until the next
-// plan (or an apply) resets it, so a reloaded page can still fetch it.
+// A finished plan stays until the next plan or apply resets it, so a reloaded
+// page can still fetch it.
 var (
 	orgMu      sync.Mutex
 	orgState   = orgStatus{Stage: "idle", Moves: []OrgMove{}}
@@ -411,9 +390,7 @@ func runOrganize(lib *library.Library) {
 	orgSet(func(s *orgStatus) { s.Stage = "done"; s.Moves = moves; s.Total = len(items) })
 }
 
-// OrganizePlan starts plan generation in the background and returns the
-// job's current state immediately. If a job is already running the caller
-// just gets that state back — polling picks up from wherever it is.
+// Returns immediately; an already-running job just gets its state back.
 func OrganizePlan(c *gin.Context, lib *library.Library) {
 	orgMu.Lock()
 	if !orgRunning(orgState.Stage) {
@@ -429,9 +406,8 @@ func OrganizeStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, orgSnap())
 }
 
-// OrganizeWarm fires a background model load and returns at once. The
-// frontend calls it when the Organize section mounts, so the cold-load
-// minute is usually already paid by the time the user asks for a plan.
+// Fired when the Organize section mounts, so the cold-load minute is usually
+// paid before the user asks for a plan.
 func OrganizeWarm(c *gin.Context) {
 	if orgWarming.CompareAndSwap(false, true) {
 		go func() {
@@ -444,8 +420,7 @@ func OrganizeWarm(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"warming": true})
 }
 
-// applyMove relocates one root-level video (plus subtitle sidecars) into
-// root/folder. Same-filesystem rename only — plan moves never cross roots.
+// Same-filesystem rename only — plan moves never cross roots.
 func applyMove(root string, m OrgMove) error {
 	src := filepath.Join(root, m.File)
 	if _, err := os.Stat(src); err != nil {
@@ -472,11 +447,8 @@ func applyMove(root string, m OrgMove) error {
 	return nil
 }
 
-// sidecars lists the subtitle files belonging to video (both in dir).
-// filepath.Glob is unusable here: a "[" in a release name — every -[YTS.MX]
-// rip, 7% of the library — reads as a character class, so the pattern matches
-// nothing and returns a nil error. Go ships no glob escaper, so scan the
-// directory instead.
+// filepath.Glob is unusable here: a "[" in a release name (-[YTS.MX], ~7% of
+// the library) reads as a character class — no match, nil error. Scan the dir.
 func sidecars(dir, video string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -513,9 +485,8 @@ func OrganizeApply(c *gin.Context, lib *library.Library) {
 		roots[filepath.Base(r)] = r
 	}
 
-	// "Filenames never round-trip through the model" only holds up to the
-	// plan — the client posts back whatever it likes. Every applied move must
-	// be one this server planned, or /apply is an arbitrary file-mover.
+	// The client posts back whatever it likes, so every applied move must be one
+	// this server planned — else /apply is an arbitrary file-mover.
 	planned := map[OrgMove]bool{}
 	for _, m := range orgSnap().Moves {
 		planned[m] = true

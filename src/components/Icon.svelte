@@ -1,9 +1,6 @@
 <script lang="ts">
-  // Central inline-SVG registry. Each entry carries the exact viewBox /
-  // intrinsic size / stroke|fill setup of the original inline SVG; shapes are
-  // real Svelte SVG nodes (NOT {@html} — that renders in the HTML namespace
-  // inside <svg> and breaks). `color` drives currentColor (used by the
-  // Download error state); omit to inherit. `size` overrides both dims.
+  // Shapes must be real Svelte SVG nodes: {@html} renders in the HTML
+  // namespace inside <svg> and breaks.
   let {
     name,
     size,

@@ -15,8 +15,6 @@ import (
 
 const osUA = "notflix v1.0.0"
 
-// OpenSubtitlesClient wraps auth + search + download against the OS REST API.
-// Token is cached in-memory for ~23h and refreshed on demand.
 type OpenSubtitlesClient struct {
 	apiKey string
 	user   string
@@ -40,8 +38,7 @@ var osClient = NewOpenSubtitlesClient()
 
 func (c *OpenSubtitlesClient) Enabled() bool { return c.apiKey != "" }
 
-// Search runs the OS subtitles query (raw urlencoded params, e.g. "moviehash=...").
-// Returns an empty slice on any failure; logs go to stdout.
+// Search takes raw urlencoded params ("moviehash=..."); nil on any failure.
 func (c *OpenSubtitlesClient) Search(params string, byHash bool) []SubResult {
 	if c.apiKey == "" {
 		return nil
@@ -107,12 +104,8 @@ func (c *OpenSubtitlesClient) Search(params string, byHash bool) []SubResult {
 	return out
 }
 
-// token returns a cached login token, or empty string if creds are missing or
-// login fails. Tokens are cached for 23 hours.
-//
-// c.mu is held only around the cached value, never across the login POST: a
-// slow login used to queue every other downloader behind it. loginMu keeps
-// that single-flight anyway, so a burst of requests still logs in once.
+// c.mu covers only the cached value, never the login POST (a slow login used to
+// queue every downloader behind it); loginMu single-flights the login.
 func (c *OpenSubtitlesClient) token() string {
 	if c.user == "" || c.pass == "" {
 		return ""
@@ -189,9 +182,7 @@ func (c *OpenSubtitlesClient) login() string {
 	return result.Token
 }
 
-// Download asks OS for a download URL for the given file_id, retrying up to 3
-// times on 429/503. Returns (link, filename, "") on success, or
-// ("", "", message) describing the failure.
+// Download returns ("", "", message) on failure; retries 429/503.
 func (c *OpenSubtitlesClient) Download(fileID int) (link, filename, errMsg string) {
 	tok := c.token()
 	rb, _ := json.Marshal(map[string]int{"file_id": fileID})

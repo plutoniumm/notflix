@@ -15,15 +15,9 @@ import (
 	"notflix/server/library"
 )
 
-// Small pool so per-file thumb calls from toMP4 don't blow up ffmpeg
-// concurrency when a batch of conversions all land at once. The bulk
-// RegenerateThumbnails path is separate and single-threaded.
+// Small pool so per-file thumb calls from toMP4 don't swamp ffmpeg concurrency.
 var thumbPool = jobs.NewPool(4)
 
-// GenerateThumbAsync queues thumbnail creation for src on the shared pool.
-// Skips silently if the destination already exists. Mirrors
-// GenerateSpriteAsync / jobs.AutoWhisper so toMP4 can fan out downstream
-// work per-file without blocking convert throughput.
 func GenerateThumbAsync(src string) {
 	go func() {
 		thumbPool.Acquire()
@@ -143,9 +137,7 @@ func RegenerateThumbnails(lib *library.Library, minInterval time.Duration) {
 				return nil
 			}
 
-			// ScanCorrupt runs ahead of RegenerateThumbnails in ProcessAll
-			// (convert.go) — skipping here silences the per-file `moov atom
-			// not found` log dumps that otherwise repeat on every pass.
+			// Skip known-corrupt files: silences the repeated `moov atom not found` dumps.
 			if library.IsCorrupt(path) {
 				skipped++
 				return nil

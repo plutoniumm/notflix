@@ -44,12 +44,9 @@ func newYTGID() string {
 	return "yt" + hex.EncodeToString(b)
 }
 
-// IsYT reports whether a gid was issued by the yt-dlp manager.
 func IsYT(gid string) bool { return strings.HasPrefix(gid, "yt") }
 
-// IsYTCandidate decides whether to hand a URL to yt-dlp instead of aria2.
-// magnet/torrent and URLs ending in a known media extension stay on aria2;
-// everything else http(s) goes to yt-dlp.
+// magnet/torrent and direct-media URLs stay on aria2; other http(s) is yt-dlp.
 func IsYTCandidate(uri string) bool {
 	low := strings.ToLower(strings.TrimSpace(uri))
 	if !strings.HasPrefix(low, "http://") && !strings.HasPrefix(low, "https://") {
@@ -107,10 +104,8 @@ func YTDlpAdd(url, dir string, lib *library.Library) (string, error) {
 		url,
 	}
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
-	// yt-dlp forks its own ffmpeg for the mux. Signalling the direct child
-	// leaves that ffmpeg writing into a library root, which the next server
-	// run then stomps — so give the download its own process group and
-	// always signal the group.
+	// yt-dlp forks its own ffmpeg for the mux: signal the group, or that ffmpeg
+	// keeps writing into a library root and the next run stomps it.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return killGroup(cmd, syscall.SIGKILL) }
 
@@ -219,10 +214,8 @@ func YTDlpRemove(gid string) {
 	log.Printf("[yt-dlp] remove gid=%s", gid)
 }
 
-// YTDlpStopAll TERMs every running download. Nothing else covers these: on
-// SIGTERM aria2c and the ffmpegs get taken down, but an orphaned yt-dlp keeps
-// writing into a library root and the next server run stomps what it wrote.
-// Wire into the signal handler alongside Aria2Stop.
+// Nothing else covers these on shutdown: an orphaned yt-dlp keeps writing into
+// a library root and the next run stomps it. Wire in alongside Aria2Stop.
 func YTDlpStopAll() {
 	ytMu.Lock()
 	running := make([]*ytJob, 0, len(ytJobs))
@@ -239,8 +232,7 @@ func YTDlpStopAll() {
 	}
 }
 
-// stopJob signals the whole group (CONT first, so a paused download can act on
-// the TERM) and then cancels, which KILLs the group if TERM wasn't enough.
+// CONT first, so a paused download can act on the TERM; Cancel then KILLs.
 func stopJob(j *ytJob) {
 	killGroup(j.Cmd, syscall.SIGCONT)
 	killGroup(j.Cmd, syscall.SIGTERM)
@@ -254,9 +246,8 @@ func killGroup(cmd *exec.Cmd, sig syscall.Signal) error {
 		return nil
 	}
 
-	// Signal the handle first: os.Process refuses once the child has been
-	// reaped (ErrProcessDone), which keeps the raw group kill below from ever
-	// landing on a pid the OS has since recycled.
+	// Signal the handle first: os.Process refuses once reaped (ErrProcessDone),
+	// so the raw group kill can't land on a recycled pid.
 	if err := cmd.Process.Signal(sig); err != nil {
 		return err
 	}

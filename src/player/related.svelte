@@ -5,7 +5,6 @@
 
   let open = $state(false);
 
-  // Show only when paused and the current dir actually has siblings.
   const files = $derived(
     (rows as [string, any[]][])?.find(([d]) => d === dir)?.[1] ?? [],
   );
@@ -99,8 +98,7 @@
       transform: translateX(-14px);
     }
   }
-  /* Hover-only affordance. On a phone the strip can never be opened but
-     still swallows taps in the left edge — part of the back-10s zone. */
+  /* On touch the strip can never open but would swallow taps in the back-10s zone. */
   @media (hover: none) {
     .rail { display: none; }
   }

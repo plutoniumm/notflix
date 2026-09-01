@@ -1,8 +1,7 @@
-// Runtime tests for watch-progress persistence. Run: node tools/watch.test.ts
 import { register } from "node:module";
 
-// Source imports are extensionless (Vite bundler resolution); teach Node to
-// retry with .ts so the real modules load unmodified.
+// Source imports are extensionless (Vite resolution); retry with .ts so the
+// real modules load unmodified.
 register(
   "data:text/javascript," +
     encodeURIComponent(`
@@ -18,8 +17,8 @@ register(
   import.meta.url,
 );
 
-// Runes are compile-time in Svelte but plain calls syntactically, so an
-// identity shim lets the real modules import under bare Node.
+// Runes are compile-time in Svelte but plain calls syntactically; an identity
+// shim lets the real modules import under bare Node.
 (globalThis as any).$state = Object.assign((v: any) => v, {
   snapshot: (v: any) => v,
 });
@@ -81,8 +80,8 @@ const reset = () => {
   gets = [];
 };
 
-// END_CUTOFF_S is 300. A flat cutoff cleared every position of any video
-// shorter than that, so a short clip could never save progress at all.
+// The end cutoff is min(END_CUTOFF_S=300, 10% of runtime): a flat 300 cleared
+// every position of any video shorter than that, so short clips never saved.
 reset();
 w.save("clip.mp4", 100, 240); // 4-minute clip, 140s from the end
 check("short clip saves", posts.length === 1 && posts[0].body.value?.t === 100, posts);
@@ -104,7 +103,7 @@ w.save("film.mp4", 30, 7200); // below RESUME_THRESHOLD_S
 check("no save below threshold", posts.length === 0, posts);
 
 reset();
-w.save("film.mp4", 99999, 7200); // insane position, rejected
+w.save("film.mp4", 99999, 7200);
 check("insane position rejected", posts.length === 0, posts);
 
 // The leave path must use sendBeacon: a suspending page drops a plain fetch.
@@ -117,8 +116,8 @@ reset();
 w.clear("film.mp4");
 check("clear beacons null", beacons.length === 1 && beacons[0].value === null, beacons);
 
-// Resume must be silent: a red toast over the video on every flaky request
-// is worse than starting from zero, which is what happens anyway.
+// Resume must be silent — a red toast on every flaky request is worse than
+// starting from zero, which is what happens anyway.
 reset();
 toast.items = [];
 getFails = true;

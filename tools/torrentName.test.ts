@@ -1,5 +1,3 @@
-// Regression cases for the torrent-name parser. Run: node tools/torrentName.test.ts
-// (Node >= 22.7 strips the types natively; no build step.)
 import { parseName, parseDirSeason } from "../src/library/torrentName.ts";
 
 type Case = {
@@ -10,8 +8,8 @@ type Case = {
   year?: number;
 };
 
-// Possessive "'s" before a number is not a season marker. Three unrelated
-// films used to share a fake "Ocean'" show key with seasons 11/12/13.
+// Possessive "'s" before a number is not a season marker — three unrelated
+// films once shared a fake "Ocean'" show key with seasons 11/12/13.
 const cases: Case[] = [
   { name: "Ocean's 11", season: undefined, title: "Ocean's 11" },
   { name: "Ocean's 12", season: undefined },
@@ -42,8 +40,8 @@ for (const c of cases) {
   }
 }
 
-// groupRows folds directories that share a title AND carry a season marker,
-// so the possessive bug has to be dead at the parseDirSeason level too.
+// groupRows folds dirs sharing a title AND a season marker, so the possessive
+// bug has to be dead at the parseDirSeason level too.
 for (const d of ["Ocean's 11", "Ocean's 12", "Ocean's 13"]) {
   const s = parseDirSeason(d);
   if (s.season !== undefined || s.range) {
@@ -52,7 +50,6 @@ for (const d of ["Ocean's 11", "Ocean's 12", "Ocean's 13"]) {
   }
 }
 
-// Season grouping must still work for real shows.
 const grp = ["Breaking Bad S01", "Breaking Bad S02"].map(parseDirSeason);
 if (grp[0].season !== 1 || grp[1].season !== 2 || grp[0].title !== grp[1].title) {
   failed++;

@@ -29,9 +29,8 @@ func TestAacArgs_PreservesSurroundDownmixesStereo(t *testing.T) {
 		t.Errorf("stereo source = %q, want stereo at rung bitrate", g)
 	}
 
-	// Unnamed multichannel (the Drive 2011 regression: AAC 6ch w/
-	// channel_layout="unknown" — the native AAC encoder fails the segment
-	// with "Unsupported channel layout 6 channels" unless we downmix).
+	// Drive (2011) regression: 6ch AAC with channel_layout="unknown" fails the
+	// segment with "Unsupported channel layout 6 channels" unless downmixed.
 	for _, layout := range []string{"", "unknown", "6 channels", "5 channels"} {
 		bad := &srcInfo{aChannels: []int{6}, aLayouts: []string{layout}}
 		g := strings.Join(aacArgs(bad, 0, "128k"), " ")
@@ -40,7 +39,6 @@ func TestAacArgs_PreservesSurroundDownmixesStereo(t *testing.T) {
 		}
 	}
 
-	// Unknown srcInfo / out-of-range index → safe stereo default.
 	if g := strings.Join(aacArgs(nil, 0, "96k"), " "); !strings.Contains(g, "-ac 2") {
 		t.Errorf("nil srcInfo must default to stereo, got %q", g)
 	}
@@ -49,14 +47,8 @@ func TestAacArgs_PreservesSurroundDownmixesStereo(t *testing.T) {
 	}
 }
 
-// (No e2e for unnamed-multichannel: lavfi auto-assigns a "5.1" layout to a
-// 6-channel source, so the exact "unknown"/"6 channels" container metadata
-// can't be reproduced synthetically. The unit cases above cover every layout
-// string the encoder rejects in the wild — that's the real regression guard.)
-
-// TestE2E_SurroundSegmentKeeps5_1 runs the real segment encoder on a 5.1
-// source and asserts the rendition is still 6-channel (surround preserved,
-// not silently downmixed to stereo).
+// No e2e for unnamed multichannel: lavfi auto-assigns a "5.1" layout to a
+// 6-channel source, so "unknown" container metadata can't be reproduced.
 func TestE2E_SurroundSegmentKeeps5_1(t *testing.T) {
 	if testing.Short() {
 		t.Skip("ffmpeg-driven; -short")

@@ -74,8 +74,6 @@
     z-index: 9;
     transition: background var(--motion, 0.3s) var(--ease-out);
   }
-  /* The bar only asserts itself while it's being used — the parent can't know
-     a field three nodes down has focus without :has(). */
   .form-wrap:has(.field:focus) {
     background: color-mix(in oklab, var(--bg-1) 88%, transparent);
   }

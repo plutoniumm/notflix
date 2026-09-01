@@ -12,10 +12,8 @@ import (
 	"notflix/server/library"
 )
 
-// makeMultiTrackMKV builds a 2s clip with TWO audio tracks (a:0 jpn, a:1 eng —
-// English deliberately NOT first) and TWO subtitle tracks (s:0 eng, s:1 spa).
-// Skips if ffmpeg is unavailable. Used to prove conversion keeps every track
-// and defaults audio to English.
+// Two audio tracks (a:0 jpn, a:1 eng — English deliberately NOT first) and
+// two subtitle tracks (s:0 eng, s:1 spa).
 func makeMultiTrackMKV(t *testing.T, root, name string) string {
 	t.Helper()
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -112,10 +110,6 @@ func TestExtractAllSubs_EveryTextTrackToSidecar(t *testing.T) {
 	}
 }
 
-// TestE2E_RemuxKeepsAllAudioAndDefaultsEnglish runs the real conversion
-// (libx264 source → AV1 MP4) and asserts via ffprobe that BOTH audio tracks
-// survive and the English one carries the container default disposition,
-// and that both subtitle tracks landed as sidecars.
 func TestE2E_RemuxKeepsAllAudioAndDefaultsEnglish(t *testing.T) {
 	if testing.Short() {
 		t.Skip("ffmpeg-driven; -short")

@@ -28,35 +28,21 @@ const (
 	port   = "4242"
 )
 
-// configuredRoots is the desired root set. Two flavours coexist:
-//   - "~/…" paths: expanded via $HOME, auto-created on boot. The home
-//     dir is presumed writable; if not, the root is skipped non-fatally.
-//   - "/Volumes/…" paths: aspirational mounts. Never created (creating
-//     a regular dir at a mountpoint would silently shadow the volume).
-//     Skipped non-fatally if the drive isn't mounted.
-//
-// Any other absolute path is treated the same as a /Volumes path: must
-// pre-exist or it's dropped.
+// "~/…" roots are auto-created; any other absolute path must pre-exist —
+// creating a dir at a mountpoint would silently shadow the unmounted volume.
 var configuredRoots = []string{
 	"~/Videos",
 	"/Volumes/Aomine",
 }
 
-// rootCaps maps a (possibly-tilde'd) configured root to a UI-only soft
-// quota in bytes. Cosmetic only — writes aren't enforced; the user can
-// blow past the cap and the UI just stops budgeting. Use this for roots
-// that share a filesystem with the boot disk (~/Videos), so the disk
-// strip doesn't drown out the others by showing the full Mac SSD.
+// rootCaps is a UI-only soft quota — writes aren't enforced; it only shapes
+// what the UI budgets against for roots sharing the boot disk.
 var rootCaps = map[string]uint64{
-	"~/Videos": 64 << 30, // 64 GiB
+	"~/Videos": 64 << 30,
 }
 
 var lib = &library.Library{}
 
-// resolveRoot expands a configured root entry to an absolute path.
-// "~/X" → "$HOME/X" (only if home was resolvable); other strings are
-// passed through. Returns ok=false when a "~" entry can't be expanded
-// because the home dir is unknown.
 func resolveRoot(raw, home string, homeOK bool) (string, bool) {
 	if strings.HasPrefix(raw, "~/") {
 		if !homeOK {
@@ -84,10 +70,7 @@ func pulse() {
 func main() {
 	_ = godotenv.Load()
 
-	// Build the active root set. Every step is non-fatal — boot must
-	// survive missing drives, unwritable home dirs, or any other per-root
-	// permission glitch so the server still answers requests against
-	// whatever roots are actually reachable.
+	// Every step below is non-fatal: boot must survive missing drives.
 	lib.Caps = map[string]uint64{}
 
 	home, homeErr := os.UserHomeDir()
@@ -101,9 +84,6 @@ func main() {
 			continue
 		}
 
-		// Tilde'd entries are ours to create; bare absolute paths must
-		// pre-exist (creating them would shadow unmounted volumes or
-		// require root permission we don't have).
 		isManaged := strings.HasPrefix(raw, "~")
 		if isManaged {
 			if !library.EnsureDir(abs) {
@@ -137,8 +117,7 @@ func main() {
 	library.EnsureDir("./cache")
 
 	jobs.OnDownloads = media.ProcessAll
-	// Adapter: jobs.Identity → library.Device. Library can't import jobs
-	// (would cycle), so it declares its own struct with the same shape.
+	// library can't import jobs (cycle), so Device mirrors jobs.Identity.
 	library.IdentityFromIP = func(ip string) library.Device {
 		i := jobs.TailscaleIdentity(ip)
 		return library.Device{
@@ -146,16 +125,14 @@ func main() {
 			OS: i.OS, Login: i.Login, Tags: i.Tags, Online: i.Online,
 		}
 	}
-	jobs.TailscaleInit() // warm the IP→identity cache + keep it warm in bg
+	jobs.TailscaleInit()
 
 	library.IsTorrentBusy = jobs.Aria2Owns
 
 	recovered := library.PipelineInit()
 	for _, r := range recovered {
-		// Convert writes to <dst>.tmp before an atomic rename. If it died
-		// mid-run, the .tmp is a truncated partial — delete so the redo
-		// starts clean. Sprite/thumb/whisper don't leak .tmp siblings; the
-		// ledger reset alone is enough to trigger a redo on next sweep.
+		// Convert's <dst>.tmp is a truncated partial after a crash — delete so
+		// the redo starts clean. No other step leaks a .tmp sibling.
 		if r.Step == "convert" {
 			base := strings.TrimSuffix(r.Path, filepath.Ext(r.Path))
 			for _, sfx := range []string{".mp4.tmp", ".audio.tmp", ".audio.tmp.mp4"} {
@@ -167,7 +144,7 @@ func main() {
 	}
 
 	media.LogEncoders()
-	go media.ProcessAll(lib) // runs ScanCorrupt internally after Convert+Clean
+	go media.ProcessAll(lib)
 	go media.NormalizeSubs(lib)
 	go jobs.Aria2Init(lib)
 	media.StartCacheCleanLoop(lib, time.Hour)
@@ -248,10 +225,8 @@ func main() {
 	router.GET("/api/subs/whisper/status", jobs.SubsWhisperStatus)
 	router.GET("/api/subs/whisper/stream", func(c *gin.Context) { jobs.SubsWhisperStream(c, lib) })
 
-	// On TERM/INT, take the children down too: cancel every FFRun (ffmpeg)
-	// and TERM aria2c. Orphaned encoders from past restarts kept writing
-	// outputs the next server run then stomped (Bleach 001–010, 2026-07-29),
-	// and an orphaned aria2c squats :6800 wedging every later spawn.
+	// Take the children down too: an orphaned ffmpeg keeps writing outputs the
+	// next run then stomps them, and an orphaned aria2c squats :6800.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go func() {

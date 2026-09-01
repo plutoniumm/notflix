@@ -1,10 +1,5 @@
-// Run: pnpm run build && node --test tools/mobile.test.ts
-//
-// Touch/PWA rules can't be exercised without a device, but they are all
-// statements about the compiled bundle — so assert on that. Each case here
-// stands for a bug that shipped: controls revealed only by :hover stay
-// invisible-but-tappable on a phone, sub-16px fields zoom iOS in and never
-// out, and 100vh/no-safe-area leaves content under the notch.
+// Touch/PWA rules can't be exercised without a device, so these assert on the
+// text of the COMPILED bundle — run `pnpm run build` first.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -46,14 +41,13 @@ const rule = (sel: string) => {
 };
 
 test("touch reveals every control that hover would", () => {
-  // Continue Watching's ✕ — an opacity-0 button still takes taps, so this was
-  // an invisible delete sitting where a thumb lands on the card.
+  // An opacity-0 ✕ still takes taps: an invisible delete under the thumb.
   const cw = rule(".cw-remove");
   assert.match(cw, /opacity:\.?\d/);
   assert.doesNotMatch(cw, /opacity:0[;}]/);
 
-  // FileRow's rename + delete live in an opacity-0 wrapper; a transparent
-  // parent hides the children whatever their own opacity says.
+  // FileRow's controls sit in an opacity-0 wrapper; a transparent parent hides
+  // the children whatever their own opacity says.
   assert.match(rule(".actions"), /opacity:1/);
 
   assert.match(rule(".scroll-arrow"), /opacity:\.?\d/);
@@ -78,7 +72,7 @@ test("safe-area insets are defined and consumed", () => {
   assert.match(css, /--safe-t:\s*env\(safe-area-inset-top/);
   assert.match(css, /--safe-b:\s*env\(safe-area-inset-bottom/);
 
-  // Top chrome (page headers) and bottom chrome (toasts, the Home panel).
+  // Two each: page headers up top, toasts + the Home panel at the bottom.
   assert.ok(
     css.split("var(--safe-t)").length - 1 >= 2,
     "expected the page headers to pad for the notch",

@@ -501,8 +501,6 @@
     transition: opacity var(--motion, 0.3s) var(--ease-out);
   }
 
-  /* Chrome recedes the moment you start typing — only :has() lets the header
-     react to focus on a field three levels down. */
   header:has(.search-wrap input:focus) .brand img,
   header:has(.search-wrap input:focus) .tools {
     opacity: 0.35;
@@ -612,8 +610,6 @@
     animation: breathe 2s ease-in-out infinite;
   }
 
-  /* The skeleton is the tile, not a grey box: same aspect, same caption
-     rhythm, so the real grid lands in place instead of replacing something. */
   .skel-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -718,8 +714,6 @@
   .count {
     font-variant-numeric: tabular-nums;
   }
-  /* A hairline that runs off the right edge — the row has a start but no end,
-     which is exactly how it scrolls. */
   .head::after {
     content: "";
     flex: 1;
@@ -734,9 +728,7 @@
   .cards :global(.tile) {
     width: 220px;
   }
-  /* Movies (dir === ".") is non-hierarchical, so pack it into a 3-row
-     column-major grid: items flow top→bottom in each column, container
-     scrolls horizontally. ~3× density per viewport vs a single row. */
+  /* Movies (dir === ".") is flat, so pack it column-major: ~3× density. */
   .cards.multi {
     display: grid;
     grid-template-rows: repeat(3, auto);
@@ -744,8 +736,6 @@
     grid-auto-columns: 186px;
     overflow-x: auto;
   }
-  /* The loose-movies bucket packs tighter than a named folder's rail — the
-     hierarchy is Continue Watching, then shows, then everything else. */
   .cards.multi :global(.tile) {
     width: 186px;
   }
@@ -791,7 +781,6 @@
   .res tbody tr:hover {
     background: rgb(255 255 255 / 0.035);
   }
-  /* Already queued: the row steps back rather than shouting a second state. */
   .res tbody tr:has(.add.done) {
     opacity: 0.45;
   }
@@ -910,9 +899,7 @@
     border-color: var(--red);
   }
 
-  /* Scroll-driven: the header settles into the page instead of sitting on top
-     of it. Chrome-only, so it is decoration on top of a header that is already
-     complete without it. */
+  /* Chrome-only decoration; the header is complete without it. */
   @supports (animation-timeline: scroll()) {
     @media (prefers-reduced-motion: no-preference) {
       header::after {

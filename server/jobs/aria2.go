@@ -25,11 +25,8 @@ import (
 
 const aria2RPC = "http://localhost:6800/jsonrpc"
 
-// A wedged aria2c keeps accepting on :6800 without ever answering — the exact
-// state a2WedgeWatchdog exists to heal. Without a deadline the watchdog's own
-// aria2.shutdown blocks forever on the wedge it is trying to break, and the
-// torrentPaths refresher freezes with it (stale IsBusy, so half-downloaded
-// files get transcoded).
+// A wedged aria2c accepts on :6800 but never answers: without a deadline the
+// watchdog's own aria2.shutdown and the paths refresher hang on it too.
 const rpcTimeout = 10 * time.Second
 
 var rpcSeq atomic.Int64
@@ -83,10 +80,9 @@ var aria2StartedAt atomic.Int64
 
 var aria2Proc atomic.Pointer[exec.Cmd]
 
-// Aria2Stop TERMs the supervised aria2c (it saves its session on TERM).
-// Called on server shutdown so a restart never leaves an orphan squatting
-// :6800 — the classic wedge where every later spawn dies on the taken port
-// and the server keeps talking to a weeks-old process with stale DHT state.
+// Aria2Stop TERMs the supervised aria2c (it saves its session on TERM). Must
+// run on shutdown: an orphan keeps :6800, later spawns die, and new flags
+// silently never apply until it's pkill'd.
 func Aria2Stop() {
 	if cmd := aria2Proc.Load(); cmd != nil && cmd.Process != nil {
 		cmd.Process.Signal(os.Interrupt)
@@ -122,29 +118,22 @@ func Aria2Init(lib *library.Library) {
 			"--bt-max-peers=0",
 			"--bt-request-peer-speed-limit=50M",
 			"--bt-max-open-files=1024",
-			// Fixed listen ports so a router (or future UPnP) can forward them,
-			// and so DHT NAT discovery sees the same address across restarts.
-			// Random per-run ports = never reachable from outside the LAN, which
-			// is why popular torrents would sit at 0 peers indefinitely.
+			// Fixed so DHT NAT discovery sees one address across restarts; random
+			// per-run ports left popular torrents at 0 peers indefinitely.
 			"--listen-port=6881-6999",
 			"--dht-listen-port=6881-6999",
 			"--enable-dht=true",
 			"--enable-dht6=true",
 			"--enable-peer-exchange=true",
-			// LAN peer discovery — instantly finds any other client on the
-			// same network without going through DHT.
 			"--bt-enable-lpd=true",
-			// Persist DHT routing table so we don't re-bootstrap from zero on
-			// every restart. Kept inside ./cache (NOT ~/.aria2/dht.dat, which
-			// can be left root-owned by a past sudo run and silently unreadable).
+			// Persist the DHT table so restarts don't re-bootstrap from zero. NOT
+			// ~/.aria2/dht.dat — a past sudo run leaves that root-owned, unreadable.
 			"--dht-file-path=./cache/aria2.dht.dat",
 			"--dht-file-path6=./cache/aria2.dht6.dat",
-			// Survive a restart mid-magnet: the .torrent file aria2 writes after
-			// metadata fetch is reused so we don't redo the lookup.
+			// Reuse the .torrent written after metadata fetch across a restart.
 			"--bt-save-metadata=true",
 			"--bt-load-saved-metadata=true",
-			// Global tracker fallback. Magnets sourced outside our TPB search
-			// (or with all-dead trackers) still get a working announce list.
+			// Fallback announce list for magnets sourced outside our own search.
 			"--bt-tracker=" + strings.Join(tpbTrackers, ","),
 		}
 		if _, err := os.Stat(aria2Session); err == nil {
@@ -171,10 +160,8 @@ func Aria2Init(lib *library.Library) {
 				break
 			}
 		}
-		// Warm the torrent-paths cache BEFORE unblocking WaitAria2 callers.
-		// ConvertAll consults library.IsBusy on every candidate; if the cache
-		// is empty it happily grabs files aria2 is downloading. Refresh here,
-		// synchronously, so downstream ProcessAll sees a populated set.
+		// Warm the paths cache BEFORE unblocking WaitAria2: on an empty cache
+		// IsBusy says no and ProcessAll grabs files aria2 is still downloading.
 		if ready {
 			refreshTorrentPaths()
 		}
@@ -183,8 +170,7 @@ func Aria2Init(lib *library.Library) {
 			log.Println("[aria2] RPC never became ready")
 		}
 
-		// Sweep any errored/completed entries that the session reload dragged in
-		// (e.g. magnets whose target dir no longer exists after a location move).
+		// The session reload drags in stale stopped entries (e.g. vanished dir).
 		if ready {
 			if raw, err := a2call("aria2.tellStopped", 0, 200); err == nil {
 				var items []struct {
@@ -280,11 +266,8 @@ func a2PurgeLoop(lib *library.Library) {
 	}
 }
 
-// a2WedgeWatchdog detects and heals the long-uptime wedge where every active
-// torrent sits at 0 peer connections indefinitely (NAT UDP mappings expired /
-// aria2 internal state drift). After a grace period, if every active torrent
-// has been at 0 conns for wedgeMax, shuts aria2c down; the supervisor loop
-// in Aria2Init respawns it with the persisted DHT + session intact.
+// Heals the long-uptime wedge where every active torrent sits at 0 peers
+// (expired NAT mappings): shut down, and Aria2Init respawns with DHT+session.
 func a2WedgeWatchdog() {
 	const (
 		checkEvery = 60 * time.Second
@@ -414,9 +397,7 @@ var (
 	speedHistory = map[string][]speedSample{} // gid -> samples, oldest first
 )
 
-// recordSpeed appends a (now, completedLength) sample and trims everything
-// before the trailing window, keeping the one bracketing sample so the
-// window stays fully covered.
+// Keeps the one sample before the window so it stays fully bracketed.
 func recordSpeed(gid string, done int64) {
 	now := time.Now()
 	speedMu.Lock()
@@ -431,8 +412,7 @@ func recordSpeed(gid string, done int64) {
 	speedHistory[gid] = s[i:]
 }
 
-// avgSpeed returns bytes/s averaged over the sampled window, or fallback
-// (aria2's instantaneous figure) when there isn't enough history yet.
+// fallback is aria2's instantaneous figure, used until there's history.
 func avgSpeed(gid string, fallback int64) int64 {
 	speedMu.Lock()
 	defer speedMu.Unlock()
@@ -581,10 +561,7 @@ func Aria2AddTorrent(c *gin.Context, lib *library.Library) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "gid": gid})
 }
 
-// torrentPaths is the live set of every file path aria2 currently has in
-// session (active + waiting + stopped-but-not-yet-purged). Refreshed by a
-// background loop and eagerly after every Add — callers get a stable read
-// without paying the RPC round-trip.
+// Every path aria2 has in session: active + waiting + stopped-but-not-purged.
 var (
 	torrentPathsMu sync.RWMutex
 	torrentPaths   = map[string]bool{}
@@ -629,9 +606,8 @@ func torrentPathsRefresher() {
 	}
 }
 
-// Aria2Owns reports whether aria2 currently holds path. This is the hot
-// question — library.IsBusy asks it for every file of every background pass —
-// so it stays a single locked lookup instead of copying the whole set.
+// Hot path: library.IsBusy asks per file per background pass, so this stays a
+// single locked lookup instead of copying the whole set.
 func Aria2Owns(path string) bool {
 	torrentPathsMu.RLock()
 	defer torrentPathsMu.RUnlock()
@@ -639,10 +615,8 @@ func Aria2Owns(path string) bool {
 	return torrentPaths[path]
 }
 
-// Aria2ActivePaths returns a snapshot of the maintained torrent-paths set.
-// Safe to hold and iterate; the caller doesn't need to lock. Includes
-// stopped-but-not-yet-purged paths, so a just-finished download stays exempt
-// from convert/thumbs/clean until the purge loop removes it (~5s).
+// Snapshot, safe to iterate unlocked. Includes stopped-but-not-yet-purged
+// paths, so a just-finished download stays exempt until the purge (~5s).
 func Aria2ActivePaths() map[string]bool {
 	torrentPathsMu.RLock()
 	defer torrentPathsMu.RUnlock()
@@ -712,10 +686,8 @@ func Aria2Resume(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 		return
 	}
-	// aria2 rejects unpause with "cannot be unpaused now" if the preceding
-	// pause hasn't fully transitioned the download to PAUSED yet (the UI fires
-	// pause→resume back-to-back). Retry the transient a few times before giving
-	// up; a genuinely-active download unpauses on the first try.
+	// aria2 rejects unpause until a just-issued pause has fully transitioned
+	// (the UI fires pause→resume back-to-back), so retry the transient.
 	var err error
 	for range 5 {
 		if _, err = a2call("aria2.unpause", gid); err == nil {
@@ -749,31 +721,23 @@ func Aria2Remove(c *gin.Context) {
 		return
 	}
 
-	// Capture the on-disk footprint BEFORE removing — once the download result
-	// is gone, aria2 can no longer tell us what it left behind.
+	// Snapshot before removal — afterwards aria2 can't say what it left behind.
 	cleanup := aria2OrphanFiles(gid)
 
 	a2call("aria2.forceRemove", gid)          //nolint
 	a2call("aria2.removeDownloadResult", gid) //nolint
 
-	// forceRemove stops the transfer but leaves the partial payload + .aria2
-	// control file on disk. A user-initiated remove means "make it go away",
-	// so delete that orphaned data. (Skipped for completed downloads — those
-	// files are real library videos.)
+	// forceRemove leaves the partial payload + .aria2 file behind; a user
+	// remove means "make it go away". Skipped for completed downloads.
 	cleanup()
 
 	log.Printf("[aria2] remove: done")
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// aria2OrphanFiles snapshots the files/dir/status of gid and returns a closure
-// that deletes the orphaned partial data. The snapshot must happen before
-// removeDownloadResult; the deletion after, so a half-removed tornet can't be
-// re-touched by aria2 mid-delete.
-//
-// Safety: only deletes when the download is NOT complete, and only the files
-// aria2 itself enumerated plus their .aria2 control siblings. Directories go
-// non-recursively, so a folder shared with unrelated media survives.
+// Snapshot before removeDownloadResult, delete after. Only non-complete
+// downloads, only enumerated files, dirs non-recursively — a folder shared
+// with unrelated media must survive.
 func aria2OrphanFiles(gid string) func() {
 	noop := func() {}
 
@@ -805,12 +769,8 @@ func aria2OrphanFiles(gid string) func() {
 	return func() { removeDownload(files, dirs, tops) }
 }
 
-// removeDownload erases one removed download: the files aria2 enumerated plus
-// their .aria2 control siblings, then the directories, deepest first and never
-// recursively. The download dir is shared — the organizer is explicitly told
-// to reuse existing folders — so anything not enumerated is someone else's
-// media, and os.Remove fails harmlessly on the non-empty dir holding it.
-// RemoveAll here used to take that media with it.
+// Never RemoveAll: the download dir is shared, so only enumerated files go and
+// os.Remove fails harmlessly on a dir still holding someone else's media.
 func removeDownload(files, dirs, tops []string) {
 	for _, p := range files {
 		os.Remove(p)
@@ -826,10 +786,8 @@ func removeDownload(files, dirs, tops []string) {
 	}
 }
 
-// cleanupDirs lists every directory between the download dir and the removed
-// files, deepest first, so the non-recursive sweep unwinds the torrent's own
-// folders and stops at the first one that still holds something. Never
-// includes root itself or anything outside it. Pure, so it's unit-testable.
+// Deepest first, so the non-recursive sweep stops at the first dir that still
+// holds something. Never root itself or anything outside it.
 func cleanupDirs(dir string, paths []string) []string {
 	root := filepath.Clean(dir)
 	seen := map[string]bool{}
@@ -855,11 +813,8 @@ func cleanupDirs(dir string, paths []string) []string {
 	return out
 }
 
-// aria2CleanupTargets resolves what to delete for a removed download: the file
-// paths themselves, plus each torrent's top-level folder under the download
-// dir. A "top" is the first path component below root — so we sweep the whole
-// torrent folder but never the root itself or anything outside it. Pure (no
-// disk/network) so it's unit-testable.
+// The files plus each torrent's top-level folder under the download dir —
+// never root itself or anything outside it.
 func aria2CleanupTargets(dir string, paths []string) (files, tops []string) {
 	root := filepath.Clean(dir)
 	seen := map[string]struct{}{}

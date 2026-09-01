@@ -25,15 +25,11 @@ import (
 
 const pythonPath = "/opt/homebrew/Caskroom/miniconda/base/envs/global/bin/python"
 
-// Hard ceiling on one background transcription.
 const whisperMax = 4 * time.Hour
 
 var (
-	// activeProcs maps a stream request's file key to the run serving it.
 	// Entries leave by process identity, never by key alone: deleting by key
-	// let a finishing handler drop a LATER run's entry, so the next request
-	// found nothing to kill and started a third python — two of them then
-	// racing to write the same .whisper.vtt.
+	// dropped a LATER run's entry and two pythons raced on one .whisper.vtt.
 	activeProcs sync.Map
 	whisperJobs sync.Map
 )
@@ -109,10 +105,8 @@ func fmtSecs(secs float64) string {
 
 var fasterWhisperOK atomic.Bool
 
-// checkFasterWhisper forks `python -c "import faster_whisper"` (~500ms). Cached
-// once-positive so the backfill walker doesn't pay it per file. If the first
-// check fails, subsequent calls re-probe (so the user can install it without
-// restarting the server).
+// ~500ms fork, cached once-positive so the backfill walker doesn't pay per
+// file; a failure re-probes, so installing it needs no restart.
 func checkFasterWhisper() bool {
 	if fasterWhisperOK.Load() {
 		return true
@@ -184,11 +178,8 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 		flusher.Flush()
 	}
 
-	// Idempotency guard: if a non-trivial .whisper.vtt already exists, don't
-	// re-run. The frontend's /api/subs/info check covers the happy path; this
-	// catches the race where the user clicks whisper before info has loaded.
-	// 100B is comfortably above an empty `WEBVTT\n\n` header but well under
-	// the smallest real transcript.
+	// Existing transcript → done. 100B is above an empty `WEBVTT` header and
+	// under any real transcript.
 	if fi, err := os.Stat(whisperVTTOf(path)); err == nil && fi.Size() > 100 {
 		log.Printf("[whisper] reuse existing vtt for %q (%d bytes)", raw, fi.Size())
 		sendEvent(map[string]any{"done": true})
@@ -219,10 +210,8 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	// Bounded + NUL-stripped tail so a misbehaving Python subprocess can't
-	// flood the log with thousands of `\x00…` rows (the post-fix flood
-	// observed 2026-05-20). 8 KB of the most-recent stderr is plenty for the
-	// actual error to surface.
+	// Bounded, NUL-stripped tail: a misbehaving python once flooded the log
+	// with thousands of `\x00…` rows.
 	stderrBuf := &library.TailWriter{Max: 8 << 10}
 	cmd.Stderr = stderrBuf
 
@@ -239,7 +228,7 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
 
-	// First line from Python: {"lang": "ja"} — capture detected language
+	// First line from python is {"lang": "…"}.
 	var lang string
 	if scanner.Scan() {
 		langLine := scanner.Text()
@@ -351,9 +340,8 @@ func SubsWhisper(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	// A terminal entry is replaced, not reported: leaving it in place made one
-	// transient failure permanent — every later request answered "error" for
-	// that file until the server restarted.
+	// A terminal entry is replaced, not reported: leaving it made one transient
+	// failure permanent until restart.
 	job := &WhisperJob{Status: "pending"}
 	if prev, loaded := whisperJobs.LoadOrStore(body.File, job); loaded {
 		status, msg := prev.(*WhisperJob).read()
@@ -403,9 +391,7 @@ func runJob(src, dst, key string, job *WhisperJob) {
 	}
 	defer os.Remove(tmpWAV)
 
-	// A hung python would otherwise sit here forever holding the 1-wide
-	// auto-whisper pool, so every later file's transcription never starts.
-	// The budget is far past a real transcription (base model, feature film).
+	// A hung python would otherwise hold the 1-wide auto-whisper pool forever.
 	ctx, cancel := context.WithTimeout(context.Background(), whisperMax)
 	defer cancel()
 
