@@ -210,3 +210,40 @@ func KVSet(c *gin.Context) {
 	statsTee(single.Key, single.Value, ip)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "key": single.Key})
 }
+
+// Watch is one `watched:<param>` progress record: T is the last saved
+// position in seconds, Dur the video's duration when the player knew it
+// (older records have none), At the wall clock of the save in ms.
+type Watch struct {
+	T   float64
+	Dur float64
+	At  float64
+}
+
+// Watched returns every watch record in the store, keyed by video param.
+// Cleared entries are stored as JSON null (that is how the UI removes a
+// Continue Watching card) and are skipped here — a nil is "forget this",
+// not "watched for zero seconds".
+func Watched() map[string]Watch {
+	store := kvRead()
+	out := make(map[string]Watch)
+
+	for k, v := range store {
+		if !strings.HasPrefix(k, "watched:") {
+			continue
+		}
+
+		m, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		w := Watch{}
+		w.T, _ = m["t"].(float64)
+		w.Dur, _ = m["dur"].(float64)
+		w.At, _ = m["at"].(float64)
+		out[strings.TrimPrefix(k, "watched:")] = w
+	}
+
+	return out
+}
