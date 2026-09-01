@@ -1,7 +1,7 @@
 // Every operation has to be reachable both ways. These assert on the text of
 // COMPILED component output (or module source for the plain .ts files) — they
 // guard the wiring, not the behaviour, because none of it can be clicked here.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { compile } from "svelte/compiler";
 import { keysMarkdown, START, END } from "./keys.ts";
 
@@ -36,12 +36,20 @@ check("README table matches KEYS", block.trim() === keysMarkdown().trim());
 // A key can only drift out of the handler, never out of the table, so walk the
 // table and demand the dispatch. Library and Pointer rows aren't player keys.
 const { KEYS } = await import("../src/player/ux.ts");
+const playerKeySources = readdirSync("src/player")
+  .filter((f) => f.endsWith(".svelte"))
+  .map((f) => read(`src/player/${f}`))
+  .join("\n");
 for (const g of KEYS) {
   if (g.g === "Library" || g.g === "Pointer") continue;
   for (const row of g.keys) {
     for (const tok of row.k.split(" / ")) {
       if (!/^[a-z]$/.test(tok)) continue;
-      check(`ux dispatches "${tok}"`, ux.includes(`lkey === "${tok}"`));
+      // A key may be dispatched by ux.ts or owned by the component that
+      // implements it (clip owns i/o). Demand a handler somewhere, not a
+      // particular file — otherwise a documented key can ship dead.
+      const owned = ux.includes(`lkey === "${tok}"`) || playerKeySources.includes(`k === "${tok}"`);
+      check(`something dispatches "${tok}"`, owned);
     }
   }
 }

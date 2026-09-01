@@ -23,6 +23,7 @@
   import Tune from "./tune.svelte";
   import Help from "./help.svelte";
   import Shot from "./shot.svelte";
+  import Clip from "./clip.svelte";
 
   import { clean, parseRaw, nextVid, hashKey } from "../core/video";
   import { api, HEAD } from "../core/api";
@@ -340,6 +341,8 @@
   let tuneOpen = $state(false);
   let helpOpen = $state(false);
   let shotOpen = $state(false);
+  let clipOpen = $state(false);
+  let clipMarks = $state<[number | null, number | null]>([null, null]);
   let railOpen = $state(false);
   let canPip = $state(false);
   let canSync = $state(false);
@@ -834,6 +837,7 @@
     onNext={ps.nextURL ? goNext : undefined}
     onPip={canPip ? () => togglePip(player) : undefined}
     onFullscreen={toggleFullscreen}
+    clip={clipMarks}
     trickplay={(sec) => sprite.tile(sec)}
   />
   <Skip
@@ -854,6 +858,13 @@
     onClose={() => (tuneOpen = false)}
   />
   <Help open={helpOpen} onClose={() => (helpOpen = false)} />
+  <Clip
+    {ps}
+    file={videoParam}
+    bind:open={clipOpen}
+    bind:marks={clipMarks}
+    onSeek={(t) => player?.currentTime(t)}
+  />
   <Shot
     open={shotOpen}
     file={videoParam}

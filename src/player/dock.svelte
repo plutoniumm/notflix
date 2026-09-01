@@ -20,6 +20,7 @@
     onPip,
     onEpisodes,
     onFullscreen,
+    clip = null,
     trickplay,
   }: {
     ps: PlayerState;
@@ -39,6 +40,7 @@
     onPip?: () => void;
     onEpisodes?: () => void;
     onFullscreen: () => void;
+    clip?: [number | null, number | null] | null;
     // Hovered second -> inline CSS for the tile, "" when there is no sprite.
     trickplay?: (sec: number) => string;
   } = $props();
@@ -264,6 +266,20 @@
           <div class="buf" style="left:{b.a}%;width:{b.w}%"></div>
         {/each}
 
+        {#if clip?.[0] != null && clip?.[1] != null && dur > 0}
+          <div
+            class="clipsel"
+            style="left:{(Math.min(clip[0], clip[1]) / dur) * 100}%;width:{(Math.abs(
+              clip[1] - clip[0],
+            ) /
+              dur) *
+              100}%"
+          ></div>
+        {/if}
+        {#each (clip ?? []).filter((t) => t != null) as t}
+          <div class="cliptick" style="left:{(t / dur) * 100}%"></div>
+        {/each}
+
         <div class="fill"></div>
 
         {#each cuts as c}
@@ -443,6 +459,26 @@
   }
   .track.live { height: 34px; }
   .track:focus-visible { outline-offset: -3px; }
+
+  .clipsel {
+    position: absolute;
+    top: 50%;
+    height: var(--h, 3px);
+    transform: translateY(-50%);
+    border-radius: 99px;
+    background: color-mix(in oklab, var(--gold) 55%, transparent);
+    pointer-events: none;
+  }
+  .cliptick {
+    position: absolute;
+    top: 50%;
+    width: 2px;
+    height: calc(var(--h, 3px) + 8px);
+    transform: translate(-1px, -50%);
+    background: var(--gold);
+    border-radius: 1px;
+    pointer-events: none;
+  }
 
   .beam {
     position: absolute;

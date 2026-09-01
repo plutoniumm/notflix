@@ -214,6 +214,9 @@ func main() {
 	router.GET("/api/skip", func(c *gin.Context) { media.SkipInfo(c, lib) })
 	router.GET("/api/frames", func(c *gin.Context) { media.Frames(c, lib) })
 	router.GET("/api/frames/img", media.FrameImage)
+	router.POST("/api/clip", func(c *gin.Context) { media.ClipStart(c, lib) })
+	router.GET("/api/clip/status", media.ClipStatus)
+	router.GET("/api/clip/file", media.ClipFile)
 	router.GET("/api/reco", func(c *gin.Context) { jobs.RecoHandler(c, lib) })
 
 	router.POST("/api/organize/plan", func(c *gin.Context) { jobs.OrganizePlan(c, lib) })

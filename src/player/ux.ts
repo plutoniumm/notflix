@@ -160,6 +160,15 @@ export const KEYS: Group[] = [
     ],
   },
   {
+    g: "Clip",
+    keys: [
+      { k: "i", a: "mark clip in-point" },
+      { k: "o", a: "mark clip out-point" },
+      { k: "Enter", a: "save the clip" },
+      { k: "Backspace", a: "clear the marks" },
+    ],
+  },
+  {
     g: "Panels",
     keys: [
       { k: "v", a: "tune — picture, audio delay, speed" },

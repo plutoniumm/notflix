@@ -45,6 +45,15 @@ discoverable only by reading this file. The table itself is generated from
 | `w` | transcribe with Whisper |
 | `g` | grab a frame |
 
+### Clip
+
+| Key | Action |
+| --- | --- |
+| `i` | mark clip in-point |
+| `o` | mark clip out-point |
+| `Enter` | save the clip |
+| `Backspace` | clear the marks |
+
 ### Panels
 
 | Key | Action |
