@@ -776,15 +776,6 @@ textarea:disabled,
   transform: scale(0.96);
 }
 
-@container card (min-width: 210px) {
-}
-
-@container card (max-width: 168px) {
-}
-
-@media (max-width: 640px) {
-}
-
 .scroll-arrow {
   position: absolute;
   z-index: 10;
@@ -1016,10 +1007,6 @@ textarea:disabled,
 
 .up {
   text-transform: uppercase;
-}
-
-.bright {
-  filter: contrast(90%) brightness(110%);
 }
 
 .tap-ripple {

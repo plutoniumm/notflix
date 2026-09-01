@@ -17,6 +17,7 @@
   import EmptyState from "../components/EmptyState.svelte";
   import Icon from "../components/Icon.svelte";
   import Badge from "../components/Badge.svelte";
+  import Help from "../player/help.svelte";
 
   type Row = { t: Torrent; p: Parsed };
 
@@ -30,6 +31,9 @@
     Array.isArray(saved) ? saved.filter((s) => typeof s === "string").slice(0, 5) : [],
   );
   let searchFocus = $state(false);
+  let helpOpen = $state(false);
+  let searchEl = $state<HTMLInputElement>();
+  let histEl = $state<HTMLElement>();
 
   function remember(term: string) {
     history = [term, ...history.filter((s) => s !== term)].slice(0, 5);
@@ -60,12 +64,29 @@
       swUpdate = (e as CustomEvent).detail;
     };
     window.addEventListener("sw-update", onSwUpdate);
+    document.addEventListener("keydown", pageKey);
 
     return () => {
       unsubSW();
       window.removeEventListener("sw-update", onSwUpdate);
+      document.removeEventListener("keydown", pageKey);
     };
   });
+
+  function pageKey(e: KeyboardEvent) {
+    if (e.ctrlKey || e.metaKey) return;
+    if ((e.target as HTMLElement).closest?.("input,textarea,[contenteditable]"))
+      return;
+
+    if (e.key === "/") {
+      e.preventDefault();
+      searchEl?.focus();
+    } else if (e.key === "?") {
+      helpOpen = !helpOpen;
+    } else if (e.key === "Escape") {
+      helpOpen = false;
+    }
+  }
 
   $effect(() => {
     if (!dlDir && home.disks.length > 0) dlDir = home.disks[0].path;
@@ -117,6 +138,16 @@
   const arrow = (key: typeof sortKey) =>
     sortKey !== key ? "" : sortDir === 1 ? " ▲" : " ▼";
 
+  const COLS: [typeof sortKey, string][] = [
+    ["title", "Title"],
+    ["res", "Quality"],
+    ["size", "Size"],
+    ["seeders", "Seed"],
+    ["leechers", "Leech"],
+    ["files", "Files"],
+    ["added", "Age"],
+  ];
+
   let torrentRows = $derived<Row[]>(
     torrentResults.map((t) => ({ t, p: parseName(t.name) })),
   );
@@ -151,15 +182,63 @@
     torrentQuery = "";
   }
 
+  function pickHistory(term: string) {
+    search = term;
+    searchFocus = false;
+    runTorrent();
+  }
+
+  const items = () => [
+    ...(histEl?.querySelectorAll<HTMLElement>(".hist-item") ?? []),
+  ];
+
   function onSearchKey(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
+      searchFocus = false;
       runTorrent();
-    } else if (e.key === "Escape" && torrentMode) {
+    } else if (e.key === "ArrowDown" && recent.length) {
       e.preventDefault();
-      clearSearch();
+      items()[0]?.focus();
+    } else if (e.key === "Escape") {
+      // Only claim Escape when there is something to close; otherwise leave it
+      // to the search field's own clear.
+      if (searchFocus && recent.length) searchFocus = false;
+      else if (torrentMode) clearSearch();
+      else return;
+
+      e.preventDefault();
     }
   }
+
+  function onHistKey(e: KeyboardEvent, i: number) {
+    const list = items();
+    if (e.key === "ArrowDown") list[(i + 1) % list.length]?.focus();
+    else if (e.key === "ArrowUp") {
+      if (i === 0) searchEl?.focus();
+      else list[i - 1]?.focus();
+    } else if (e.key === "Escape") {
+      searchFocus = false;
+      searchEl?.focus();
+    } else return;
+
+    e.preventDefault();
+  }
+
+  // The list used to unmount on the input's blur, so it was unreachable by Tab
+  // and only ever took mousedown, which Enter never fires. focusout with a
+  // relatedTarget check keeps it alive while focus is anywhere inside.
+  function onWrapOut(e: FocusEvent) {
+    const to = e.relatedTarget as Node | null;
+    if (to && (e.currentTarget as HTMLElement).contains(to)) return;
+    searchFocus = false;
+  }
+
+  const sortKeyDown = (key: typeof sortKey) => (e: KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    sortBy(key);
+  };
 
   function removeContinue(e: Event, dir: string, name: string) {
     e.preventDefault();
@@ -183,31 +262,28 @@
       <img src="/assets/tight.svg" alt="Notflix" height="42" />
     </a>
 
-    <div class="search-wrap p-rel">
+    <div class="search-wrap p-rel" onfocusout={onWrapOut}>
       <span class="search-ic p-abs dead cc"><Icon name="search" size={15} /></span>
       <input
+        bind:this={searchEl}
         class="field w-100"
         type="search"
         placeholder={torrentMode
           ? "Filter results — Enter to re-search"
-          : "Search library — Enter to search torrents"}
+          : "Search library — / to focus, Enter to search torrents"}
         bind:value={search}
         onkeydown={onSearchKey}
         onfocus={() => (searchFocus = true)}
-        onblur={() => (searchFocus = false)}
         autocomplete="off"
         spellcheck="false"
       />
       {#if searchFocus && recent.length}
-        <div class="hist p-abs w-100 flow-h">
-          {#each recent as h (h)}
+        <div class="hist p-abs w-100 flow-h" bind:this={histEl}>
+          {#each recent as h, i (h)}
             <button
               class="hist-item w-100 ptr f al-ct g10"
-              onmousedown={(e) => {
-                e.preventDefault();
-                search = h;
-                runTorrent();
-              }}
+              onclick={() => pickHistory(h)}
+              onkeydown={(e) => onHistKey(e, i)}
             >
               <span class="hist-ic">↺</span>
               <span class="trunc">{h}</span>
@@ -231,6 +307,14 @@
           Update ready — reload
         </button>
       {/if}
+      <button
+        class="icon-btn qmark glass glass-hover ptr"
+        aria-label="Keyboard shortcuts"
+        title="Keyboard & gestures (?)"
+        onclick={() => (helpOpen = !helpOpen)}
+      >
+        ?
+      </button>
       <a
         href="/manage"
         class="icon-btn glass glass-hover"
@@ -281,27 +365,15 @@
           <table class="res">
             <thead>
               <tr>
-                <th class="ptr" onclick={() => sortBy("title")}
-                  >Title{arrow("title")}</th
-                >
-                <th class="ptr num" onclick={() => sortBy("res")}
-                  >Quality{arrow("res")}</th
-                >
-                <th class="ptr num" onclick={() => sortBy("size")}
-                  >Size{arrow("size")}</th
-                >
-                <th class="ptr num" onclick={() => sortBy("seeders")}
-                  >Seed{arrow("seeders")}</th
-                >
-                <th class="ptr num" onclick={() => sortBy("leechers")}
-                  >Leech{arrow("leechers")}</th
-                >
-                <th class="ptr num" onclick={() => sortBy("files")}
-                  >Files{arrow("files")}</th
-                >
-                <th class="ptr num" onclick={() => sortBy("added")}
-                  >Age{arrow("added")}</th
-                >
+                {#each COLS as [key, label]}
+                  <th
+                    class="ptr"
+                    class:num={key !== "title"}
+                    tabindex="0"
+                    onclick={() => sortBy(key)}
+                    onkeydown={sortKeyDown(key)}>{label}{arrow(key)}</th
+                  >
+                {/each}
                 <th></th>
               </tr>
             </thead>
@@ -493,6 +565,8 @@
       {/if}
     </div>
   {/if}
+
+  <Help open={helpOpen} onClose={() => (helpOpen = false)} />
 </div>
 
 <style>
@@ -580,6 +654,12 @@
   }
   .icon-btn:hover {
     color: var(--tx-5);
+  }
+  .qmark {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1;
   }
 
   .update-btn {

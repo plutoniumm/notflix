@@ -11,7 +11,9 @@
     videoParam,
     title,
     tuneOpen = false,
+    helpOpen = false,
     runWhisper,
+    onHelp,
     onTune,
     onToggleSubs,
     onSelectLocal,
@@ -25,7 +27,9 @@
     videoParam: string;
     title: string;
     tuneOpen?: boolean;
+    helpOpen?: boolean;
     runWhisper: () => void;
+    onHelp: () => void;
     onTune: () => void;
     onToggleSubs: () => void;
     onSelectLocal: (file: string, label: string) => void;
@@ -107,6 +111,16 @@
         onclick={onTune}
       >
         <Icon name="settings" />
+      </button>
+
+      <button
+        class="ibtn qmark cc rx5 ptr p5"
+        aria-label="Keyboard shortcuts"
+        title="Keyboard & gestures (?)"
+        class:active={helpOpen}
+        onclick={onHelp}
+      >
+        ?
       </button>
 
       <Down {videoParam} {title} />
@@ -203,6 +217,13 @@
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
   }
   .ibtn.pulse { animation: pulse 1.5s ease infinite; }
+
+  .qmark {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1;
+  }
 
   @keyframes pulse {
     0%, 100% { color: var(--tx-3); }

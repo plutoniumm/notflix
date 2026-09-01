@@ -1,26 +1,33 @@
 <script lang="ts">
   import { clean, vidURL, thumbFail } from "../core/video";
 
-  let { rows, dir, name, paused, embed }: any = $props();
-
-  let open = $state(false);
+  let { rows, dir, name, paused, embed, open = $bindable(false) }: any =
+    $props();
 
   const files = $derived(
     (rows as [string, any[]][])?.find(([d]) => d === dir)?.[1] ?? [],
   );
-  const visible = $derived(!embed && paused && files.length > 1);
+  // Paused is the passive reveal; `open` is the deliberate one, so `t` and the
+  // dock button work over moving picture too.
+  const visible = $derived(!embed && (paused || open) && files.length > 1);
   const activeIdx = $derived(files.findIndex((f: any) => f.name === name));
   const pad = (n: number) => String(n).padStart(2, "0");
 </script>
 
 {#if !embed && files.length > 1}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <aside
     class="rail flow-h"
     class:open
     class:out={!visible}
     onmouseenter={() => (open = true)}
     onmouseleave={() => (open = false)}
+    onkeydown={(e) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      open = false;
+    }}
   >
     <button class="tab cc ptr" onclick={() => (open = !open)}>
       <span class="chev d-ib" class:rot={open}></span>
@@ -98,9 +105,12 @@
       transform: translateX(-14px);
     }
   }
-  /* On touch the strip can never open but would swallow taps in the back-10s zone. */
+  /* The closed 40px strip has no hover to open it and would swallow taps in
+     the back-10s zone; on touch the rail exists only once the dock's up-next
+     button (or `t`) has opened it. */
   @media (hover: none) {
-    .rail { display: none; }
+    .rail:not(.open) { display: none; }
+    .rail.open { width: min(292px, 84vw); }
   }
 
   .tab {

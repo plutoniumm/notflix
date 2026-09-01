@@ -21,6 +21,7 @@
   import Whisper from "./whisper.svelte";
   import Skip, { activeSkip } from "./skip.svelte";
   import Tune from "./tune.svelte";
+  import Help from "./help.svelte";
 
   import { clean, parseRaw, nextVid, hashKey } from "../core/video";
   import { api, HEAD } from "../core/api";
@@ -29,7 +30,7 @@
   import WatchProgress from "./watch";
   import { Down, isSupported } from "../library/dl";
   import { local } from "../core/store";
-  import { Touch, Hotkeys, togglePip, pipOk, av1Ok } from "./ux";
+  import { Touch, Click, Hotkeys, togglePip, pipOk, av1Ok } from "./ux";
   import { SAVE_INTERVAL_MS } from "../core/events.svelte";
   import { AVSync } from "./avsync";
   import { PlayerView } from "./view.svelte";
@@ -336,16 +337,32 @@
 
   let whisperCues = $state<WhisperCue[]>([]);
   let tuneOpen = $state(false);
+  let helpOpen = $state(false);
+  let railOpen = $state(false);
   let canPip = $state(false);
   let canSync = $state(false);
 
   let introRange = $state<[number, number] | null>(null);
   let outroRange = $state<[number, number] | null>(null);
 
+  const hasEps = $derived(
+    (ps.rows.find(([d]) => d === dir)?.[1]?.length ?? 0) > 1,
+  );
+
   const asRange = (v: any): [number, number] | null =>
     Array.isArray(v) && v.length === 2 && v.every((n) => Number.isFinite(n))
       ? [v[0], v[1]]
       : null;
+
+  // One ladder, most-recently-raised first. The panels that own the top layer
+  // dismiss themselves too, and closing a closed panel is a no-op.
+  function closeTop() {
+    if (helpOpen) helpOpen = false;
+    else if (tuneOpen) tuneOpen = false;
+    else if (view.subs.open) view.subs.close();
+    else if (view.audio.open) view.audio.close();
+    else if (railOpen) railOpen = false;
+  }
 
   async function searchSubs() {
     view.subs.setSearching(true);
@@ -456,8 +473,19 @@
     }
     if (dead) return;
 
+    // The custom chrome owns every control, so video.js's own surfaces are
+    // switched off rather than hidden: controls:false stops it acting like a
+    // controlled player at all, and the three `false`s stop those components
+    // from being constructed. Its text-track display, loading spinner and
+    // media loader are NOT controls and stay — chrome.svelte dresses them.
+    // (The one unguarded `player.controlBar` in video.js is behind a
+    // `!CSS.supports("inset")` branch, i.e. browsers that can't render this
+    // app's :has()/container queries anyway.)
     player = videojs(videoEl!, {
-      controls: true,
+      controls: false,
+      controlBar: false,
+      bigPlayButton: false,
+      errorDisplay: false,
       preload: "auto",
       fill: true,
       playsinline: true,
@@ -540,12 +568,11 @@
       player.on("ratechange", () => speed.set(player.playbackRate() || 1));
 
       cleanups.push(Touch(player, pageEl!, toggleFullscreen));
+      cleanups.push(Click(player, pageEl!, toggleFullscreen));
       cleanups.push(
-        Hotkeys(
-          player,
-          toggleFullscreen,
-          goNext,
-          () => {
+        Hotkeys(player, toggleFullscreen, {
+          next: goNext,
+          whisper: () => {
             const tracks = player.textTracks();
             for (let i = 0; i < tracks.length; i++) {
               const t = tracks[i];
@@ -557,10 +584,10 @@
             }
             runWhisper();
           },
-          (deltaMs) => {
+          sync: (deltaMs) => {
             if (canSync) ps.showSync(avSync!.adjust(deltaMs));
           },
-          () => {
+          skip: () => {
             const which = activeSkip(
               player.currentTime() ?? 0,
               introRange,
@@ -570,8 +597,11 @@
             else if (which === "outro")
               ps.nextURL ? goNext() : player.currentTime(outroRange![1]);
           },
-          () => (tuneOpen = !tuneOpen),
-        ),
+          tune: () => (tuneOpen = !tuneOpen),
+          rail: () => (railOpen = !railOpen),
+          help: () => (helpOpen = !helpOpen),
+          esc: closeTop,
+        }),
       );
 
       const saveProgress = () => {
@@ -712,6 +742,8 @@
     {videoParam}
     {runWhisper}
     {tuneOpen}
+    {helpOpen}
+    onHelp={() => (helpOpen = !helpOpen)}
     onTune={() => (tuneOpen = !tuneOpen)}
     onToggleSubs={toggleSubs}
     onSelectLocal={selectLocal}
@@ -734,7 +766,7 @@
     <video
       bind:this={videoEl}
       playsinline
-      class="video-js vjs-default-skin vjs-big-play-centered"
+      class="video-js vjs-default-skin"
     ></video>
   </div>
 
@@ -752,6 +784,17 @@
     </div>
   {/if}
 
+  <!-- video.js's big play button went with its control bar; this is the
+       affordance that replaces it, and the only chrome that shows mid-frame. -->
+  <button
+    class="ghost cc p-abs rx20"
+    class:out={!ps.paused || !!playerError}
+    aria-label="Play"
+    onclick={() => safePlay()}
+  >
+    <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor"><path d="M7 4l13 8-13 8z" /></svg>
+  </button>
+
   <Whisper msg={ps.wMsg} cues={whisperCues} currentTime={ps.currentTime} />
 
   <Dock
@@ -763,6 +806,19 @@
     speed={ps.speed}
     onSeek={(t) => player?.currentTime(t)}
     onPlayPause={() => (player?.paused() ? safePlay() : player.pause())}
+    onVolume={(v) => {
+      player?.volume(v);
+      if (v > 0 && player?.muted()) player.muted(false);
+    }}
+    onMute={() => {
+      if (!player) return;
+      const m = !player.muted();
+      player.muted(m);
+      // Un-muting a slider that was dragged to zero is otherwise silent.
+      if (!m && player.volume() === 0) player.volume(0.5);
+    }}
+    onSpeedSet={(r) => player?.playbackRate(r)}
+    onEpisodes={hasEps ? () => (railOpen = !railOpen) : undefined}
     onSpeedDown={() =>
       player?.playbackRate(
         Math.max(0.25, Math.round((player.playbackRate() - 0.25) * 4) / 4),
@@ -793,10 +849,18 @@
     onSpeed={(r) => player?.playbackRate(r)}
     onClose={() => (tuneOpen = false)}
   />
+  <Help open={helpOpen} onClose={() => (helpOpen = false)} />
   <Volume level={ps.volLevel} visible={ps.volVisible} />
   <Sync ms={ps.syncMs} visible={ps.syncVisible} />
   <Synopsis {name} {title} {embed} paused={ps.paused} />
-  <Related rows={ps.rows} {dir} {name} {embed} paused={ps.paused} />
+  <Related
+    rows={ps.rows}
+    {dir}
+    {name}
+    {embed}
+    paused={ps.paused}
+    bind:open={railOpen}
+  />
 </div>
 
 <style>
@@ -853,5 +917,48 @@
   .video-wrap {
     inset: 0;
     z-index: 1;
+    transition:
+      filter var(--m, 260ms) var(--ease-out),
+      scale var(--m, 260ms) var(--ease-out);
+  }
+
+  .ghost {
+    top: 50%;
+    left: 50%;
+    translate: -50% -50%;
+    z-index: 8;
+    width: 86px;
+    height: 86px;
+    padding-left: 6px;
+    color: var(--tx-5);
+    background: rgba(3, 2, 6, 0.42);
+    border: 1px solid var(--glass-bd);
+    backdrop-filter: blur(14px) saturate(150%);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    box-shadow:
+      var(--sh-3),
+      0 0 70px -18px color-mix(in oklab, var(--art-1) 85%, transparent);
+    cursor: pointer;
+    transition:
+      opacity var(--m, 260ms) var(--ease-out),
+      scale var(--m, 260ms) var(--ease-snap),
+      background var(--m-fast, 130ms) var(--ease-out);
+  }
+  .ghost:hover {
+    background: rgba(3, 2, 6, 0.6);
+  }
+  .ghost:active {
+    scale: 0.94;
+  }
+  .ghost.out {
+    opacity: 0;
+    scale: 1.25;
+    pointer-events: none;
+  }
+  @starting-style {
+    .ghost {
+      opacity: 0;
+      scale: 0.9;
+    }
   }
 </style>
