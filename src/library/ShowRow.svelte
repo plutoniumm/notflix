@@ -1,8 +1,6 @@
 <script lang="ts">
-  import { join } from "../core/path";
   import { local } from "../core/store";
-  import MediaCard from "../components/MediaCard.svelte";
-  import ScrollRow from "../components/ScrollRow.svelte";
+  import SeriesStrip from "./SeriesStrip.svelte";
   import type { SeasonEntry, ContinueItem } from "./homeData.svelte";
 
   let {
@@ -78,21 +76,14 @@
     </div>
   </div>
 
-  <ScrollRow>
-    {#key season.dir}
-      <div class="cards spotlight flow-x-s g10 f">
-        {#each season.files as f, idx (f.name)}
-          <MediaCard
-            dir={season.dir}
-            name={f.name}
-            key={f.key}
-            {idx}
-            downloaded={downloadedSet.has(join(season.dir, f.name))}
-          />
-        {/each}
-      </div>
-    {/key}
-  </ScrollRow>
+  {#key season.dir}
+    <SeriesStrip
+      dir={season.dir}
+      files={season.files}
+      {continues}
+      {downloadedSet}
+    />
+  {/key}
 </section>
 
 <style>
@@ -142,26 +133,6 @@
     box-shadow: 0 2px 10px -2px var(--red-glow);
   }
 
-  .cards {
-    padding: 14px 48px 20px;
-    scrollbar-width: none;
-    transition:
-      opacity var(--motion, 0.26s) var(--ease-out),
-      translate var(--motion, 0.26s) var(--ease-out);
-  }
-  .cards :global(.tile) {
-    width: 220px;
-  }
-
-  /* The swap replaces the strip outright, so it animates from @starting-style —
-     a keyframe would have to be re-triggered. */
-  @starting-style {
-    .cards {
-      opacity: 0;
-      translate: 14px 0;
-    }
-  }
-
   @media (max-width: 640px) {
     .head {
       padding: 0 16px;
@@ -177,18 +148,6 @@
       overflow-x: auto;
       scrollbar-width: none;
       border-radius: var(--r-md);
-    }
-    .cards {
-      padding: 12px 16px 16px;
-    }
-    .cards :global(.tile) {
-      width: 148px;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .cards {
-      transition-duration: 1ms;
     }
   }
 </style>

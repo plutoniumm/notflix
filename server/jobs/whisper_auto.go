@@ -1,11 +1,13 @@
 package jobs
 
 import (
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode"
 
 	"notflix/server/library"
 )
@@ -24,10 +26,51 @@ var englishSubExts = []string{
 	".en.srt", ".eng.srt", ".english.srt",
 }
 
+// The plain, unsuffixed sidecar — the most common shape, and it was missing
+// above: 50 files (47 of them City Hunter episodes that ship English subs) got
+// fully re-transcribed for nothing, each producing a worse track (untranslated,
+// run-on cues) next to the good one. Unsuffixed carries no language though, so
+// it only counts when it sniffs Latin-script: a Japanese-only sidecar must still
+// let whisper+translate add an English track.
+var plainSubExts = []string{".vtt", ".srt"}
+
+// >80% of sampled letters ASCII. A UTF-16 sidecar reads as mostly non-letters
+// and fails this, which errs toward transcribing — the safe direction.
+func latinScript(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	buf := make([]byte, 8192)
+	n, _ := io.ReadFull(f, buf)
+	if n < 32 {
+		return false
+	}
+
+	letters, ascii := 0, 0
+	for _, r := range string(buf[:n]) {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+		letters++
+		if r <= unicode.MaxASCII {
+			ascii++
+		}
+	}
+	return letters > 0 && float64(ascii)/float64(letters) > 0.8
+}
+
 func hasEnglishSub(mp4Path string) bool {
 	base := strings.TrimSuffix(mp4Path, filepath.Ext(mp4Path))
 	for _, ext := range englishSubExts {
 		if _, err := os.Stat(base + ext); err == nil {
+			return true
+		}
+	}
+	for _, ext := range plainSubExts {
+		if p := base + ext; latinScript(p) {
 			return true
 		}
 	}

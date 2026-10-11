@@ -104,3 +104,30 @@ func TestE2E_AnamorphicSegmentIsDeanamorphized(t *testing.T) {
 		t.Errorf("segment SAR = %q, want square (1:1 / N/A) — still anamorphic", sar)
 	}
 }
+
+// AVERAGE-BANDWIDTH used to be set to the PEAK segment rate: Obsession (4K AV1)
+// averages 1.57 Mbps but holds one real 6.7s / 26 MB segment at 31.4 Mbps, so
+// the player was told to expect 31 Mbps sustained.
+func TestSegmentBitratesPeakVersusAverage(t *testing.T) {
+	// 4 segments of 1s. Three are 125 kB (1 Mbps), one is 1.25 MB (10 Mbps).
+	bounds := []float64{0, 1, 2, 3, 4}
+	var pkts []vpkt
+	for i, size := range []int{125_000, 125_000, 1_250_000, 125_000} {
+		pkts = append(pkts, vpkt{pts: float64(i) + 0.1, size: size, key: true})
+	}
+
+	per, peak, avg := segmentBitrates(pkts, bounds)
+	if len(per) != 4 {
+		t.Fatalf("want 4 per-segment rates, got %d", len(per))
+	}
+	if peak != 10_000_000 {
+		t.Errorf("peak = %d, want 10000000 (the fat segment)", peak)
+	}
+	// (125k+125k+1.25M+125k) bytes * 8 / 4s = 3.25 Mbps
+	if avg != 3_250_000 {
+		t.Errorf("avg = %d, want 3250000", avg)
+	}
+	if avg >= peak {
+		t.Error("average must be below the peak when one segment is fat")
+	}
+}

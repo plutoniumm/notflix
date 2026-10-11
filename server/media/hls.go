@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -30,7 +31,21 @@ const (
 	qSrc = "src"
 	// Segment/init URLs are immutable-cached: bump on ANY change to segment or
 	// init production, or clients replay stale fragments forever.
-	hlsURLVer = "6"
+	// 8: the AV1 audio renditions were regenerated stereo on 09-29, days AFTER
+	// cv=7 went live, so the same cv=7 init URL served a 5.1 moov and then a
+	// stereo one. Segments/inits go out immutable for a year, so every browser
+	// that touched one of those 9 titles in the window has the 5.1 init pinned
+	// against stereo segments — it plays for curl and is dead in the client.
+	// Bump on ANY change to segment or init BYTES, not just to the code path.
+	// 9: cv=8 is itself poisoned. ensureInit's fast path was a bare os.Stat, so
+	// during a cold start it served a 0-BYTE audio init under max-age=31536000 —
+	// pinned in that browser for a year while the file on disk became correct
+	// seconds later, so nothing server-side could ever find it. Every title
+	// opened after the cache wipe was exposed. Fixed in ensureInit + HLSInit;
+	// this bump evicts the empty inits already sitting in clients.
+	// 10: an already-AAC <=2ch source now copies instead of re-encoding, so a
+	// regenerated audio rendition carries different bytes than cv=9 served.
+	hlsURLVer = "10"
 )
 
 var hlsInFlight sync.Map
@@ -113,7 +128,8 @@ type srcInfo struct {
 	kfTimes     []float64
 	bounds      []float64 // keyframe-aligned segment boundaries
 	segBitrates []int     // bps, aligned with bounds
-	peakBitrate int       // bps
+	peakBitrate int       // bps, max over segments — HLS BANDWIDTH
+	avgBitrate  int       // bps, whole-file mean — HLS AVERAGE-BANDWIDTH
 	mu          sync.Mutex
 	ready       bool
 }
@@ -293,7 +309,7 @@ func getSrcInfo(path string) *srcInfo {
 			}
 		}
 		si.bounds = muxerBounds(si.kfTimes, pkts[0].pts, si.dur, hlsSegDur)
-		si.segBitrates, si.peakBitrate = segmentBitrates(pkts, si.bounds)
+		si.segBitrates, si.peakBitrate, si.avgBitrate = segmentBitrates(pkts, si.bounds)
 		si.ready = true
 	}
 	return si
@@ -394,9 +410,14 @@ func uniformDurs(dur, step float64) []float64 {
 }
 
 // pkts must be sorted by pts (ffprobe output already is).
-func segmentBitrates(pkts []vpkt, bounds []float64) ([]int, int) {
+// Returns per-segment rates, the PEAK (HLS BANDWIDTH) and the whole-file MEAN
+// (HLS AVERAGE-BANDWIDTH). These are genuinely far apart on an efficient AV1
+// encode: Obsession (4K AV1) averages 1.57 Mbps but has one real 6.7s segment
+// holding 26 MB = 31.4 Mbps. Reporting the peak as the average told the player
+// the stream needed 31 Mbps sustained and it buffered accordingly.
+func segmentBitrates(pkts []vpkt, bounds []float64) ([]int, int, int) {
 	if len(bounds) < 2 {
-		return nil, 0
+		return nil, 0, 0
 	}
 	numSegs := len(bounds) - 1
 	segBytes := make([]int, numSegs)
@@ -413,7 +434,7 @@ func segmentBitrates(pkts []vpkt, bounds []float64) ([]int, int) {
 	}
 
 	perSeg := make([]int, numSegs)
-	peak := 0
+	peak, totBytes, totDur := 0, 0, 0.0
 	for i, b := range segBytes {
 		dur := bounds[i+1] - bounds[i]
 		if dur <= 0 {
@@ -423,8 +444,14 @@ func segmentBitrates(pkts []vpkt, bounds []float64) ([]int, int) {
 		if perSeg[i] > peak {
 			peak = perSeg[i]
 		}
+		totBytes += b
+		totDur += dur
 	}
-	return perSeg, peak
+	avg := 0
+	if totDur > 0 {
+		avg = int(float64(totBytes) * 8 / totDur)
+	}
+	return perSeg, peak, avg
 }
 
 // h264 source-passthrough copy is DISABLED: generateSegment's copy mode can't
@@ -661,11 +688,15 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 		// and the AAC audio ship as separate single-track renditions, cut on the
 		// SAME keyframe boundaries.
 		si := getSrcInfo(path)
-		avg := si.peakBitrate
-		if avg <= 0 {
-			avg = 6_000_000
+		// BANDWIDTH is the peak segment rate, AVERAGE-BANDWIDTH the mean. Both
+		// used to be the peak (with BANDWIDTH inflated a further 20%).
+		peak, avg := si.peakBitrate, si.avgBitrate
+		if peak <= 0 {
+			peak = 6_000_000
 		}
-		peak := avg + avg/5
+		if avg <= 0 || avg > peak {
+			avg = peak
+		}
 		codecs := av1Codec(srcHeight, si.vBitDepth) + ",mp4a.40.2"
 
 		lang := "und"
@@ -1314,6 +1345,17 @@ var av1AudioInFlight sync.Map // audio dir -> chan struct{}
 // MEDIA_ERR_DECODE'd ~seg 367 on encoder re-priming. The muxer flushes segments
 // ~100× realtime, so callers waitForFile instead of blocking on the pass.
 // A `.done` marker means fully rendered; without it the dir is a partial.
+// srcAudio returns the probed metadata for one audio track, or nil when the
+// probe failed or the index is out of range — callers must treat nil as "assume
+// nothing and transcode", never as "no audio".
+func srcAudio(srcPath string, audioIdx int) *audioMeta {
+	m := getSrcInfo(srcPath).aMeta
+	if audioIdx < 0 || audioIdx >= len(m) {
+		return nil
+	}
+	return &m[audioIdx]
+}
+
 func ensureAV1Audio(srcPath, hash string, audioIdx int, segDur float64) error {
 	dir := filepath.Dir(initPath(hash, "audio", audioIdx, true))
 	if _, err := os.Stat(filepath.Join(dir, ".done")); err == nil {
@@ -1342,7 +1384,29 @@ func ensureAV1Audio(srcPath, hash string, audioIdx int, segDur float64) error {
 			"-y", "-i", srcPath,
 			"-map", fmt.Sprintf("0:a:%d", audioIdx), "-vn",
 		}
-		args = append(args, aacArgs(getSrcInfo(srcPath), audioIdx, "192k")...)
+		// Stereo, unlike the h264 ladder: >2ch AAC in this fMP4 audio-only
+		// rendition never plays. 176 multichannel files across the library have
+		// zero watch records (Orville S02, Breaking Bad S01 both fetched a full
+		// segment set and never reported a frame), while stereo AV1 titles and
+		// multichannel h264/TS (Sopranos S01E01, 55min watched) both play. The
+		// master advertises mp4a.40.2 with no CHANNELS attribute either way.
+		//
+		// But when the source track is ALREADY AAC at <=2ch, that target is what
+		// the file holds, so re-encoding buys nothing and costs everything: The
+		// Fix (2h21m, source aac/stereo/193k) was 3 hours from finishing at 3
+		// segs/min under load, to reproduce audio it already had. Copy also
+		// preserves a source above 192k instead of capping it, and the init's
+		// esds then describes the very frames being copied.
+		//
+		// Exactly 2, not <=2: a mono source copied straight through yields a
+		// 1-channel rendition, and the CMAF audio track this master points at
+		// is declared stereo. Re-encoding mono to stereo is the cheap case
+		// anyway, so the copy fast path loses nothing by excluding it.
+		if m := srcAudio(srcPath, audioIdx); m != nil && m.codec == "aac" && m.channels == 2 {
+			args = append(args, "-c:a", "copy")
+		} else {
+			args = append(args, "-c:a", "aac", "-b:a", "192k", "-ac", "2")
+		}
 		args = append(args,
 			"-f", "hls",
 			"-hls_segment_type", "fmp4",
@@ -1419,6 +1483,44 @@ func ensureAV1Video(srcPath, hash string, segDur float64) error {
 	return nil
 }
 
+// Existence is NOT readiness for an init segment: ffmpeg creates init.m4s and
+// fills it in place, so waitForFile's bare os.Stat returned the instant the file
+// appeared and HLSInit served 0 bytes under `Cache-Control: immutable` — that
+// client's rendition then never initializes again, not even across a restart.
+// Segments are atomic (`-hls_flags temp_file`) and keep using waitForFile.
+// Complete means every top-level box closes exactly at EOF and a moov is among
+// them; a half-written box leaves the walk short of the end.
+func waitForInit(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if b, err := os.ReadFile(path); err == nil && initComplete(b) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for a complete %s", filepath.Base(path))
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+}
+
+func initComplete(b []byte) bool {
+	moov := false
+	for off := 0; off < len(b); {
+		if len(b)-off < 8 {
+			return false
+		}
+		size := int(binary.BigEndian.Uint32(b[off : off+4]))
+		if string(b[off+4:off+8]) == "moov" {
+			moov = true
+		}
+		if size < 8 || off+size > len(b) {
+			return false
+		}
+		off += size
+	}
+	return moov
+}
+
 func waitForFile(path string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -1436,7 +1538,22 @@ var initInFlight sync.Map
 
 func ensureInit(srcPath, hash, q string, audioIdx int, useCopy bool) (out string, err error) {
 	out = initPath(hash, q, audioIdx, useCopy)
-	if _, err := os.Stat(out); err == nil {
+	if useCopy && q != "audio" {
+		// The video copy rendition writes its init beside its segments; the
+		// a0/ path initPath hands back for it is never written at all, so the
+		// fast path below could never hit and every request re-entered the pass.
+		seg0, _ := segPaths(hash, CodecAV1, qSrc, 0, 0, segVideoOnly, true)
+		out = filepath.Join(filepath.Dir(seg0), "init.m4s")
+	}
+	// NOT a bare os.Stat. ffmpeg creates init.m4s and fills it IN PLACE, so
+	// existence means "started", not "usable" — and this fast path handed back
+	// a 0-byte init under Cache-Control: max-age=31536000. hls.js cannot
+	// initialize a SourceBuffer from an empty init, so the title is dead in
+	// that browser for a YEAR, while curl and a fresh profile both play it.
+	// The audio rendition is the one that bites: its pass starts after the
+	// video pass, so a cold start asks for the audio init before it has bytes.
+	// waitForInit below guards generation; this shortcut used to bypass it.
+	if b, rerr := os.ReadFile(out); rerr == nil && initComplete(b) {
 		return out, nil
 	}
 
@@ -1464,7 +1581,7 @@ func ensureInit(srcPath, hash, q string, audioIdx int, useCopy bool) (out string
 			if err := ensureAV1Audio(srcPath, hash, audioIdx, audioStep(getSrcInfo(srcPath))); err != nil {
 				return out, err
 			}
-			if err := waitForFile(out, 120*time.Second); err != nil {
+			if err := waitForInit(out, 120*time.Second); err != nil {
 				return out, err
 			}
 			return out, nil
@@ -1474,12 +1591,10 @@ func ensureInit(srcPath, hash, q string, audioIdx int, useCopy bool) (out string
 		if err := ensureAV1Video(srcPath, hash, hlsSegDur); err != nil {
 			return out, err
 		}
-		seg0, _ := segPaths(hash, CodecAV1, qSrc, 0, 0, segVideoOnly, true)
-		vInit := filepath.Join(filepath.Dir(seg0), "init.m4s")
-		if err := waitForFile(vInit, 120*time.Second); err != nil {
+		if err := waitForInit(out, 120*time.Second); err != nil {
 			return out, err
 		}
-		return vInit, nil
+		return out, nil
 	}
 
 	p, ok := av1Profiles[q]
@@ -1514,7 +1629,21 @@ func HLSInit(c *gin.Context, lib *library.Library) {
 		return
 	}
 
+	// Last gate before an immutable cache header goes out. ensureInit is meant
+	// to guarantee this, but it has bypassed its own check once already, and the
+	// cost of being wrong here is asymmetric: a 200 + max-age=31536000 on a
+	// truncated init poisons that browser for a year and looks like a dead
+	// title, while a 503 just makes the player retry a second later.
+	b, rerr := os.ReadFile(out)
+	if rerr != nil || !initComplete(b) {
+		log.Printf("init incomplete, refusing to cache [%s q=%s audio=%d]: %d bytes",
+			filepath.Base(path), q, audioIdx, len(b))
+		c.Header("Cache-Control", "no-store")
+		c.String(http.StatusServiceUnavailable, "init not ready")
+		return
+	}
+
 	c.Header("Content-Type", "video/mp4")
 	c.Header("Cache-Control", "public, max-age=31536000")
-	c.File(out)
+	c.Data(http.StatusOK, "video/mp4", b)
 }

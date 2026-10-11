@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,7 +19,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"notflix/server/library"
-	"notflix/server/x/httpc"
 )
 
 // The model only ever sees an indexed file list + existing folder names and
@@ -76,72 +77,119 @@ func existingFolders(lib *library.Library) map[string]map[string]int {
 	return out
 }
 
-func organizePrompt(items []OrgItem, folders map[string]map[string]int) string {
-	type f struct {
-		I    int    `json:"i"`
-		Name string `json:"name"`
-		Root string `json:"root"`
-	}
-	files := make([]f, len(items))
-	for i, it := range items {
-		files[i] = f{I: i, Name: library.CleanName(it.File), Root: it.Root}
-	}
-	filesJSON, _ := json.Marshal(files)
+// yearRe runs on the RAW filename, never on CleanName's output: bracketRe eats
+// "(2021)" and the keyword list eats a bare "2025", so by the time a name is
+// clean the year is usually gone — while the prompt asks for decade grouping.
+// "Dune (2021) [1080p]" cleaned to "Dune" and "Companion 2025" to "Companion",
+// so every decade bucket was a guess from the title alone.
+var yearRe = regexp.MustCompile(`\b(19[3-9]\d|20[0-4]\d)\b`)
 
-	var names []string
-	for _, m := range folders {
-		for name := range m {
-			names = append(names, name)
+func fileYear(raw string) int {
+	m := yearRe.FindAllString(raw, -1)
+	if len(m) == 0 {
+		return 0
+	}
+	// Last match: "Blade Runner 2049 (2017)" must read 2017, not the title.
+	y, err := strconv.Atoi(m[len(m)-1])
+	if err != nil {
+		return 0
+	}
+	return y
+}
+
+type orgFile struct {
+	I    int    `json:"i"`
+	Name string `json:"name"`
+	Year int    `json:"year,omitempty"`
+	Root string `json:"root"`
+}
+
+func organizeFiles(items []OrgItem) []orgFile {
+	out := make([]orgFile, len(items))
+	for i, it := range items {
+		out[i] = orgFile{I: i, Name: library.CleanName(it.File), Year: fileYear(it.File), Root: it.Root}
+	}
+	return out
+}
+
+// Folder names carry their occupant count: "Documentaries (12)" is an
+// established grouping, "Misc (2)" is barely one, and the model reuses the
+// former far more readily when it can tell them apart.
+func organizeFolders(folders map[string]map[string]int) []string {
+	var out []string
+	for root, m := range folders {
+		for name, n := range m {
+			out = append(out, fmt.Sprintf("%s/%s (%d)", root, name, n))
 		}
 	}
-	sort.Strings(names)
-	foldersJSON, _ := json.Marshal(names)
+	sort.Strings(out)
+	return out
+}
+
+func organizePrompt(items []OrgItem, folders map[string]map[string]int) string {
+	filesJSON, _ := json.Marshal(organizeFiles(items))
+	foldersJSON, _ := json.Marshal(organizeFolders(folders))
 
 	return fmt.Sprintf(`You organize a home movie library. Below is a list of loose video files, plus the folders that already exist.
 
 Assign files to folders:
 - Films of one franchise or series belong in one folder named after it (e.g. "Harry Potter", "Mission Impossible").
 - Documentaries and docuseries go in "Documentaries".
-- Reuse an existing folder when one fits.
-- Remaining movies: group by decade (e.g. "1980s", "2000s"). If a decade group would mix languages, split it by language (e.g. "Hindi 2000s"). If a group grows past ~15 files, split it into parts (e.g. "2000s A-M", "2000s N-Z").
-- A file may only move to a folder on its own root.
+- Reuse an existing folder when one fits. Prefer a folder that already holds several files; match its name EXACTLY, character for character.
+- Remaining movies: group by decade from the year field (e.g. "1980s", "2000s"). If a decade group would mix languages, split it by language (e.g. "Hindi 2000s"). If a group grows past ~15 files, split it into parts (e.g. "2000s A-M", "2000s N-Z").
+- A file may only move to a folder on its own root. Existing folders are listed "root/folder (file count)"; answer with the folder name alone, without the root prefix.
 - Never invent a folder that would hold a single file; leave such files out entirely.
 - If a file is ambiguous, leave it out.
 
 Existing folders: %s
-Files: %s
-
-Return ONLY a JSON object: {"moves":[{"i":<file index>,"folder":"<folder name>"}]}. No explanation.`,
-		string(foldersJSON), string(filesJSON))
+Files: %s`, string(foldersJSON), string(filesJSON))
 }
 
-// Generous (whole-library prompt, cold model) but finite: an asleep ollama
-// host accepts the connection and never answers.
+// Generous (whole-library prompt, cold model) but finite: an asleep host
+// accepts the connection and never answers.
 const organizeTimeout = 10 * time.Minute
 
-func organizeChat(prompt string) (string, error) {
-	req := map[string]any{
-		"model":      ollamaModel(),
-		"stream":     false,
-		"format":     "json",
-		"keep_alive": ollamaKeepAlive,
-		"messages":   []map[string]string{{"role": "user", "content": prompt}},
-	}
+// organizeThink: whether the schema gives the model a scratchpad field before
+// the moves. A grammar forces the first token, so with a bare moves-only schema
+// the model CANNOT think — structured output turns reasoning off for free.
+// Measured on 40 held-out files that already live in known folders (see
+// organize_bench_test.go) — set from that measurement, not from taste.
+const organizeThink = false
 
-	var chatResp struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-		Error string `json:"error"`
+// organizeSchema makes a malformed plan unrepresentable rather than merely
+// discouraged: `i` is bounded to the actual file count, so the out-of-range
+// index that validMoves used to drop silently can't be emitted, and the
+// envelope can't carry prose. `folder` stays a free string on purpose — an enum
+// of existing folders was measured correct for reuse but it also forbids the
+// NEW franchise and decade folders the prompt exists to create.
+func organizeSchema(nFiles int) map[string]any {
+	move := map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"i", "folder"},
+		"properties": map[string]any{
+			"i":      map[string]any{"type": "integer", "minimum": 0, "maximum": nFiles - 1},
+			"folder": map[string]any{"type": "string", "minLength": 1, "maxLength": folderMaxLen},
+		},
 	}
-	if err := httpc.PostJSON(context.Background(), ollamaHost()+"/api/chat", req, &chatResp, organizeTimeout); err != nil {
-		return "", err
+	props := map[string]any{"moves": map[string]any{"type": "array", "items": move}}
+	required := []string{"moves"}
+	if organizeThink {
+		// Ordered first so the tokens land before any decision commits.
+		props["reasoning"] = map[string]any{"type": "string"}
+		required = []string{"reasoning", "moves"}
 	}
-	if chatResp.Error != "" {
-		return "", fmt.Errorf("ollama: %s", chatResp.Error)
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             required,
+		"properties":           props,
 	}
+}
 
-	return chatResp.Message.Content, nil
+func organizeChat(prompt string, nFiles int) (string, error) {
+	return saturnChat(context.Background(), "", prompt,
+		jsonSchema("organize_moves", organizeSchema(nFiles)), organizeTimeout)
 }
 
 type orgAssign struct {
@@ -198,8 +246,16 @@ func mergeAssigns(runs [][]orgAssign) []orgAssign {
 	return out
 }
 
+// Release-name folders in this library genuinely run past 80 chars ("Sapne vs
+// Everyone S01 720p 10bit DS4K AMZN WEBRip x265 HEVC Hindi DDP 5.1 ESub -
+// Immortal" is 89). At 80 the grammar TRUNCATED the name mid-string and the
+// model's answer then matched no folder — 12 of 12 benchmark errors were this,
+// not a judgement failure. The bound is shared with organizeSchema so the
+// validator and the grammar can never disagree.
+const folderMaxLen = 120
+
 func folderOK(name string) bool {
-	if name == "" || len(name) > 80 {
+	if name == "" || len(name) > folderMaxLen {
 		return false
 	}
 	if strings.HasPrefix(name, ".") || strings.Contains(name, "..") {
@@ -329,17 +385,12 @@ func runOrganize(lib *library.Library) {
 		return
 	}
 
-	host, model := ollamaHost(), ollamaModel()
-	if !ollamaHasModel(host, model) {
-		fail(fmt.Errorf("ollama model %q unavailable at %s", model, host))
+	// One cheap probe up front: a cold model costs a full timeout per run, and
+	// "gateway down" and "pinned id gone from the catalogue" are different
+	// fixes, so they get different messages instead of three 10min stalls.
+	if err := saturnUp(context.Background(), 20*time.Second); err != nil {
+		fail(fmt.Errorf("saturn unavailable at %s: %w", saturnHost(), err))
 		return
-	}
-	if !ollamaLoaded(host, model) {
-		orgSet(func(s *orgStatus) { s.Stage = "loading model" })
-		if err := ollamaWarm(host, model); err != nil {
-			fail(fmt.Errorf("model load: %w", err))
-			return
-		}
 	}
 
 	folders := existingFolders(lib)
@@ -349,7 +400,7 @@ func runOrganize(lib *library.Library) {
 	var lastErr error
 	for r := 1; r <= organizeRuns; r++ {
 		orgSet(func(s *orgStatus) { s.Stage = "classifying"; s.Run = r })
-		content, err := organizeChat(prompt)
+		content, err := organizeChat(prompt, len(items))
 		var assigns []orgAssign
 		if err == nil {
 			assigns, err = parseOrganize(content)
@@ -412,7 +463,7 @@ func OrganizeWarm(c *gin.Context) {
 	if orgWarming.CompareAndSwap(false, true) {
 		go func() {
 			defer orgWarming.Store(false)
-			if err := ollamaWarm(ollamaHost(), ollamaModel()); err != nil {
+			if err := saturnWarm(context.Background()); err != nil {
 				log.Printf("[organize] warm: %v", err)
 			}
 		}()

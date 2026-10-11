@@ -1,7 +1,6 @@
 package library
 
 import (
-	"bufio"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -111,29 +110,14 @@ func statsTee(key string, value any, clientIP string) {
 	f.Write([]byte("\n"))
 }
 
+// One reader for the log: scanStats (history.go) streams it from an offset.
 func readStatsSince(cutoffMs int64) []statsEvent {
-	statsMu.Lock()
-	defer statsMu.Unlock()
-	f, err := os.Open(statsPath)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
 	var out []statsEvent
-	sc := bufio.NewScanner(f)
-	// Paths can be deep; bump the scanner buffer.
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		var ev statsEvent
-		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
-			continue
+	scanStats(0, func(ev statsEvent) {
+		if ev.At >= cutoffMs {
+			out = append(out, ev)
 		}
-		if ev.At < cutoffMs {
-			continue
-		}
-		out = append(out, ev)
-	}
+	})
 	return out
 }
 

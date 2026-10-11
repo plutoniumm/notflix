@@ -8,15 +8,18 @@
   import { Down, isSupported } from "./dl";
   import { clean } from "../core/video";
   import { join } from "../core/path";
+  import { ago, pct } from "../core/fmt";
 
   import Header from "./Header.svelte";
   import Magnet from "./Magnet.svelte";
   import Downloads from "./Downloads.svelte";
   import FolderRow from "./FolderRow.svelte";
   import Organize from "./Organize.svelte";
-  import ProgressBar from "../components/ProgressBar.svelte";
+  import Storage from "./Storage.svelte";
+  import Sect from "./Sect.svelte";
   import DeleteBtn from "../components/DeleteBtn.svelte";
   import ProcessStatusPanel from "./ProcessStatus.svelte";
+  import { room } from "../core/room.svelte";
 
   declare const __BUILD_TIME__: string;
   const frontendBuild = __BUILD_TIME__;
@@ -31,6 +34,13 @@
   let val = $state("");
   let jobs: Job[] = $state([]);
   let dlJobs: Downjob[] = $state([]);
+  let dlDown = $state(false);
+
+  // The room goes faintly red when something needs a person, so the state is
+  // known from any page and this one is only opened once it already matters.
+  $effect(() => {
+    room.alarm = dlDown;
+  });
   let processingLib = $state(false);
   let procStatus: ProcessStatus | null = $state(null);
   let pwaDownloads = $state<
@@ -132,7 +142,11 @@
 
     pollers.push(
       usePoll(async () => {
-        dlJobs = (await api.aria2.list({ silent: true })) ?? [];
+        const r = await api.aria2.list({ silent: true });
+        // aria2 can keep downloading with its RPC wedged; [] would read as
+        // "nothing queued" and hide the one state that needs a restart.
+        dlDown = r == null;
+        dlJobs = r ?? [];
       }, DL_POLL_MS),
     );
 
@@ -302,6 +316,21 @@
         .map((f) => ({ dir, name: f.name, root: f.root })),
     ),
   );
+
+  const stamped = (s: string) => {
+    const t = Date.parse(s);
+
+    return Number.isFinite(t) ? ago(t) : "unknown";
+  };
+
+  // The footer's only job: catch a bundle the browser is holding after the
+  // binary moved on. A date pair nobody can diff by eye can't do that.
+  let stale = $derived.by(() => {
+    const f = Date.parse(frontendBuild);
+    const b = Date.parse(backendBuild);
+
+    return Number.isFinite(f) && Number.isFinite(b) && b - f > 120_000;
+  });
 </script>
 
 <div style="min-height:100vh; min-height:100dvh">
@@ -315,23 +344,21 @@
   <Magnet {disks} onAdd={addDownload} onAddTorrent={addTorrentFile} />
 
   <main>
-    <ProcessStatusPanel status={procStatus} {jobs} />
+    <ProcessStatusPanel status={procStatus} {jobs} i={0} />
 
     {#if corruptFiles.length > 0}
-      <section class="panel bad surface flow-h">
-        <h3 class="phead m0 f al-ct g10">
-          <span class="plabel">Corrupt / unplayable</span>
-          <span class="pcount fs-xs">{corruptFiles.length}</span>
-          <span class="pnote fs-xs tx-1">re-scanned on every library process</span>
-        </h3>
+      <Sect
+        i={1}
+        bad
+        label="Corrupt / unplayable"
+        meta="{corruptFiles.length} · re-scanned on every library process"
+      >
         {#each corruptFiles as cf (cf.dir + "/" + cf.name)}
-          <div class="item f al-ct g10">
-            <div class="info">
-              <span class="d-b fs-sm tx-4 trunc">{clean(cf.name)}</span>
-              <span class="d-b fs-xs tx-1 trunc">
-                {cf.dir === "." ? "Root" : cf.dir} · {cf.root}
-              </span>
-            </div>
+          <div class="led bad-row">
+            <span class="fs-sm tx-4 trunc">{clean(cf.name)}</span>
+            <span class="fs-xs tx-1 trunc tr">
+              {cf.dir === "." ? "Root" : cf.dir} · {cf.root}
+            </span>
             <DeleteBtn
               armed={armed === join(cf.dir, cf.name)}
               title="Delete file"
@@ -339,148 +366,128 @@
             />
           </div>
         {/each}
-      </section>
+      </Sect>
     {/if}
 
-    <Organize onApplied={() => loadAll()} />
+    {#if dlDown}
+      <Sect i={1} bad label="aria2 not answering">
+        <p class="m0 fs-xs tx-1 pad">
+          downloads may still be running; restart aria2 to get status back
+        </p>
+      </Sect>
+    {/if}
 
-    <Downloads
-      jobs={dlJobs}
-      onRemove={removeDownload}
-      onPause={pauseDownload}
-      onResume={resumeDownload}
-    />
+    <div class="cols">
+      <div class="col">
+        <Downloads
+          i={2}
+          jobs={dlJobs}
+          onRemove={removeDownload}
+          onPause={pauseDownload}
+          onResume={resumeDownload}
+        />
+
+        <Organize i={4} onApplied={() => loadAll()} />
+      </div>
+
+      <div class="col">
+        <Storage i={5} {disks} {dirSizes} />
 
     {#if pwaDownloads.length > 0}
-      <section class="panel surface flow-h">
-        <h3 class="phead m0 f al-ct g10">
-          <span class="plabel">Offline downloads</span>
-          <span class="pcount fs-xs">{pwaDownloads.length}</span>
-        </h3>
+      <Sect i={3} label="Saving to this device" meta="{pwaDownloads.length} files">
         {#each pwaDownloads as dl (dl.videoParam)}
-          <div class="item f al-ct g10">
-            <div class="info">
-              <span class="d-b fs-sm tx-4 trunc"
-                >{clean(dl.title || dl.videoParam)}</span
-              >
-              <div class="pwa-bar">
-                <ProgressBar value={dl.progress} variant="success" label />
-              </div>
-            </div>
+          <div class="led pwa" style="--fill:{dl.progress}%">
+            <span class="fs-sm tx-4 trunc">{clean(dl.title || dl.videoParam)}</span>
+            <span class="fs-xs tx-1 num tr">{pct(dl.progress)}</span>
           </div>
         {/each}
-      </section>
+      </Sect>
     {/if}
 
-    {#if loading}
-      <div class="skel f-col g10" aria-hidden="true">
-        {#each Array(7) as _, i}
-          <div class="skel-row" style="--i:{i}"></div>
-        {/each}
       </div>
-    {:else}
-      {#each rows as [dir, files], idx}
-        {@const ds = dirSizes[dir]}
-        {@const disk = ds ? disks.find((d) => d.root === ds.root) : null}
-        <FolderRow
-          {dir}
-          {files}
-          {jobs}
-          {idx}
-          {editing}
-          bind:val
-          {startEdit}
-          {cancelEdit}
-          {confirmEdit}
-          onDelFile={(f) => delFile(dir, f)}
-          onDelDir={() => delDir(dir)}
-          sizeBytes={ds?.bytes ?? 0}
-          diskTotal={disk?.total ?? 0}
-          hidden={hiddenSet.has(dir)}
-          onToggleHidden={() => toggleHidden(dir)}
-          {armed}
-        />
-      {/each}
-    {/if}
-
-    <div class="build-info fs-xs tx-1">
-      frontend {frontendBuild
-        .replace("T", " ")
-        .replace(/:\d\dZ?$/, "")
-        .replace("Z", "")} UTC
-      {#if backendBuild}
-        &middot; backend {backendBuild
-          .replace("T", " ")
-          .replace(/:\d\dZ?$/, "")
-          .replace("Z", "")} UTC
-      {/if}
     </div>
+
+    <Sect i={6} label="Library" meta="{rows.length} folders · {total} files">
+      {#if loading}
+        <div class="skel f-col g10">
+          {#each Array(7) as _, k}
+            <div class="skel-row" style="--i:{k}"></div>
+          {/each}
+        </div>
+      {:else}
+        {#each rows as [dir, files], idx}
+          {@const ds = dirSizes[dir]}
+          {@const disk = ds ? disks.find((d) => d.root === ds.root) : null}
+          <FolderRow
+            {dir}
+            {files}
+            {jobs}
+            {idx}
+            {editing}
+            bind:val
+            {startEdit}
+            {cancelEdit}
+            {confirmEdit}
+            onDelFile={(f) => delFile(dir, f)}
+            onDelDir={() => delDir(dir)}
+            sizeBytes={ds?.bytes ?? 0}
+            diskTotal={disk?.total ?? 0}
+            hidden={hiddenSet.has(dir)}
+            onToggleHidden={() => toggleHidden(dir)}
+            {armed}
+          />
+        {/each}
+      {/if}
+    </Sect>
+
+    <footer class="foot fs-xs f fw al-ct j-ct g10">
+      <span class="tx-1">built</span>
+      <span class="tx-3">frontend {stamped(frontendBuild)}</span>
+      {#if backendBuild}
+        <span class="tx-1">/</span>
+        <span class="tx-3">backend {stamped(backendBuild)}</span>
+      {/if}
+      {#if stale}
+        <span class="red">— reload, this bundle is older than the server</span>
+      {/if}
+    </footer>
   </main>
 </div>
 
 <style>
   main {
     padding: 24px 40px 60px;
-    max-width: 980px;
+    max-width: 1520px;
     --i: 0;
     position: relative;
     z-index: 1;
   }
 
-  .panel {
-    margin-bottom: 20px;
-    transition:
-      opacity var(--motion, 0.32s) var(--ease-out),
-      translate var(--motion, 0.32s) var(--ease-out);
+  /* Processing and Library stay full width — a table and a long list both read
+     worse in a half column. Everything else pairs up once there is room. */
+  .cols {
+    display: grid;
+    gap: 0 44px;
+    align-items: start;
   }
-  @starting-style {
-    .panel {
-      opacity: 0;
-      translate: 0 10px;
+  @media (min-width: 1180px) {
+    .cols {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
   }
-  .phead {
-    padding: 10px 16px;
-    background: rgb(255 255 255 / 0.02);
-    border-bottom: 1px solid var(--glass-bd);
-  }
-  .plabel {
-    color: var(--tx-3);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-  }
-  .pcount {
-    color: var(--tx-1);
-    font-variant-numeric: tabular-nums;
-  }
-  .pnote {
-    margin-left: auto;
-    text-align: right;
-  }
-
-  .panel.bad {
-    border-color: color-mix(in oklab, var(--red) 45%, transparent);
-    box-shadow: inset 2px 0 0 var(--red);
-  }
-  .panel.bad .plabel {
-    color: var(--red);
-  }
-
-  .item {
-    padding: 10px 16px;
-    border-top: 1px solid rgb(255 255 255 / 0.04);
-  }
-  .item:first-of-type {
-    border-top: none;
-  }
-  .info {
-    flex: 1;
+  .col {
     min-width: 0;
   }
-  .pwa-bar {
-    margin-top: 6px;
+
+  .bad-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+  }
+  .pwa {
+    grid-template-columns: minmax(0, 1fr) 48px;
+    --led-c: color-mix(in oklab, var(--grn) 22%, transparent);
+  }
+  .pad {
+    padding: 8px 10px;
   }
 
   .skel-row {
@@ -498,12 +505,10 @@
     opacity: calc(1 - var(--i) * 0.1);
   }
 
-  .build-info {
-    margin-top: 56px;
+  .foot {
+    margin-top: 48px;
     padding: 16px 0;
     border-top: 1px solid var(--glass-bd);
-    text-align: center;
-    color: var(--tx-1);
     font-family: var(--font-display);
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -515,12 +520,5 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .panel {
-      transition-duration: 1ms;
-    }
-    .skel-row {
-      animation: none;
-    }
-  }
+  
 </style>

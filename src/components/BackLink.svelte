@@ -28,9 +28,5 @@
     scale: 0.92;
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .back {
-      transition-duration: 1ms;
-    }
-  }
+  
 </style>

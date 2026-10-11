@@ -274,6 +274,15 @@ func toMP4(srcPath, root string) error {
 		return err
 	}
 
+	// Before AutoWhisper below: it skips a file that already has an English
+	// sidecar, and it keys that check on the VIDEO's basename. Leaving the
+	// release's own subtitles on the pre-conversion stem both stranded them and
+	// bought a redundant transcription of a file that already had subs.
+	if n := library.MoveSidecars(strings.TrimSuffix(srcPath, filepath.Ext(srcPath)),
+		filepath.Join(dir, cleanedBase)); n > 0 {
+		log.Printf("[convert] %s: carried %d sidecar(s) onto the converted name", name, n)
+	}
+
 	os.Remove(srcPath)
 	library.PipelineForget(srcPath) // source is gone; ledger key is now mp4Path
 	library.PipelineMark(mp4Path, "convert", library.StepDone)

@@ -361,7 +361,10 @@
 
       <div class="title trunc fw5 tx-5">{title}</div>
 
-      <button
+      <!-- Playback: speed and where you go next. Separated from the two view
+           controls, which change how you watch rather than what plays. -->
+      <div class="dgrp f al-ct">
+        <button
         class="speed-chip pl-num cc rx5 ptr sh-0"
         title="Playback speed — click to cycle, scroll to nudge"
         onclick={cycleSpeed}
@@ -384,6 +387,9 @@
         </button>
       {/if}
 
+      </div>
+
+      <div class="dgrp f al-ct">
       {#if onPip}
         <button class="ctrl ptr cc" aria-label="Picture in picture" onclick={onPip}>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2" /><rect x="12" y="11" width="8" height="7" rx="1" fill="currentColor" /></svg>
@@ -393,6 +399,7 @@
       <button class="ctrl ptr cc" aria-label="Fullscreen" onclick={onFullscreen}>
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
       </button>
+      </div>
     </div>
   </div>
 {/if}
@@ -706,6 +713,28 @@
     font-size: 14px;
     letter-spacing: -0.014em;
     color: var(--tx-5);
+  }
+
+  /* Same grouping rule as the top strip: one surface, hairline seams, round
+     only at the ends. */
+  .dgrp {
+    gap: 0;
+    margin-left: 8px;
+    border-radius: 11px;
+    background: color-mix(in oklab, var(--tx-5) 6%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tx-5) 8%, transparent);
+  }
+  .dgrp > * + * {
+    box-shadow: inset 1px 0 0 color-mix(in oklab, var(--tx-5) 8%, transparent);
+  }
+  .dgrp > :first-child {
+    border-radius: 10px 0 0 10px;
+  }
+  .dgrp > :last-child {
+    border-radius: 0 10px 10px 0;
+  }
+  .dgrp > :only-child {
+    border-radius: 10px;
   }
 
   .speed-chip {

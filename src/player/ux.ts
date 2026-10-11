@@ -1,3 +1,4 @@
+import { subToggle, type SubTrack } from "./subtrack";
 import { toast } from "../core/toast.svelte";
 
 // Everything the player paints over the picture. A gesture that lands on any
@@ -205,6 +206,33 @@ export function Hotkeys(
   onFullscreen: () => void,
   on: Acts,
 ): () => void {
+  // subs.ts keeps exactly one subtitle track showing at a time. The old `c`
+  // handler inverted the mode of EVERY captions track, so pressing it while one
+  // was on turned all the others ON — two languages stacked on screen — and
+  // pressing again left the original one off. Toggle the set, not each member,
+  // and remember which track to bring back.
+  let lastSub = "";
+
+  const subTracks = () => {
+    const all = player.textTracks();
+    const out: any[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const t = all[i];
+      if (t.kind === "captions" || t.kind === "subtitles") out.push(t);
+    }
+
+    return out;
+  };
+
+  const toggleSubs = () => {
+    const subs = subTracks();
+    if (!subs.length) return;
+
+    const { show, remember } = subToggle(subs, lastSub);
+    lastSub = remember;
+    for (const t of subs) t.mode = t === show ? "showing" : "hidden";
+  };
+
   const handler = (e: KeyboardEvent) => {
     // Space/letters belong to whatever control has focus, and Cmd/Ctrl
     // chords belong to the browser. The scrub track stops its own arrows
@@ -269,13 +297,7 @@ export function Hotkeys(
     } else if (lkey === "p") {
       togglePip(player);
     } else if (lkey === "c") {
-      const tracks = player.textTracks();
-      for (let i = 0; i < tracks.length; i++) {
-        const t = tracks[i];
-        if (t.kind === "captions" || t.kind === "subtitles") {
-          t.mode = t.mode === "showing" ? "hidden" : "showing";
-        }
-      }
+      toggleSubs();
     } else if (key >= "0" && key <= "9") {
       player.currentTime(player.duration() * parseInt(key) * 0.1);
     } else if (key === "]") {

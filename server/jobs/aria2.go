@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -84,9 +85,27 @@ var aria2Proc atomic.Pointer[exec.Cmd]
 // run on shutdown: an orphan keeps :6800, later spawns die, and new flags
 // silently never apply until it's pkill'd.
 func Aria2Stop() {
-	if cmd := aria2Proc.Load(); cmd != nil && cmd.Process != nil {
-		cmd.Process.Signal(os.Interrupt)
+	cmd := aria2Proc.Load()
+	if cmd == nil || cmd.Process == nil {
+		return
 	}
+	// SIGINT asks aria2 to shut down gracefully, which it does from the same
+	// command queue that serves RPC — and that queue is exactly what wedges
+	// (seen 09-30: downloads still writing, RPC and the save-session timer both
+	// dead for 14min). A graceful stop it can never run leaves the old process
+	// squatting :6800, and then every later spawn silently gets no RPC at all.
+	// Killing is safe: --continue=true resumes from the .aria2 control files.
+	cmd.Process.Signal(os.Interrupt)
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		// Signal(0) probes liveness. NOT cmd.Wait(): the supervisor goroutine
+		// already owns it, and a second Wait returns instantly with "already
+		// called", which would report exit and skip the kill every time.
+		if cmd.Process.Signal(syscall.Signal(0)) != nil {
+			return
+		}
+	}
+	cmd.Process.Kill()
 }
 
 func Aria2Init(lib *library.Library) {
@@ -100,7 +119,7 @@ func Aria2Init(lib *library.Library) {
 	for {
 		started := time.Now()
 		args := []string{
-			"--enable-rpc", "--rpc-listen-all",
+			"--enable-rpc",
 			"--rpc-listen-port=6800",
 			"--seed-time=0",
 			"--quiet=true",
@@ -115,7 +134,10 @@ func Aria2Init(lib *library.Library) {
 			"--max-overall-download-limit=0",
 			"--file-allocation=falloc",
 			"--disk-cache=64M",
-			"--bt-max-peers=0",
+			// Not 0 (unlimited): 3 torrents held 244 established peers / 778 network
+			// fds, and aria2 services peers and the RPC listener on ONE loop. 60 is
+			// just above aria2's own default; raise only with the fd count in hand.
+			"--bt-max-peers=60",
 			"--bt-request-peer-speed-limit=50M",
 			"--bt-max-open-files=1024",
 			// Fixed so DHT NAT discovery sees one address across restarts; random
@@ -630,6 +652,16 @@ func Aria2ActivePaths() map[string]bool {
 func Aria2List(c *gin.Context) {
 	activeRaw, err1 := a2call("aria2.tellActive")
 	waitRaw, err2 := a2call("aria2.tellWaiting", 0, 100)
+
+	// Never swallow this into an empty list. aria2 can keep downloading while
+	// its control plane wedges (RPC silent, save-session timer stopped) — and a
+	// 200 with [] reads as "nothing is downloading", so the one symptom that
+	// says "aria2 needs a kick" is the one we used to hide.
+	if err1 != nil && err2 != nil {
+		log.Printf("aria2 rpc unreachable: %v", err1)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "aria2 rpc unreachable: " + err1.Error()})
+		return
+	}
 
 	var active, waiting []a2StatusRaw
 	if err1 == nil {

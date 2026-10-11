@@ -299,6 +299,8 @@ const blurbTimeout = 3 * time.Minute
 func blurbChat(prompt string) (string, error) {
 	req := map[string]any{
 		"model":      ollamaModel(),
+		"options":    OllamaOpts(nil),
+		"think":      NoThink,
 		"stream":     false,
 		"format":     "json",
 		"keep_alive": ollamaKeepAlive,

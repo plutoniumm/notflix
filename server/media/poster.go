@@ -628,7 +628,8 @@ func visionProbeHost() bool {
 	// Load the weights here, once, under the probe lock. A ~100GB cold load
 	// outlasts any sane per-pick budget, and paying it inside the first pick
 	// makes a slow load indistinguishable from a dead host to the breaker.
-	load := map[string]any{"model": model, "prompt": "", "keep_alive": visionAlive}
+	load := map[string]any{"model": model, "prompt": "", "keep_alive": visionAlive,
+		"options": jobs.OllamaOpts(nil)}
 	if err := httpc.PostJSON(context.Background(), host+"/api/generate", load, nil, visionLoad); err != nil {
 		log.Printf("[poster] vision off: %s did not load: %v", model, err)
 
@@ -675,7 +676,7 @@ func visionPick(sheet image.Image, m SpriteManifest, finalists []int) (int, bool
 		"format":     "json",
 		"think":      false,
 		"keep_alive": visionAlive,
-		"options":    map[string]any{"temperature": 0},
+		"options":    jobs.OllamaOpts(map[string]any{"temperature": 0}),
 	}
 
 	var resp struct {

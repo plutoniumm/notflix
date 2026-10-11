@@ -58,7 +58,12 @@
 
     <div class="spacer"></div>
 
-    <div class="chips f g5 sh-0 al-ct">
+    <!-- Grouped by what the control acts on, not by what fits. Seven identical
+         icons in one strip is seven things to scan every time; three bound
+         groups is three, and the grouping itself says what each one does. -->
+    <div class="chips f sh-0 al-ct">
+      <!-- Tracks: what you hear and what you read. -->
+      <div class="grp f al-ct">
       {#if view.audio.tracks.length > 1}
         <div class="btn-wrap p-rel">
           <button
@@ -110,9 +115,12 @@
         onclick={runWhisper}
       >
         <Icon name="whisper" />
-      </button>
+        </button>
+      </div>
 
-      <button
+      <!-- Capture: both of these hand you a file out of this video. -->
+      <div class="grp f al-ct">
+        <button
         class="ibtn cc rx5 ptr p5"
         aria-label="Grab a frame"
         title="Grab a frame (g)"
@@ -130,9 +138,12 @@
         onclick={onClip}
       >
         <Icon name="scissors" />
-      </button>
+        </button>
+      </div>
 
-      <button
+      <!-- Everything else: adjust, keep, explain. -->
+      <div class="grp f al-ct">
+        <button
         class="ibtn cc rx5 ptr p5"
         aria-label="Picture and audio"
         class:active={tuneOpen}
@@ -151,8 +162,8 @@
         ?
       </button>
 
-      <Down {videoParam} {title} />
-
+        <Down {videoParam} {title} />
+      </div>
     </div>
   </div>
 {/if}
@@ -211,6 +222,41 @@
   }
 
   .btn-wrap { display: flex; align-items: center; }
+
+  /* A group is one object: shared surface, hairline seams, rounded only at the
+     ends. No overflow:hidden — the subtitle and audio pickers are children and
+     would be clipped by it. */
+  .chips {
+    gap: 10px;
+  }
+  .grp {
+    gap: 0;
+    border-radius: 12px;
+    background: color-mix(in oklab, var(--tx-5) 6%, transparent);
+    backdrop-filter: blur(20px) saturate(150%);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tx-5) 9%, transparent);
+  }
+  /* :global — a seam has to land on <Down>'s root too, which this scope cannot
+     see otherwise. */
+  .grp > :global(* + *) {
+    box-shadow: inset 1px 0 0 color-mix(in oklab, var(--tx-5) 9%, transparent);
+  }
+  .grp :global(.ibtn) {
+    border-radius: 0;
+    background: none;
+  }
+  .grp > :global(*:first-child) :global(.ibtn),
+  .grp > :global(*:first-child).ibtn {
+    border-radius: 11px 0 0 11px;
+  }
+  .grp > :global(*:last-child) :global(.ibtn),
+  .grp > :global(*:last-child).ibtn {
+    border-radius: 0 11px 11px 0;
+  }
+  .grp > :global(*:only-child) :global(.ibtn),
+  .grp > :global(*:only-child).ibtn {
+    border-radius: 11px;
+  }
 
   .ibtn {
     color: var(--tx-3);

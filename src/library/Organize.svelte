@@ -5,6 +5,7 @@
   import { clean } from "../core/video";
   import { ORGANIZE_POLL_MS } from "../core/events.svelte";
   import { usePoll } from "../core/poll";
+  import Sect from "./Sect.svelte";
 
   type Move = { file: string; root: string; folder: string };
   type Plan = {
@@ -17,7 +18,7 @@
     error: string;
   };
 
-  let { onApplied }: { onApplied: () => void } = $props();
+  let { onApplied, i = 0 }: { onApplied: () => void; i?: number } = $props();
 
   let loading = $state(false);
   let applying = $state(false);
@@ -138,14 +139,13 @@
   }
 </script>
 
-<section class="panel surface flow-h">
-  <h3 class="phead m0 f al-ct g10">
-    <span class="plabel">Organize with AI</span>
-    <span class="pnote fs-xs tx-1">
-      groups loose movies into folders — nothing moves until you apply
-    </span>
-  </h3>
-
+<Sect
+  {i}
+  label="Organize with AI"
+  meta={moves?.length
+    ? `${selected.length} of ${moves.length} selected`
+    : "nothing moves until you apply"}
+>
   {#if moves === null}
     <div class="bar f al-ct g10">
       <button class="act ptr fs-sm" onclick={suggest} disabled={loading}>
@@ -168,14 +168,14 @@
             <span class="gcount">{files.length}</span>
           </div>
           {#each files as m (key(m))}
-            <label class="item f al-ct g10 ptr" class:off={excluded.has(key(m))}>
+            <label class="led item ptr" class:off={excluded.has(key(m))}>
               <input
                 type="checkbox"
                 checked={!excluded.has(key(m))}
                 onchange={() => toggle(m)}
               />
               <span class="fs-sm tx-4 trunc">{clean(m.file)}</span>
-              <span class="fs-xs tx-1 root">{m.root}</span>
+              <span class="fs-xs tx-1 tr">{m.root}</span>
             </label>
           {/each}
         </div>
@@ -192,45 +192,13 @@
       <button class="ghost ptr fs-sm" onclick={() => (moves = null)}>
         Discard
       </button>
-      <span class="fs-xs tx-1 count">
-        {selected.length} of {moves.length} selected
-      </span>
     </div>
   {/if}
-</section>
+</Sect>
 
 <style>
-  .panel {
-    margin-bottom: 20px;
-    transition:
-      opacity var(--motion, 0.32s) var(--ease-out),
-      translate var(--motion, 0.32s) var(--ease-out);
-  }
-  @starting-style {
-    .panel {
-      opacity: 0;
-      translate: 0 10px;
-    }
-  }
-  .phead {
-    padding: 10px 16px;
-    background: rgb(255 255 255 / 0.02);
-    border-bottom: 1px solid var(--glass-bd);
-  }
-  .plabel {
-    color: var(--tx-3);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-  }
-  .pnote {
-    margin-left: auto;
-    text-align: right;
-  }
-
   .bar {
-    padding: 12px 16px;
+    padding: 4px 2px 0;
   }
   .stage {
     font-variant-numeric: tabular-nums;
@@ -252,12 +220,14 @@
   .plan {
     max-height: 46vh;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
-  .group {
-    border-top: 1px solid rgb(255 255 255 / 0.04);
+  .group + .group {
+    margin-top: 10px;
   }
   .gname {
-    padding: 10px 16px 4px;
+    padding: 6px 10px 3px;
     color: var(--tx-4);
     font-weight: 600;
     letter-spacing: 0.02em;
@@ -271,23 +241,18 @@
     font-variant-numeric: tabular-nums;
   }
   .item {
-    padding: 5px 16px 5px 30px;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+    padding-block: 4px;
+    padding-left: 22px;
     transition:
-      background var(--motion-fast, 0.15s) var(--ease-out),
-      opacity var(--motion-fast, 0.18s) var(--ease-out);
-  }
-  .item:hover {
-    background: var(--glass);
+      opacity var(--motion-fast) var(--ease-out),
+      background-color var(--motion-fast) var(--ease-out);
   }
   .item.off {
-    opacity: 0.35;
+    opacity: 0.32;
   }
   .item input {
     accent-color: var(--red);
-    flex-shrink: 0;
-  }
-  .root {
-    margin-left: auto;
     flex-shrink: 0;
   }
 
@@ -322,18 +287,5 @@
   .ghost:hover {
     color: var(--tx-4);
   }
-  .count {
-    margin-left: auto;
-    font-variant-numeric: tabular-nums;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .panel,
-    .item {
-      transition-duration: 1ms;
-    }
-    .spin {
-      animation: none;
-    }
-  }
+  
 </style>

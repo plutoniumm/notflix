@@ -441,3 +441,20 @@ func TestRankRootFileGetsDotDir(t *testing.T) {
 		t.Fatalf("root file should carry dir \".\": %+v", got)
 	}
 }
+
+// centerVecs used to read `dim` from whichever key Go's random map order handed
+// back first, so a lone stray vector could define the space and drop every good
+// one. -count=50 makes the old 1-in-3 flake a certainty.
+func TestCenterVecsPicksMajorityDimension(t *testing.T) {
+	out := centerVecs(map[string]vec{
+		"a": {1, 2, 3}, "b": {4, 5, 6}, "c": {7, 8, 9}, "stray": {1},
+	})
+	if _, ok := out["stray"]; ok {
+		t.Error("stray 1-dim vector survived")
+	}
+	for _, k := range []string{"a", "b", "c"} {
+		if _, ok := out[k]; !ok {
+			t.Errorf("majority-dimension vector %q was dropped", k)
+		}
+	}
+}

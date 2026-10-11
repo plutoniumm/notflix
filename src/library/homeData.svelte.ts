@@ -1,11 +1,13 @@
 import { api } from "../core/api";
 import { kv } from "../core/kv";
 import { clean } from "../core/video";
+import { matches } from "../core/fuzzy";
 import { join } from "../core/path";
 import { JOBS_POLL_MS } from "../core/events.svelte";
 import { usePoll } from "../core/poll";
 import { Down } from "./dl";
 import { parseDirSeason } from "./torrentName";
+import { episodic } from "./series";
 
 export type ContinueItem = {
   dir: string;
@@ -24,7 +26,7 @@ export type SeasonEntry = {
 };
 
 export type HomeRow =
-  | { kind: "dir"; dir: string; files: VideoEntry[] }
+  | { kind: "dir"; dir: string; files: VideoEntry[]; series: boolean }
   | { kind: "show"; key: string; title: string; seasons: SeasonEntry[] };
 
 const showKey = (title: string) =>
@@ -56,7 +58,15 @@ export function groupRows(data: VideoData): HomeRow[] {
   for (const m of parsed) {
     const k = marked(m) ? showKey(m.p.title) : "";
     if (!k || (counts.get(k) ?? 0) < 2) {
-      out.push({ kind: "dir", dir: m.g.dir, files: m.g.files });
+      out.push({
+        kind: "dir",
+        dir: m.g.dir,
+        files: m.g.files,
+        // A show row is a show by construction; a plain dir has to be read off
+        // its filenames, since a folder of episodes and a folder of unrelated
+        // films arrive in exactly the same shape.
+        series: episodic(m.g.files.map((f) => f.name)),
+      });
       continue;
     }
     if (emitted.has(k)) continue;
@@ -217,14 +227,13 @@ export class HomeData {
   }
 
   filter(q: string): { dir: string; name: string; key: string }[] | null {
-    const trimmed = q.trim().toLowerCase();
-    if (!trimmed) return null;
+    if (!q.trim()) return null;
+
+    // Same token-AND matcher as the torrent results: library filenames are
+    // dot-separated too, so a two-word query was never a substring of them.
     return this.data.flatMap((g) =>
       (g.files || [])
-        .filter((f) => {
-          const name = f.name.toLowerCase();
-          return clean(name).includes(trimmed) || name.includes(trimmed);
-        })
+        .filter((f) => matches(q, clean(f.name), f.name, g.dir))
         .map((f) => ({ dir: g.dir, ...f })),
     );
   }

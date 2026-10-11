@@ -184,12 +184,5 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .skull,
-    .conv-fill,
-    .actions {
-      animation: none;
-      transition-duration: 1ms;
-    }
-  }
+  
 </style>

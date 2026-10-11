@@ -1,143 +1,178 @@
 <script lang="ts">
-  import ProgressBar from "../components/ProgressBar.svelte";
-  import { rate } from "../core/fmt";
+  import Sect from "./Sect.svelte";
+  import { bytes, rate, durWords } from "../core/fmt";
 
   let {
     jobs,
     onRemove,
     onPause,
     onResume,
+    i = 0,
   }: {
     jobs: Downjob[];
     onRemove: (gid: string) => void;
     onPause: (gid: string) => void;
     onResume: (gid: string) => void;
+    i?: number;
   } = $props();
+
+  const KEEP = 24;
+  const W = 54;
+  const H = 14;
+
+  // The history is a plain Map, not $state: appending to it would make the
+  // effect depend on what it writes and loop forever.
+  const hist = new Map<string, number[]>();
+  let spark = $state<Record<string, string>>({});
+
+  $effect(() => {
+    const next: Record<string, string> = {};
+    for (const j of jobs) {
+      const h = [...(hist.get(j.gid) ?? []), Math.max(0, j.speed)].slice(-KEEP);
+      hist.set(j.gid, h);
+      next[j.gid] = trace(h);
+    }
+    for (const gid of [...hist.keys()]) if (!(gid in next)) hist.delete(gid);
+    spark = next;
+  });
+
+  // Normalised to the window's own peak: the shape answers "is it moving or
+  // stalled", which an absolute scale hides on a slow torrent.
+  function trace(h: number[]): string {
+    if (h.length < 2) return "";
+    const top = Math.max(...h, 1);
+
+    return h
+      .map((v, k) => {
+        const x = (k / (h.length - 1)) * W;
+
+        return `${x.toFixed(1)},${(H - 1 - (v / top) * (H - 2)).toFixed(1)}`;
+      })
+      .join(" ");
+  }
+
+  const left = (j: Downjob) =>
+    j.speed > 0 && j.total > j.done ? durWords((j.total - j.done) / j.speed) : "";
+
+  let moving = $derived(jobs.filter((j) => j.status !== "paused"));
+  let pull = $derived(moving.reduce((n, j) => n + Math.max(0, j.speed), 0));
+  let meta = $derived(
+    [
+      `${jobs.length} queued`,
+      moving.length ? rate(pull) : jobs.length ? "all paused" : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  );
 </script>
 
 {#if jobs.length > 0}
-  <section class="panel surface flow-h">
-    <h3 class="phead m0 f al-ct g10">
-      <span class="plabel">Downloading</span>
-      <span class="pcount fs-xs">{jobs.length}</span>
-    </h3>
-
-    {#each jobs as j (j.gid)}
-      <div class="item f al-ct g10" class:paused={j.status === "paused"}>
-        <div class="info">
-          <span class="name d-b fs-sm tx-4 trunc">{j.name || j.gid}</span>
-          <div class="f al-ct g10">
-            <div style="flex:1; min-width:0">
-              <ProgressBar
-                value={j.percent}
-                variant={j.status !== "paused" ? "striped" : "default"}
-                label
-              />
-            </div>
-            <span class="speed fs-xs tx-1">
-              {j.status === "paused" ? "paused" : rate(j.speed)}
-            </span>
-          </div>
-        </div>
-        {#if j.status === "paused"}
-          <button
-            class="btn-icon sh-0"
-            title="Resume"
-            onclick={() => onResume(j.gid)}
-          >
-            ▶
-          </button>
-        {:else}
-          <button
-            class="btn-icon sh-0"
-            title="Pause"
-            onclick={() => onPause(j.gid)}
-          >
-            ⏸
-          </button>
-        {/if}
-        <button
-          class="btn-icon danger sh-0"
-          title="Remove"
-          onclick={() => onRemove(j.gid)}
-        >
-          ✕
-        </button>
+  <Sect {i} label="Downloading" {meta}>
+    <div class="tbl">
+      <div class="led hrow fs-xs tx-1">
+        <span>Torrent</span>
+        <span class="sp">Trend</span>
+        <span class="tr sz">Size</span>
+        <span class="tr">Speed</span>
+        <span class="tr lf">Left</span>
+        <span></span>
+        <span></span>
       </div>
-    {/each}
-  </section>
+
+      {#each jobs as j (j.gid)}
+        {@const paused = j.status === "paused"}
+        <div class="led row" class:paused style="--fill:{j.percent}%">
+          <span class="nm fs-sm tx-4 trunc">{j.name || j.gid}</span>
+
+          <span class="sp">
+            {#if spark[j.gid] && !paused}
+              <svg viewBox="0 0 {W} {H}" width={W} height={H}>
+                <polyline points={spark[j.gid]} fill="none" stroke-width="1.25" />
+              </svg>
+            {/if}
+          </span>
+
+          <span class="tr sz fs-xs tx-1 num">
+            {bytes(j.done)} / {bytes(j.total)}
+          </span>
+          <!-- 0 B/s on an active torrent means no peers, not "almost done". -->
+          <span class="tr fs-xs num" class:red={!paused && j.speed === 0}>
+            {paused ? "paused" : rate(j.speed)}
+          </span>
+          <span class="tr lf fs-xs tx-1 num">{left(j) || "—"}</span>
+
+          {#if paused}
+            <button class="btn-icon sh-0" title="Resume" onclick={() => onResume(j.gid)}>
+              ▶
+            </button>
+          {:else}
+            <button class="btn-icon sh-0" title="Pause" onclick={() => onPause(j.gid)}>
+              ⏸
+            </button>
+          {/if}
+          <button
+            class="btn-icon danger sh-0"
+            title="Remove"
+            onclick={() => onRemove(j.gid)}
+          >
+            ✕
+          </button>
+        </div>
+      {/each}
+    </div>
+  </Sect>
 {/if}
 
 <style>
-  .panel {
-    margin-bottom: 20px;
-    transition:
-      opacity var(--motion, 0.32s) var(--ease-out),
-      translate var(--motion, 0.32s) var(--ease-out);
+  .tbl :global(.led) {
+    grid-template-columns:
+      minmax(0, 1fr) 54px 104px 78px 52px
+      auto auto;
   }
-  @starting-style {
-    .panel {
-      opacity: 0;
-      translate: 0 10px;
-    }
-  }
-  .phead {
-    padding: 10px 16px;
-    background: rgb(255 255 255 / 0.02);
-    border-bottom: 1px solid var(--glass-bd);
-  }
-  .plabel {
-    color: var(--tx-3);
-    font-size: 11px;
-    font-weight: 600;
+  .hrow {
+    padding-block: 2px;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
+    font-size: 10px;
+    border-bottom: 1px solid var(--glass-bd);
+    border-radius: 0;
+    margin-bottom: 2px;
   }
-  .pcount {
-    color: var(--tx-1);
-    font-variant-numeric: tabular-nums;
+  .row {
+    padding-block: 9px;
   }
-  .item {
-    padding: 11px 16px;
-    border-top: 1px solid rgb(255 255 255 / 0.04);
-    transition: opacity var(--motion, 0.25s) var(--ease-out);
-  }
-  .item:first-of-type {
-    border-top: none;
-  }
-  .item.paused {
-    opacity: 0.6;
-  }
-  .info {
-    flex: 1;
-    min-width: 0;
-  }
-  .name {
-    margin-bottom: 6px;
+  .nm {
     font-weight: 500;
   }
-  .speed {
-    min-width: 68px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+
+  .sp {
+    height: 14px;
   }
-  .item :global(.btn-icon) {
+  .sp svg {
+    display: block;
+    overflow: visible;
+    color: var(--grn);
+  }
+
+  .paused {
+    opacity: 0.6;
+    --led-c: var(--glass);
+  }
+  .row :global(.btn-icon) {
     opacity: 1;
   }
 
   @media (max-width: 640px) {
-    .item {
-      padding: 10px 8px;
+    .tbl :global(.led) {
+      grid-template-columns: minmax(0, 1fr) 72px auto auto;
     }
-    .name {
-      font-size: 12px;
+    .sp,
+    .sz,
+    .lf {
+      display: none;
     }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .panel,
-    .item {
-      transition-duration: 1ms;
+    .nm {
+      font-size: 13px;
     }
   }
 </style>

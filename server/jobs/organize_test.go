@@ -111,12 +111,19 @@ func TestRunsAgree(t *testing.T) {
 }
 
 func TestFolderOK(t *testing.T) {
-	for _, bad := range []string{"", ".hidden", "a/b", `a\b`, "..", strings.Repeat("x", 81)} {
+	for _, bad := range []string{"", ".hidden", "a/b", `a\b`, "..", strings.Repeat("x", folderMaxLen+1)} {
 		if folderOK(bad) {
 			t.Errorf("folderOK(%q) should be false", bad)
 		}
 	}
-	for _, good := range []string{"Harry Potter", "2000s", "Hindi 1990s", "Documentaries"} {
+	// The long one is a REAL folder in this library and is why the bound moved
+	// off 80: at 80 the grammar truncated it mid-string and every held-out file
+	// from it was assigned to a folder that does not exist — 12 of 12 benchmark
+	// errors. Shortening this bound again reintroduces exactly that.
+	for _, good := range []string{
+		"Harry Potter", "2000s", "Hindi 1990s", "Documentaries",
+		"Sapne vs Everyone S01 720p 10bit DS4K AMZN WEBRip x265 HEVC Hindi DDP 5.1 ESub - Immortal",
+	} {
 		if !folderOK(good) {
 			t.Errorf("folderOK(%q) should be true", good)
 		}
@@ -269,12 +276,58 @@ func TestApplyMoveTakesSidecars(t *testing.T) {
 func TestOrganizePrompt(t *testing.T) {
 	items := []OrgItem{{File: "Harry.Potter.2001.1080p.mp4", Root: "Ravan"}}
 	p := organizePrompt(items, map[string]map[string]int{"Ravan": {"Marvel": 5}})
-	for _, want := range []string{`"i":0`, "Harry Potter", "Marvel", `"moves"`} {
+	// No `"moves"` here any more: the response_format schema makes the envelope
+	// unrepresentable, so asking for it in prose was the part that could be
+	// ignored. The schema is asserted below instead.
+	for _, want := range []string{`"i":0`, "Harry Potter", "Marvel", `"year":2001`, "Ravan/Marvel (5)"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt missing %q", want)
 		}
 	}
 	if strings.Contains(p, "1080p") {
 		t.Error("prompt should carry cleaned names, not raw rip tags")
+	}
+}
+
+// The year is parsed off the RAW filename because CleanName destroys it:
+// bracketRe eats "(2021)" and the keyword list eats a bare "2025", which left
+// every decade bucket a guess from the title alone.
+func TestFileYear(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want int
+	}{
+		{"Dune (2021) [1080p] [WEBRip] [5.1] [YTS.MX].mp4", 2021},
+		{"Companion 2025 1080p WEBRip x264.mkv", 2025},
+		{"Oppenheimer.2023.2160p.WEB-DL.mkv", 2023},
+		{"Blade Runner 2049 (2017) 1080p.mkv", 2017}, // title digits must not win
+		{"Ran 1985 Remastered DTS SARTRE.mp4", 1985},
+		{"The Orville S02E11 Lasting Impressions LESS.mp4", 0},
+	} {
+		if got := fileYear(c.in); got != c.want {
+			t.Errorf("fileYear(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+// A schema is only worth having if it makes the bad answer impossible, so pin
+// the two bounds that do the work: the index cannot leave the file list, and
+// the folder bound matches the validator's.
+func TestOrganizeSchemaBounds(t *testing.T) {
+	sch := organizeSchema(7)
+	props := sch["properties"].(map[string]any)
+	if _, ok := props["reasoning"]; ok != organizeThink {
+		t.Errorf("reasoning field present=%v, organizeThink=%v", ok, organizeThink)
+	}
+	item := props["moves"].(map[string]any)["items"].(map[string]any)
+	ip := item["properties"].(map[string]any)
+	if got := ip["i"].(map[string]any)["maximum"]; got != 6 {
+		t.Errorf("i maximum = %v, want 6 for 7 files", got)
+	}
+	if got := ip["folder"].(map[string]any)["maxLength"]; got != folderMaxLen {
+		t.Errorf("folder maxLength = %v, want folderMaxLen (%d)", got, folderMaxLen)
+	}
+	if item["additionalProperties"] != false {
+		t.Error("a move must not accept extra keys")
 	}
 }

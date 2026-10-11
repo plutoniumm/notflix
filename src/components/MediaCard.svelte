@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { cell, manifest, sheet, zoneSec, type SpriteManifest } from "../core/sprite";
+  import { dur } from "../core/fmt";
   import { clean, thumbFail, vidURL } from "../core/video";
   import { art, morph } from "./art";
 
@@ -22,6 +24,69 @@
   } = $props();
 
   let frame = $state<HTMLElement | null>(null);
+
+  // The art splits into ZONES columns left→right; hovering one shows a frame
+  // drawn from that fraction of the runtime.
+  const ZONES = 5;
+
+  // Keyed by `key` because an unkeyed row recycles this component onto another
+  // video, and a stale sheet would scrub the wrong title.
+  let got = $state<{ key: string; m: SpriteManifest | null } | null>(null);
+  let zone = $state(-1);
+  let at = $state(0);
+
+  // Re-rolled only on a zone change — per-pointermove would strobe.
+  function roll(z: number) {
+    zone = z;
+    const m = got?.m;
+    if (m && z >= 0) at = zoneSec(m, z, ZONES);
+  }
+
+  // Touch keeps the static poster: a tap is the tile's one job (navigate), and
+  // the sheet is a few hundred KB nobody asked for.
+  function scrub(e: PointerEvent) {
+    if (e.pointerType === "touch" || !frame) return;
+
+    // Lazily, once per hovered tile: claim the slot before awaiting so the
+    // pointermove stream behind this one doesn't queue a callback per event.
+    if (got?.key !== key) {
+      got = { key, m: null };
+      manifest(key).then((m) => {
+        got = { key, m };
+        roll(zone);
+      });
+    }
+
+    const box = frame.getBoundingClientRect();
+    const z = Math.min(
+      ZONES - 1,
+      Math.max(0, Math.floor(((e.clientX - box.left) / box.width) * ZONES)),
+    );
+    if (z !== zone) roll(z);
+  }
+
+  // Scrubbing is only legible if the five divisions are VISIBLE — a silent
+  // image swap reads as "the thumbnail changed", not as "I am moving through
+  // the episode". The track below draws them and marks the one under the
+  // pointer, which is the whole point of splitting the art into fifths.
+  const live = $derived(got?.key === key && got.m !== null && zone >= 0);
+
+  const crop = $derived.by(() => {
+    const m = got?.key === key ? got.m : null;
+    if (!m || zone < 0) return "";
+
+    const c = cell(m, at);
+    // Percentage positioning stretches one cell over the whole box, matching
+    // the static thumbnail (which is object-fit: fill), so nothing shifts.
+    const x = m.cols > 1 ? (c.col / (m.cols - 1)) * 100 : 0;
+    const y = m.rows > 1 ? (c.row / (m.rows - 1)) * 100 : 0;
+
+    return (
+      `background-image:url('${sheet(key)}');` +
+      `background-size:${m.cols * 100}% ${m.rows * 100}%;` +
+      `background-position:${x}% ${y}%`
+    );
+  });
 </script>
 
 <a
@@ -30,6 +95,9 @@
   style="--i: {idx}"
   use:art={key}
   onclick={() => morph(frame, key)}
+  onpointerenter={scrub}
+  onpointermove={scrub}
+  onpointerleave={() => roll(-1)}
 >
   <div class="art p-rel flow-h" bind:this={frame}>
     <img
@@ -39,7 +107,18 @@
       loading="lazy"
       onerror={thumbFail}
     />
+    {#if crop}
+      <div class="shot p-abs dead" style={crop}></div>
+    {/if}
     <div class="scrim p-abs dead"></div>
+    {#if live}
+      <div class="zones p-abs dead">
+        {#each { length: ZONES } as _, z}
+          <i class:on={z === zone}></i>
+        {/each}
+      </div>
+      <div class="stamp p-abs dead">{dur(at)}</div>
+    {/if}
     <div class="play p-abs cc dead">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
         <path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none" />
@@ -103,6 +182,60 @@
     padding: 18%;
     opacity: 0.3;
     box-sizing: border-box;
+  }
+
+  /* No background-color: a sheet that 404s leaves the thumbnail showing. */
+  .shot {
+    inset: 0;
+    background-repeat: no-repeat;
+    animation: shot-in var(--motion-fast, 0.18s) var(--ease-out) both;
+  }
+
+  /* The five divisions, drawn. Bottom edge so it never covers a face, and
+     inside .art so it scrubs with the tile rather than the page. */
+  .zones {
+    left: 6px;
+    right: 6px;
+    bottom: 6px;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 3px;
+    height: 3px;
+  }
+  .zones i {
+    border-radius: 2px;
+    background: color-mix(in oklab, #fff 28%, transparent);
+    transition:
+      background var(--motion-fast, 0.18s) var(--ease-out),
+      box-shadow var(--motion-fast, 0.18s) var(--ease-out),
+      scale var(--motion-fast, 0.18s) var(--ease-out);
+  }
+  .zones i.on {
+    background: var(--red);
+    box-shadow: 0 0 10px var(--red-glow);
+    scale: 1 2.2;
+  }
+
+  .stamp {
+    right: 7px;
+    bottom: 14px;
+    padding: 2px 6px;
+    border-radius: var(--r-sm, 4px);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: #fff;
+    background: color-mix(in oklab, #000 62%, transparent);
+    backdrop-filter: blur(6px);
+    animation: shot-in var(--motion-fast, 0.18s) var(--ease-out) both;
+  }
+
+  
+  @keyframes shot-in {
+    from {
+      opacity: 0;
+    }
   }
 
   .scrim {
@@ -249,17 +382,5 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .tile,
-    .art,
-    .art img,
-    .play {
-      animation: none;
-      transition-duration: 1ms;
-    }
-    .tile:hover .art,
-    .tile:hover .art img {
-      scale: 1;
-    }
-  }
+  
 </style>

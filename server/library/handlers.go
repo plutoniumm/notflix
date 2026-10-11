@@ -236,19 +236,58 @@ func DirSizes(c *gin.Context, lib *Library) {
 
 // filepath.Glob reads "[" as a character class and Go ships no escaper, so a
 // bracketed release name silently matches nothing (err == nil). Scan instead.
-func sideVtts(base string) []string {
+// os.ReadDir + prefix, never filepath.Glob: `[` is a character class and Go has
+// no glob escaper, so Glob on a "-[YTS.MX]" name returns nothing with a nil
+// error. Matches both extensions, and the bare "<base>.vtt" falls out of the
+// same prefix+"." test.
+func sideSubs(base string) []string {
 	dir, prefix := filepath.Split(base)
 	entries, _ := os.ReadDir(dir)
 
 	var out []string
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasPrefix(name, prefix+".") && strings.HasSuffix(name, ".vtt") {
+		if !strings.HasPrefix(name, prefix+".") {
+			continue
+		}
+		if strings.HasSuffix(name, ".vtt") || strings.HasSuffix(name, ".srt") {
 			out = append(out, filepath.Join(dir, name))
 		}
 	}
 
 	return out
+}
+
+// MoveSidecars carries a video's subtitle siblings across a change of name, and
+// reports how many it moved.
+//
+// Conversion renames X.mkv to CleanName(X).mp4 but used to leave X.eng.srt and
+// X.vtt sitting on the old stem: ~90 subtitle files were stranded in this
+// library that way. The second-order cost was worse than the clutter —
+// AutoWhisper's hasEnglishSub looks for sidecars matching the VIDEO's basename,
+// so every stranding also bought a redundant whisper transcription of a file
+// that already shipped with subtitles.
+//
+// ponytail: a video whose stem is a dot-prefix of another's ("Foo" vs
+// "Foo.Bar") could claim its neighbour's sidecars. Same exposure the rename
+// handler always had; narrow it if two such files ever share a directory.
+func MoveSidecars(oldBase, newBase string) int {
+	if oldBase == newBase {
+		return 0
+	}
+
+	moved := 0
+	for _, old := range sideSubs(oldBase) {
+		dst := newBase + strings.TrimPrefix(old, oldBase)
+		if _, err := os.Stat(dst); err == nil {
+			continue // never clobber a sidecar already sitting on the new stem
+		}
+		if os.Rename(old, dst) == nil {
+			moved++
+		}
+	}
+
+	return moved
 }
 
 func Rename(c *gin.Context, lib *Library) {
@@ -287,20 +326,7 @@ func Rename(c *gin.Context, lib *Library) {
 
 	ext := strings.ToLower(filepath.Ext(abs))
 	if ext == ".mp4" {
-		base := abs[:len(abs)-len(ext)]
-		nbase := dst[:len(dst)-len(filepath.Ext(dst))]
-
-		for _, suf := range []string{".vtt", ".srt"} {
-			old := base + suf
-			if _, err := os.Stat(old); err == nil {
-				os.Rename(old, nbase+suf)
-			}
-		}
-
-		for _, old := range sideVtts(base) {
-			suffix := strings.TrimPrefix(old, base)
-			os.Rename(old, nbase+suffix)
-		}
+		MoveSidecars(abs[:len(abs)-len(ext)], dst[:len(dst)-len(filepath.Ext(dst))])
 	}
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -352,12 +378,7 @@ func VideoDelete(c *gin.Context, lib *Library) {
 		return
 	}
 
-	base := strings.TrimSuffix(abs, filepath.Ext(abs))
-	for _, suf := range []string{".vtt", ".srt"} {
-		DelFile(base + suf)
-	}
-
-	for _, m := range sideVtts(base) {
+	for _, m := range sideSubs(strings.TrimSuffix(abs, filepath.Ext(abs))) {
 		DelFile(m)
 	}
 

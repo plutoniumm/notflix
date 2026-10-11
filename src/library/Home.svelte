@@ -4,6 +4,7 @@
   import { clean } from "../core/video";
   import { ago, bytes } from "../core/fmt";
   import { join } from "../core/path";
+  import { matches } from "../core/fuzzy";
   import { local } from "../core/store";
   import { toast } from "../core/toast.svelte";
   import { HomeData } from "./homeData.svelte";
@@ -11,6 +12,7 @@
   import Continues from "./Continues.svelte";
   import Recommended from "./Recommended.svelte";
   import ShowRow from "./ShowRow.svelte";
+  import SeriesStrip from "./SeriesStrip.svelte";
   import MediaCard from "../components/MediaCard.svelte";
   import Blurb from "../components/Blurb.svelte";
   import ScrollRow from "../components/ScrollRow.svelte";
@@ -19,10 +21,42 @@
   import Icon from "../components/Icon.svelte";
   import Badge from "../components/Badge.svelte";
   import Help from "../player/help.svelte";
+  import Tonight from "./Tonight.svelte";
 
   type Row = { t: Torrent; p: Parsed };
 
   const home = new HomeData();
+
+  // The catalogue is no longer the front door. A grid of everything is a
+  // browsing surface by design — it has no end, so it can only be abandoned,
+  // never finished. The default is a short, reasoned shortlist; the full
+  // library is one key away for when you actually want to go looking.
+  const stay = local("home-mode", "tonight");
+  let mode = $state(stay.get());
+  // The stage fills exactly what the header leaves; guessing it made the page
+  // scroll, which is the one thing this surface must not do.
+  let hdrH = $state(64);
+  const setMode = (m: string) => {
+    mode = m;
+    stay.set(m);
+  };
+  // Searching IS going looking, so it switches surface on its own.
+  let surface = $derived(search.trim() || torrentMode ? "library" : mode);
+
+
+  // Rows are chosen from how many tiles actually fit, not from the count alone.
+  // The old min(3, n/2) made a five-film folder a 2-wide column occupying a
+  // third of a 1600px screen — which is most of what "tiles on a black
+  // background" was. Minimum rows to hold the set on one screen, capped at 3.
+  const COL = 196;
+  let winW = $state(1440);
+  const rowsFor = (n: number) => {
+    const pad = winW <= 640 ? 32 : 96;
+    const fit = Math.max(1, Math.floor((winW - pad) / COL));
+
+    return Math.min(3, Math.max(1, Math.ceil(n / fit)));
+  };
+
   let search = $state("");
   let swUpdate = $state<(() => void) | null>(null);
 
@@ -41,10 +75,11 @@
     searches.set($state.snapshot(history));
   }
 
-  const recent = $derived.by(() => {
-    const q = search.trim().toLowerCase();
-    return history.filter((h) => !q || (h.toLowerCase().includes(q) && h !== search.trim()));
-  });
+  // Same matcher as the results below, or the suggestion list would disagree
+  // with what pressing Enter on it returns.
+  const recent = $derived.by(() =>
+    history.filter((h) => matches(search, h) && h !== search.trim()),
+  );
 
   let torrentMode = $state(false);
   let torrentLoading = $state(false);
@@ -159,14 +194,9 @@
         if (resFilter !== "all") return p.res === resFilter;
         return true;
       })
-      .filter(({ t, p }) => {
-        const f = search.trim().toLowerCase();
-        return (
-          !f ||
-          p.title.toLowerCase().includes(f) ||
-          t.name.toLowerCase().includes(f)
-        );
-      })
+      // Token-AND, not substring: a dot-separated release name never contains
+      // the typed phrase, so `.includes` discarded hits the providers found.
+      .filter(({ t, p }) => matches(search, p.title, t.name))
       .sort((a, b) => {
         let d: number;
         if (sortKey === "title") d = a.p.title.localeCompare(b.p.title);
@@ -257,8 +287,10 @@
   }
 </script>
 
-<div style="min-height: 100vh; min-height: 100dvh;">
-  <header class="glass-header f al-ct g20 p-rel">
+<svelte:window bind:innerWidth={winW} />
+
+<div style="min-height: 100vh; min-height: 100dvh; --hdr:{hdrH}px">
+  <header class="glass-header f al-ct g20 p-rel" bind:clientHeight={hdrH}>
     <a href="/" class="brand sh-0">
       <img src="/assets/tight.svg" alt="Notflix" height="42" />
     </a>
@@ -303,6 +335,13 @@
     {/if}
 
     <nav class="tools f al-ct g10">
+      {#if surface === "library" && !search.trim() && !torrentMode}
+        <button
+          class="icon-btn glass glass-hover ptr"
+          title="Back to tonight (L)"
+          onclick={() => setMode("tonight")}>&#9728;</button
+        >
+      {/if}
       {#if swUpdate}
         <button class="update-btn btn-action ptr fs-xs" onclick={applyUpdate}>
           Update ready — reload
@@ -316,6 +355,9 @@
       >
         ?
       </button>
+      <a href="/history" class="icon-btn glass glass-hover" title="History">
+        <Icon name="history" />
+      </a>
       <a
         href="/manage"
         class="icon-btn glass glass-hover"
@@ -327,6 +369,13 @@
     </nav>
   </header>
 
+  {#if surface === "tonight"}
+    <Tonight
+      data={home.data}
+      continues={home.continues}
+      onLibrary={() => setMode("library")}
+    />
+  {:else}
   <main>
     {#if torrentMode}
       <div class="search-header f al-ct g20">
@@ -504,33 +553,54 @@
               <h2 class="m0">
                 {dir === "." ? "Movies" : clean(dir) || dir}
               </h2>
-              <span class="count fs-xs tx-1">{files.length}</span>
+              <span class="count fs-xs tx-1">
+                {files.length}
+                {row.series
+                  ? "episodes"
+                  : files.length === 1
+                    ? "title"
+                    : "titles"}
+              </span>
             </div>
 
-            <ScrollRow>
-              <div
-                class="cards spotlight flow-x-s g10 {dir === '.' ? 'multi' : 'f'}"
-              >
-                {#each files as f, idx (f.name)}
-                  <MediaCard
-                    {dir}
-                    name={f.name}
-                    key={f.key}
-                    {idx}
-                    downloaded={home.downloadedSet.has(join(dir, f.name))}
-                  >
-                    {#snippet footer()}
-                      <Blurb name={f.name} />
-                    {/snippet}
-                  </MediaCard>
-                {/each}
-              </div>
-            </ScrollRow>
+            {#if row.series}
+              <SeriesStrip
+                {dir}
+                {files}
+                continues={home.continues}
+                downloadedSet={home.downloadedSet}
+              />
+            {:else}
+              <ScrollRow>
+                <!-- Unordered, so it stacks: a block you browse, not a line you
+                     walk. Rows follow the count or a 3-film folder reads as a
+                     column with two empty rows beside it. -->
+                <div
+                  class="cards multi spotlight flow-x-s g10"
+                  style="--rows:{rowsFor(files.length)}"
+                >
+                  {#each files as f, idx (f.name)}
+                    <MediaCard
+                      {dir}
+                      name={f.name}
+                      key={f.key}
+                      {idx}
+                      downloaded={home.downloadedSet.has(join(dir, f.name))}
+                    >
+                      {#snippet footer()}
+                        <Blurb name={f.name} />
+                      {/snippet}
+                    </MediaCard>
+                  {/each}
+                </div>
+              </ScrollRow>
+            {/if}
           </section>
         {/if}
       {/each}
     {/if}
   </main>
+  {/if}
 
   {#if home.conversions.length > 0 || home.inProg.length > 0}
     <div class="panel glass-strong p-fix flow-h">
@@ -808,23 +878,24 @@
     background: linear-gradient(to right, var(--glass-bd), transparent);
   }
 
-  .cards {
+  /* A flat folder has no order to preserve, so pack it column-major: ~3×
+     density, and a silhouette nothing like the series spine's single ruled
+     line. var() in repeat() is a plain token substitution. */
+  .cards.multi {
+    display: grid;
+    grid-template-rows: repeat(var(--rows, 3), auto);
+    grid-auto-flow: column;
+    /* Grow into the free space, stop before a poster becomes a billboard.
+       Past the container width there is no free space, so they fall back to
+       186px and the row scrolls as before. */
+    grid-auto-columns: minmax(186px, 300px);
+    justify-content: start;
+    overflow-x: auto;
     padding: 14px 48px 20px;
     scrollbar-width: none;
   }
-  .cards :global(.tile) {
-    width: 220px;
-  }
-  /* Movies (dir === ".") is flat, so pack it column-major: ~3× density. */
-  .cards.multi {
-    display: grid;
-    grid-template-rows: repeat(3, auto);
-    grid-auto-flow: column;
-    grid-auto-columns: 186px;
-    overflow-x: auto;
-  }
   .cards.multi :global(.tile) {
-    width: 186px;
+    width: 100%;
   }
 
   table.res {
@@ -988,24 +1059,24 @@
 
   /* Chrome-only decoration; the header is complete without it. */
   @supports (animation-timeline: scroll()) {
-    @media (prefers-reduced-motion: no-preference) {
-      header::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        background: linear-gradient(
-          to bottom,
-          var(--bg-1) 0%,
-          color-mix(in oklab, var(--bg-1) 70%, transparent) 100%
-        );
-        opacity: 0;
-        z-index: -1;
-        animation: settle linear both;
-        animation-timeline: scroll(root block);
-        animation-range: 0 140px;
-      }
+        header::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(
+        to bottom,
+        var(--bg-1) 0%,
+        color-mix(in oklab, var(--bg-1) 70%, transparent) 100%
+      );
+      opacity: 0;
+      z-index: -1;
+      animation: settle linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 140px;
     }
+  
+
   }
   @keyframes settle {
     to {
@@ -1037,18 +1108,12 @@
     .head h2 {
       font-size: 17px;
     }
-    .cards {
-      padding: 12px 16px 16px;
-    }
-    .cards :global(.tile) {
-      width: 148px;
-    }
     .cards.multi {
-      grid-template-rows: repeat(2, auto);
-      grid-auto-columns: 132px;
+      padding: 12px 16px 16px;
+      grid-auto-columns: minmax(132px, 1fr);
     }
     .cards.multi :global(.tile) {
-      width: 132px;
+      width: 100%;
     }
     .search-header,
     .pad {
@@ -1076,17 +1141,5 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .skel-art,
-    .skel-line,
-    .scan-line,
-    .offline-dot {
-      animation: none;
-    }
-    .hist,
-    .panel,
-    .search-wrap {
-      transition-duration: 1ms;
-    }
-  }
+  
 </style>

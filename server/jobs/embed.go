@@ -399,11 +399,23 @@ func centerVecs(in map[string]vec) map[string]vec {
 		return out
 	}
 
-	dim := 0
+	// The reference dimension must be the MAJORITY one, never whichever key Go
+	// hands back first: map order is random, so one stray vector from an old
+	// model's space could define dim and every good vector was then dropped as
+	// ragged — a 1-in-3 flake in TestCenterEmptyAndRagged, and in production a
+	// silent purge of the whole store in favour of the stray.
+	counts := map[int]int{}
 	for _, v := range in {
-		dim = len(v)
+		counts[len(v)]++
+	}
 
-		break
+	dim, best := 0, 0
+	for d, c := range counts {
+		// Ties break toward the longer space so the choice is deterministic
+		// regardless of map order.
+		if c > best || (c == best && d > dim) {
+			dim, best = d, c
+		}
 	}
 
 	mean := make([]float64, dim)

@@ -1,6 +1,8 @@
 // Ambilight: a 16x9 canvas sample reduced to two colours for --art-1/--art-2.
 // Must never compete with decode: rVFC idles while the video isn't presenting,
-// and the loop hard-stops on pause / hidden / reduced-motion.
+// and the loop hard-stops on pause / hidden. The OS reduced-motion setting is
+// deliberately NOT consulted: this is a single-user system and the owner wants
+// the motion. `opts.reduced` stays as a hard off switch for tests.
 
 export type RGB = [number, number, number];
 
@@ -142,14 +144,6 @@ export function analyze(px: Uint8ClampedArray | number[]): [RGB, RGB] {
 type Sink = (a: string, b: string) => void;
 type Opts = { every?: number; canvas?: () => any; reduced?: () => boolean };
 
-const prefersReduced = () => {
-  try {
-    return !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  } catch {
-    return false;
-  }
-};
-
 const makeCanvas = () => {
   if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(W, H);
   const c = document.createElement("canvas");
@@ -178,7 +172,7 @@ export class Ambient {
     this.#sink = sink;
     this.#every = opts.every ?? SAMPLE_MS;
     this.#makeCanvas = opts.canvas ?? makeCanvas;
-    this.#reduced = opts.reduced ?? prefersReduced;
+    this.#reduced = opts.reduced ?? (() => false);
   }
 
   attach(video: HTMLVideoElement) {

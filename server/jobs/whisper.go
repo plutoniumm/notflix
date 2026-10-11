@@ -99,6 +99,34 @@ func fmtDur(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d:%02d.%03d", h, m, s, ms)
 }
 
+// Whisper stretches a segment's End out to the next speech chunk, so a
+// one-syllable line can carry a 40s duration and sit on screen for most of a
+// scene (City Hunter ep05, small/cond-off: `ね` held for 24.8s, 17 such cues in
+// one episode). The TEXT is fine — only End is wrong. Measured against the
+// release sub for that episode, whose longest cue is 7.8s: hand-authored subs
+// never linger, so clamp, and never run past the next cue's start.
+const whisperMaxCue = 8.0
+
+func whisperVTT(segs []whisperSeg) []byte {
+	var sb bytes.Buffer
+	sb.WriteString("WEBVTT\n\n")
+	for i, s := range segs {
+		end := s.End
+		if lim := s.Start + whisperMaxCue; end > lim {
+			end = lim
+		}
+		if i+1 < len(segs) && end > segs[i+1].Start {
+			end = segs[i+1].Start
+		}
+		if end <= s.Start {
+			end = s.Start + 0.5
+		}
+		sb.WriteString(fmtSecs(s.Start) + " --> " + fmtSecs(end) + "\n")
+		sb.WriteString(s.Text + "\n\n")
+	}
+	return sb.Bytes()
+}
+
 func fmtSecs(secs float64) string {
 	return fmtDur(time.Duration(secs * float64(time.Second)))
 }
@@ -196,7 +224,7 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 	}
 	defer os.Remove(tmpWAV)
 
-	modelName := c.DefaultQuery("model", "base")
+	modelName := c.DefaultQuery("model", "small") // see stream_whisper.py — base measured 68.6% vs small 91.4%
 	log.Printf("[whisper] starting python: model=%s wav=%s", modelName, tmpWAV)
 
 	ctx := c.Request.Context()
@@ -293,7 +321,7 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 		for i, s := range segs {
 			texts[i] = s.Text
 		}
-		if translated, err := TranslateSegments(texts, lang); err == nil {
+		if translated, err := TranslateSegments(texts, lang, ShowGlossary(path)); err == nil {
 			for i := range segs {
 				segs[i].Text = translated[i]
 			}
@@ -302,18 +330,13 @@ func SubsWhisperStream(c *gin.Context, lib *library.Library) {
 		}
 	}
 
-	var sb bytes.Buffer
-	sb.WriteString("WEBVTT\n\n")
-	for _, s := range segs {
-		sb.WriteString(fmtSecs(s.Start) + " --> " + fmtSecs(s.End) + "\n")
-		sb.WriteString(s.Text + "\n\n")
-	}
+	vtt := whisperVTT(segs)
 
 	vttPath := whisperVTTOf(path)
-	if err := os.WriteFile(vttPath, sb.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(vttPath, vtt, 0644); err != nil {
 		log.Printf("[whisper] failed to write vtt: %v", err)
 	} else {
-		log.Printf("[whisper] vtt saved: %s (%d bytes)", vttPath, sb.Len())
+		log.Printf("[whisper] vtt saved: %s (%d bytes)", vttPath, len(vtt))
 	}
 	sendEvent(map[string]any{"done": true})
 	log.Printf("[whisper] stream complete: %d segments", len(segs))
@@ -395,7 +418,12 @@ func runJob(src, dst, key string, job *WhisperJob) {
 	ctx, cancel := context.WithTimeout(context.Background(), whisperMax)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, pythonPath, "tools/stream_whisper.py", tmpWAV)
+	// Niced like FFRun.Nice, for the same reason: this is backfill, and
+	// faster-whisper saturates every core. Unniced it starved the AV1 copy pass
+	// hard enough to blow HLSSegment's 120s wait and 500 a cold first play. The
+	// interactive SSE transcribe above stays at normal priority.
+	cmd := exec.CommandContext(ctx, "nice",
+		append([]string{"-n", "19", pythonPath}, "tools/stream_whisper.py", tmpWAV)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return killGroup(cmd, syscall.SIGKILL) }
 
@@ -444,7 +472,7 @@ func runJob(src, dst, key string, job *WhisperJob) {
 		for i, s := range segs {
 			texts[i] = s.Text
 		}
-		if translated, err := TranslateSegments(texts, lang); err == nil {
+		if translated, err := TranslateSegments(texts, lang, ShowGlossary(src)); err == nil {
 			for i := range segs {
 				segs[i].Text = translated[i]
 			}
@@ -453,14 +481,9 @@ func runJob(src, dst, key string, job *WhisperJob) {
 		}
 	}
 
-	var sb bytes.Buffer
-	sb.WriteString("WEBVTT\n\n")
-	for _, s := range segs {
-		sb.WriteString(fmtSecs(s.Start) + " --> " + fmtSecs(s.End) + "\n")
-		sb.WriteString(s.Text + "\n\n")
-	}
+	vtt := whisperVTT(segs)
 
-	if err := os.WriteFile(dst, sb.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(dst, vtt, 0644); err != nil {
 		job.set("error", "failed to write vtt: "+err.Error())
 		return
 	}

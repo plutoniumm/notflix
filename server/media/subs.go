@@ -373,31 +373,14 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	ext := strings.ToLower(filepath.Ext(fileName))
-	var vtt string
-
-	switch ext {
-	case ".srt":
-		parsed, err := parseSRT(string(raw))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "srt parse error: " + err.Error()})
-			return
-		}
-		vtt = parsed.AsVTT()
-	case ".vtt":
-		parsed, err := parseVTT(string(raw))
-		if err != nil {
-			vtt = string(raw)
-		} else {
-			vtt = parsed.AsVTT()
-		}
-	default:
-		parsed, err := parseSRT(string(raw))
-		if err != nil {
-			vtt = string(raw)
-		} else {
-			vtt = parsed.AsVTT()
-		}
+	// One gate, whatever the advertised extension: the provider's filename is a
+	// hint, not a guarantee, and the old per-ext fallbacks wrote unparsed bodies
+	// to disk as the sidecar.
+	vtt, err := AsVTT(raw)
+	if err != nil {
+		log.Printf("[subs] rejected %s from opensubtitles: %v", fileName, err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
 	}
 
 	base := path[:len(path)-len(filepath.Ext(path))]
@@ -438,16 +421,17 @@ func subdlFetch(c *gin.Context, videoPath, src string) {
 		return
 	}
 
-	parsed, err := parseSRT(string(srt))
+	vtt, err := AsVTT(srt)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "srt parse: " + err.Error()})
+		log.Printf("[subs] rejected subdl payload for %s: %v", filepath.Base(videoPath), err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 
 	base := videoPath[:len(videoPath)-len(filepath.Ext(videoPath))]
 	outPath := nextSubPath(base, "eng")
 
-	if err := os.WriteFile(outPath, []byte(parsed.AsVTT()), 0644); err != nil {
+	if err := os.WriteFile(outPath, []byte(vtt), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save vtt"})
 		return
 	}

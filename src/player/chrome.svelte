@@ -209,15 +209,6 @@
     opacity: 1;
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .pl *,
-    .pl *::before,
-    .pl *::after {
-      animation-duration: 1ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 1ms !important;
-    }
-  }
-
+  
   }
 </style>

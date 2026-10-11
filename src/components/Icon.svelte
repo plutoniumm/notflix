@@ -15,7 +15,8 @@
       | "settings"
       | "volume"
       | "camera"
-      | "scissors";
+      | "scissors"
+      | "history";
     size?: number;
     color?: string;
   } = $props();
@@ -38,6 +39,7 @@
     volume: { vb: "0 0 24 24", w: 14, h: 14, fill: "currentColor" },
     camera: { vb: "0 0 24 24", w: 18, h: 18, stroke: 2, rnd: true },
     scissors: { vb: "0 0 24 24", w: 18, h: 18, stroke: 2, rnd: true },
+    history: { vb: "0 0 24 24", w: 18, h: 18, stroke: 2, rnd: true },
   };
 
   const m = $derived(META[name]);
@@ -84,6 +86,10 @@
     {:else if name === "camera"}
       <path d="M3 8h3l2-2h8l2 2h3v11H3z" />
       <circle cx="12" cy="13" r="3.5" />
+    {:else if name === "history"}
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v4h4" />
+      <path d="M12 8v4l3 2" />
     {:else if name === "scissors"}
       <circle cx="6" cy="6" r="2.6" />
       <circle cx="6" cy="18" r="2.6" />

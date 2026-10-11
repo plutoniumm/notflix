@@ -30,9 +30,14 @@ const (
 
 // "~/…" roots are auto-created; any other absolute path must pre-exist —
 // creating a dir at a mountpoint would silently shadow the unmounted volume.
+// Aomine first: every "first root" default reads off this order — DiskInfo and
+// DirSizes both iterate it, and the download dir picker preselects disks[0].
+// The big external drive is where downloads should land, not the capped boot
+// root. Nothing takes Roots[0] as a semantic default, so order is cosmetic
+// everywhere else.
 var configuredRoots = []string{
-	"~/Videos",
 	"/Volumes/Aomine",
+	"~/Videos",
 }
 
 // rootCaps is a UI-only soft quota — writes aren't enforced; it only shapes
@@ -160,12 +165,20 @@ func main() {
 
 	router.GET("/", func(c *gin.Context) { pulse(); c.File("index.html") })
 	router.GET("/manage", func(c *gin.Context) { c.File("index.html") })
+	router.GET("/history", func(c *gin.Context) { c.File("index.html") })
 	router.StaticFile("/manifest.json", "./public/manifest.json")
 	router.StaticFile("/sw.js", "./public/sw.js")
 	router.Static("/assets", assDir)
 
 	router.GET("/list/video", func(c *gin.Context) { pulse(); library.VideoList(c, lib) })
-	router.GET("/video/*filename", func(c *gin.Context) { pulse(); media.VideoServe(c, lib) })
+	// No pulse() here: this is the byte-range streaming path, and a browser
+	// issues hundreds of range requests per title. pulse() spawns
+	// GenerateThumbnails for EVERY root on 1% of calls — a full WalkDir with a
+	// per-file IsBusy/IsCorrupt stat storm plus ffmpeg grabs, unguarded, so
+	// several could overlap mid-playback. Exactly the "batch work must never
+	// starve live streaming" rule. Thumbs are covered by ProcessAll's thumbs
+	// phase and toMP4's per-file dispatch; the navigation routes still pulse.
+	router.GET("/video/*filename", func(c *gin.Context) { media.VideoServe(c, lib) })
 	router.HEAD("/video/*filename", func(c *gin.Context) { media.VideoHeadServe(c, lib) })
 	router.GET("/images/:filename", func(c *gin.Context) { media.Thumbnail(c, lib) })
 	router.DELETE("/video/*filename", func(c *gin.Context) { library.VideoDelete(c, lib) })
@@ -183,6 +196,7 @@ func main() {
 	router.GET("/api/manage/diskinfo", func(c *gin.Context) { library.DiskInfo(c, lib) })
 	router.GET("/api/manage/dirsizes", func(c *gin.Context) { library.DirSizes(c, lib) })
 	router.GET("/api/manage/hidden", library.HiddenList)
+	router.GET("/api/history", func(c *gin.Context) { library.HistoryHandler(c, lib) })
 
 	router.GET("/api/build", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"backend": buildTime})

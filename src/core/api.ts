@@ -160,4 +160,8 @@ export const api = {
     resume: (gid: string, opts?: ReqOpts) => POST(`/api/aria2/resume?gid=${gid}`, {}, opts),
     remove: (gid: string, opts?: ReqOpts) => DEL(`/api/aria2/remove?gid=${gid}`, opts),
   },
+
+  // Every file that ever existed here, joined across the saved .torrent
+  // metadata, the watch log, the KV marks and the pipeline ledger.
+  history: (opts?: ReqOpts) => GET("/api/history", opts),
 };

@@ -30,6 +30,13 @@ func TestParseTranslation(t *testing.T) {
 			want:    []string{"hello", "world"},
 		},
 		{
+			// Shipped 11 `{` / `"out": [` cues into Seven Samurai's .whisper.vtt:
+			// pretty JSON one line short of `want`, line-split into "translations".
+			name:    "pretty json short of want must error, not line-split",
+			content: "{\n  \"out\": [\n    \"hello\"\n  ]\n}",
+			wantErr: true,
+		},
+		{
 			name:    "numbered list fallback",
 			content: "1. hello\n2. world",
 			want:    []string{"hello", "world"},

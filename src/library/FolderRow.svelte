@@ -368,13 +368,5 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .folder,
-    .caret,
-    .eye-icon,
-    .conv-flag {
-      animation: none;
-      transition-duration: 1ms;
-    }
-  }
+  
 </style>

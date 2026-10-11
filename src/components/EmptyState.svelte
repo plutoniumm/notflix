@@ -60,9 +60,5 @@
     grid-column: 1 / -1;
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .es {
-      transition-duration: 1ms;
-    }
-  }
+  
 </style>

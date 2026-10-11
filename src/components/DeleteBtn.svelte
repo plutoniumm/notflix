@@ -40,9 +40,5 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .armed {
-      animation: none;
-    }
-  }
+  
 </style>

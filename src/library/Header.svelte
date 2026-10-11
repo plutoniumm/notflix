@@ -137,12 +137,5 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .proc-btn.busy {
-      animation: none;
-    }
-    .meter-fill {
-      transition-duration: 1ms;
-    }
-  }
+  
 </style>

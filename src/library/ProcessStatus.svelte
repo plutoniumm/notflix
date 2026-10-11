@@ -1,268 +1,348 @@
 <script lang="ts">
-  import ProgressBar from "../components/ProgressBar.svelte";
+  import Sect from "./Sect.svelte";
   import { clean } from "../core/video";
   import { durWords, pct } from "../core/fmt";
   import { TICK_MS } from "../core/events.svelte";
   import { usePoll } from "../core/poll";
+  import { room } from "../core/room.svelte";
 
   let {
     status,
     jobs = [],
+    i = 0,
   }: {
     status: ProcessStatus | null;
     jobs?: Job[];
+    i?: number;
   } = $props();
 
+  // ProcessAll's real shape. CleanAll runs alone first so later phases walk a
+  // settled tree; these chains then fan out concurrently. A flat ten-row list
+  // claims ten sequential steps, which is a lie about the machine — and the
+  // lie is why the old panel read as a form rather than as something working.
+  const GATE = "clean";
+  const CHAINS = [
+    ["convert"],
+    ["scan", "repair"],
+    ["thumbs", "sprites", "posters"],
+    ["whisper"],
+    ["blurbs"],
+    ["skips"],
+  ];
+
   const labels: Record<string, string> = {
+    clean: "Organise",
     convert: "Convert",
-    clean: "Organize",
-    scan: "Scan for corruption",
+    scan: "Scan",
     repair: "Repair",
-    thumbs: "Thumbnails",
-    sprites: "Trickplay sprites",
-    posters: "Poster frames",
-    blurbs: "Descriptions",
-    whisper: "Subtitles (Whisper)",
-    skips: "Intro/outro detection",
+    thumbs: "Thumbs",
+    sprites: "Sprites",
+    posters: "Posters",
+    blurbs: "Blurbs",
+    whisper: "Whisper",
+    skips: "Intro/outro",
   };
 
-  const elapsed = (ms: number) => (ms < 1000 ? "<1s" : durWords(ms / 1000));
-
-  function phaseElapsed(p: PhaseInfo, now: number): string {
-    if (!p.startedAt) return "";
-
-    return elapsed((p.endedAt ?? now) - p.startedAt);
-  }
+  // One cell per file up to this, then one cell per batch. A count is
+  // subitisable and a bar is not: 60% of a bar could be three files or three
+  // hundred, and that magnitude is the thing the old bars threw away.
+  const CELLS = 56;
 
   let now = $state(Date.now());
   $effect(() => usePoll(() => (now = Date.now()), TICK_MS));
+  $effect(() => {
+    room.busy = !!status?.running;
+  });
 
-  let visible = $derived(status?.running || status?.phases?.some((p) => p.state !== "pending"));
-  let totalElapsed = $derived(
-    status?.startedAt ? elapsed((status.endedAt ?? now) - status.startedAt) : "",
-  );
+  const elapsed = (ms: number) => (ms < 1000 ? "<1s" : durWords(ms / 1000));
 
-  let convertActive = $derived(
-    status?.phases?.find((p) => p.name === "convert")?.state === "running",
+  let phases = $derived(status?.phases ?? []);
+  const at = (name: string) => phases.find((p) => p.name === name);
+
+  const span = (p: PhaseInfo) =>
+    p.startedAt ? elapsed((p.endedAt ?? now) - p.startedAt) : "";
+
+  function field(p: PhaseInfo) {
+    const total = p.total ?? 0;
+    const done = p.done || 0;
+
+    if (total > 0) {
+      const n = Math.min(total, CELLS);
+      return { n, lit: Math.round((done / total) * n), per: total / n };
+    }
+    // No total but work recorded: the count is the magnitude, all of it done.
+    if (done > 0) {
+      const n = Math.min(done, CELLS);
+      return { n, lit: n, per: done / n };
+    }
+
+    return { n: 0, lit: 0, per: 1 };
+  }
+
+  const count = (p: PhaseInfo) =>
+    p.total ? `${p.done}/${p.total}` : p.done ? String(p.done) : "—";
+
+  let settled = $derived(phases.filter((p) => p.state === "done").length);
+  let touched = $derived(phases.reduce((n, p) => n + (p.done || 0), 0));
+  let visible = $derived(
+    !!status && (status.running || phases.some((p) => p.state !== "pending")),
   );
+  let meta = $derived(
+    [
+      `${settled}/${phases.length}`,
+      touched > 0 ? `${touched} files` : "",
+      status?.startedAt
+        ? elapsed((status.endedAt ?? now) - status.startedAt)
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  );
+  let convertActive = $derived(at("convert")?.state === "running");
 </script>
 
-{#if status && visible}
-  <section class="panel surface flow-h" class:live={status.running}>
-    <h3 class="phead m0 f al-ct g10">
-      <span class="plabel">
-        {status.running ? "Processing library" : "Last run"}
+{#snippet step(p: PhaseInfo)}
+  {@const f = field(p)}
+  <div
+    class="step st-{p.state}"
+    class:idle={p.state === "done" && !f.n}
+    title="{labels[p.name] ?? p.name} · {count(p)}{f.per > 1
+      ? ` · 1 mark = ${Math.round(f.per)} files`
+      : ''} {span(p)}"
+  >
+    <span class="nm fs-xs trunc">{labels[p.name] ?? p.name}</span>
+    {#if f.n}
+      <span class="units">
+        {#each { length: f.n } as _, c}
+          <i class:on={c < f.lit} class:edge={c === f.lit} style="--i:{c}"></i>
+        {/each}
       </span>
-      {#if totalElapsed}
-        <span class="pcount fs-xs">{totalElapsed}</span>
-      {/if}
-    </h3>
+      <span class="ct fs-xs num">{count(p)}</span>
+    {:else}
+      <span class="units"></span>
+      <span class="ct fs-xs num tx-1">—</span>
+    {/if}
+  </div>
+{/snippet}
 
-    <div class="phases">
-      {#each status.phases as p (p.name)}
-        <div class="phase f al-ct g10 st-{p.state}">
-          <span class="mark sh-0 cc"></span>
-          <span class="lbl fs-sm sh-0 trunc">{labels[p.name] ?? p.name}</span>
-
-          <div class="mid">
-            {#if p.state === "running" || p.state === "done"}
-              {#if p.total && p.total > 0}
-                <div class="bar">
-                  <ProgressBar
-                    value={(p.done / p.total) * 100}
-                    variant={p.state === "running" ? "striped" : "default"}
-                    label={false}
-                    height="4px"
-                  />
-                </div>
-              {/if}
-              {#if p.state === "running" && p.note}
-                <span class="note fs-xs tx-1 trunc">{clean(p.note)}</span>
-              {/if}
-            {/if}
-          </div>
-
-          <span class="cnt fs-xs tx-1 sh-0">
-            {#if p.total && p.total > 0}
-              {p.done}/{p.total}
-            {:else if p.state === "done" && p.done > 0}
-              {p.done}
-            {/if}
-          </span>
-          <span class="el fs-xs tx-1 sh-0">{phaseElapsed(p, now)}</span>
+{#if visible && status}
+  <Sect
+    {i}
+    label={status.running ? "Working" : "Last run"}
+    {meta}
+    fill={phases.length ? (settled / phases.length) * 100 : 0}
+  >
+    <div class="rig" class:live={status.running}>
+      {#if at(GATE)}
+        <div class="gate">
+          {@render step(at(GATE)!)}
+          {#if at(GATE)!.note}
+            <span class="note fs-xs trunc">{clean(at(GATE)!.note!)}</span>
+          {/if}
         </div>
-      {/each}
-    </div>
+      {/if}
 
-    {#if convertActive && jobs.length > 0}
-      <div class="jobs">
-        <div class="jobs-hd fs-xs tx-1">Active conversions ({jobs.length})</div>
-        {#each jobs as j (j.name)}
-          <div class="job f al-ct g10">
-            <span class="jn fs-xs tx-4 trunc">{clean(j.name)}</span>
-            <div class="jb">
-              <ProgressBar value={j.percent} variant="striped" label={false} height="4px" />
+      <div class="lanes">
+        {#each CHAINS as chain, li (chain[0])}
+          {@const live = chain.some((n) => at(n)?.state === "running")}
+          {@const note = chain.map((n) => at(n)?.note).find(Boolean)}
+          <div class="lane" class:hot={live} style="--i:{li}">
+            <div class="steps">
+              {#each chain as name (name)}
+                {#if at(name)}{@render step(at(name)!)}{/if}
+              {/each}
             </div>
-            <span class="jp fs-xs tx-1 sh-0">{pct(j.percent)}</span>
+            {#if note}<span class="note fs-xs trunc">{clean(note)}</span>{/if}
           </div>
         {/each}
       </div>
-    {/if}
-  </section>
+
+      <!-- A single file's conversion IS a continuous fraction, so here a bar is
+           the honest mark — unlike a phase, where it hid the count. -->
+      {#if convertActive && jobs.length > 0}
+        <div class="subs">
+          {#each jobs as j (j.name)}
+            <div class="sub" style="--fill:{j.percent}%">
+              <span class="fs-xs tx-3 trunc">{clean(j.name)}</span>
+              <span class="fs-xs num tx-1">{pct(j.percent)}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </Sect>
 {/if}
 
 <style>
-  .panel {
-    margin-bottom: 20px;
-    transition:
-      opacity var(--motion, 0.32s) var(--ease-out),
-      translate var(--motion, 0.32s) var(--ease-out);
-  }
-  @starting-style {
-    .panel {
-      opacity: 0;
-      translate: 0 10px;
-    }
-  }
-  .panel.live {
-    border-color: color-mix(in oklab, var(--red) 32%, transparent);
-  }
-  .phead {
-    padding: 10px 16px;
-    background: rgb(255 255 255 / 0.02);
-    border-bottom: 1px solid var(--glass-bd);
-  }
-  .plabel {
-    color: var(--tx-3);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-  }
-  .pcount {
-    color: var(--tx-1);
-    margin-left: auto;
-    font-variant-numeric: tabular-nums;
+  .rig {
+    display: grid;
+    gap: 6px;
   }
 
-  .phases {
-    padding: 8px 16px 10px;
+  /* The gate is the one phase nothing overlaps, so it gets the full width and
+     everything else hangs off it. */
+  .gate {
+    display: grid;
+    gap: 2px;
+    padding: 7px 10px 8px;
+    border: 1px solid var(--glass-bd);
+    border-radius: var(--r-md);
+    background: linear-gradient(
+      180deg,
+      var(--glass) 0%,
+      color-mix(in oklab, var(--glass) 30%, transparent) 100%
+    );
   }
-  .phase {
-    padding: 5px 0;
+
+  /* The fan-out as a board rather than a drawn tree: at full width the lanes
+     sit side by side, which is what concurrent actually looks like. */
+  .lanes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+    gap: 2px 22px;
+    align-content: start;
+  }
+
+  .lane {
     position: relative;
+    padding: 3px 8px 3px 11px;
+    border-radius: var(--r-sm);
+    transition: background var(--motion) var(--ease-out);
   }
-  .phase::before {
+  /* The rail is the lane's own state, carried in the margin where it is read
+     without being looked at. */
+  .lane::before {
     content: "";
     position: absolute;
-    left: 5px;
-    top: 0;
-    bottom: 0;
-    width: 1px;
+    inset: 3px auto 3px 2px;
+    width: 2px;
+    border-radius: 2px;
     background: var(--glass-bd);
+    transition:
+      background var(--motion) var(--ease-out),
+      box-shadow var(--motion) var(--ease-out);
   }
-  .phase:first-child::before {
-    top: 50%;
+  .lane.hot {
+    background: color-mix(in oklab, var(--red) 7%, transparent);
   }
-  .phase:last-child::before {
-    bottom: 50%;
-  }
-
-  .mark {
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
-    border: 1px solid var(--bg-5);
-    background: var(--bg-2);
-    z-index: 1;
-  }
-  .st-running .mark {
-    border-color: var(--red);
+  .lane.hot::before {
     background: var(--red);
-    box-shadow: 0 0 0 4px var(--red-soft);
-    animation: breathe 1.4s ease-in-out infinite;
-  }
-  .st-done .mark {
-    border-color: var(--grn);
-    background: color-mix(in oklab, var(--grn) 70%, transparent);
+    box-shadow: 0 0 10px var(--red-glow);
   }
 
-  .lbl {
-    min-width: 150px;
-    color: var(--tx-4);
+  .steps {
+    display: grid;
+    gap: 1px;
   }
-  .st-pending .lbl {
+
+  .step {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr) 58px;
+    align-items: center;
+    gap: 9px;
+    min-height: 20px;
+  }
+  .nm {
+    color: var(--tx-3);
+  }
+  .st-pending .nm,
+  .idle .nm {
     color: var(--tx-1);
   }
-  .mid {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
+  .st-running .nm {
+    color: var(--tx-4);
   }
-  .bar {
-    width: 100%;
-  }
-  .note {
-    display: block;
-  }
-  .cnt {
-    min-width: 62px;
+  .ct {
     text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .el {
-    min-width: 48px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+    color: var(--tx-3);
   }
 
-  .jobs {
-    border-top: 1px solid var(--glass-bd);
-    padding-bottom: 6px;
-  }
-  .jobs-hd {
-    padding: 8px 16px 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
-  }
-  .job {
-    padding: 3px 16px;
-  }
-  .jn {
-    flex: 1;
+  /* The unit field. Each mark is work, so the row's width is its size and the
+     lit run is its progress — one mark carrying both. */
+  .units {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 13px;
     min-width: 0;
+    overflow: hidden;
   }
-  .jb {
-    width: 120px;
+  .units i {
+    width: 4px;
+    height: 4px;
     flex-shrink: 0;
+    border-radius: 1px;
+    background: var(--glass-2);
+    transition:
+      height var(--motion) var(--ease-spring),
+      background var(--motion) var(--ease-out);
+    /* A batch finishing lights as one sweep rather than ten separate blinks:
+       co-moving marks are read as a single event. */
+    transition-delay: calc(var(--i) * 9ms);
   }
-  .jp {
-    min-width: 36px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+  .units i.on {
+    height: 13px;
+    background: var(--grn);
+  }
+  .st-running .units i.on {
+    background: var(--red);
+  }
+  /* The frontier mark breathes on the same phase as the room, so the panel and
+     the page are one thing rather than a widget sitting on a background. */
+  .st-running .units i.edge {
+    height: calc(5px + var(--room-live, 0) * 8px);
+    background: color-mix(
+      in oklab,
+      var(--red) calc(30% + var(--room-live, 0) * 70%),
+      var(--glass-2)
+    );
+    transition-delay: 0ms;
+  }
+
+  .idle .units,
+  .st-pending .units {
+    opacity: 0.4;
+  }
+  .idle {
+    opacity: 0.55;
+  }
+
+  .note {
+    grid-column: 1 / -1;
+    padding-left: 85px;
+    color: var(--tx-2);
+  }
+
+  .subs {
+    display: grid;
+    gap: 1px;
+    margin: 2px 0 0 19px;
+  }
+  .sub {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 3px 8px;
+    border-radius: var(--r-sm);
+    background: linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--red) 16%, transparent) 0 var(--fill),
+      var(--glass) var(--fill)
+    );
+    transition: --fill var(--motion-slow) linear;
   }
 
   @media (max-width: 640px) {
-    .lbl {
-      min-width: 0;
-      flex: 1;
+    .step {
+      grid-template-columns: 64px minmax(0, 1fr) 54px;
+      gap: 6px;
     }
-    .mid {
-      display: none;
+    .note {
+      padding-left: 70px;
     }
-    .phases {
-      padding: 8px 10px 10px;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .panel,
-    .st-running .mark {
-      animation: none;
-      transition-duration: 1ms;
+    .lanes {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>

@@ -25,6 +25,39 @@
   initial-value: 0;
 }
 
+/* The room field's drift, written by src/core/room.svelte.ts on a 1/f walk.
+   Registered so a CSS transition can smooth between ticks instead of stepping. */
+@property --room-x {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --room-y {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --room-k {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.3;
+}
+
+/* 0..1 respiration phase while the pipeline is working. */
+@property --room-live {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --room-bad {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
 @property --room {
   syntax: "<number>";
   inherits: true;
@@ -42,6 +75,14 @@
   syntax: "<number>";
   inherits: true;
   initial-value: 0;
+}
+
+/* .led's progress stop. inherits: false — a ledger row sets it for itself and
+   must not hand it down to a nested row. */
+@property --fill {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
 }
 
 :root {
@@ -87,9 +128,17 @@
   --sh-art: 0 20px 50px -20px color-mix(in oklab, var(--art-1) 70%, transparent),
     0 8px 22px -12px color-mix(in oklab, var(--art-2) 50%, transparent);
 
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease-snap: cubic-bezier(0.2, 0.9, 0.3, 1.1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Real damped springs, sampled into linear(). A cubic-bezier can overshoot
+     once but cannot oscillate — it has no way back past the target a second
+     time — so the old cubic "spring" was a single lurch, not a settle. These
+     are second-order responses at zeta 0.85 / 0.68 / 0.55, ringing down
+     through 0.6%, 5.4% and 12.6% peak overshoot. */
+  --ease-spring-soft: linear(0.0000 0.0%, 0.0203 3.6%, 0.0720 7.1%, 0.1435 10.7%, 0.2260 14.3%, 0.3130 17.9%, 0.3997 21.4%, 0.4830 25.0%, 0.5607 28.6%, 0.6315 32.1%, 0.6948 35.7%, 0.7505 39.3%, 0.7987 42.9%, 0.8400 46.4%, 0.8748 50.0%, 0.9037 53.6%, 0.9275 57.1%, 0.9469 60.7%, 0.9623 64.3%, 0.9745 67.9%, 0.9839 71.4%, 0.9911 75.0%, 0.9964 78.6%, 1.0003 82.1%, 1.0029 85.7%, 1.0047 89.3%, 1.0057 92.9%, 1.0062 96.4%, 1.0000 100.0%);
+  --ease-spring: linear(0.0000 0.0%, 0.0208 3.6%, 0.0752 7.1%, 0.1525 10.7%, 0.2440 14.3%, 0.3423 17.9%, 0.4418 21.4%, 0.5384 25.0%, 0.6288 28.6%, 0.7111 32.1%, 0.7841 35.7%, 0.8472 39.3%, 0.9004 42.9%, 0.9441 46.4%, 0.9790 50.0%, 1.0059 53.6%, 1.0257 57.1%, 1.0395 60.7%, 1.0483 64.3%, 1.0529 67.9%, 1.0543 71.4%, 1.0531 75.0%, 1.0502 78.6%, 1.0460 82.1%, 1.0410 85.7%, 1.0357 89.3%, 1.0303 92.9%, 1.0250 96.4%, 1.0000 100.0%);
+  --ease-spring-pop: linear(0.0000 0.0%, 0.0212 3.6%, 0.0778 7.1%, 0.1601 10.7%, 0.2594 14.3%, 0.3680 17.9%, 0.4795 21.4%, 0.5888 25.0%, 0.6920 28.6%, 0.7860 32.1%, 0.8690 35.7%, 0.9399 39.3%, 0.9984 42.9%, 1.0446 46.4%, 1.0794 50.0%, 1.1036 53.6%, 1.1185 57.1%, 1.1254 60.7%, 1.1258 64.3%, 1.1209 67.9%, 1.1122 71.4%, 1.1007 75.0%, 1.0875 78.6%, 1.0736 82.1%, 1.0595 85.7%, 1.0460 89.3%, 1.0335 92.9%, 1.0222 96.4%, 1.0000 100.0%);
 
   /* Pull durations from here, never a literal — the reduced-motion block at
      the bottom of this file collapses these and everything built on them. */
@@ -200,26 +249,38 @@ video {
   transition: filter var(--motion-fast) linear, opacity var(--motion-fast) linear;
 }
 
-/* Setting --art-1/--art-2 on <html> tints the whole page wash. */
+/* The page wash. Its colour comes from the artwork under the pointer, its
+   drift from a 1/f walk, its brightness from whether the machine is working.
+   No keyframe: a loop is recognised as a loop and stops being a room. */
 body::after {
   content: "";
   position: fixed;
-  inset: -12%;
+  inset: -14%;
   pointer-events: none;
   z-index: -1;
-  opacity: var(--room);
+  opacity: calc(var(--room) * (0.62 + var(--room-k) * 0.55));
   background:
-    radial-gradient(ellipse 70% 50% at 8% -4%,
-      color-mix(in oklab, var(--art-1) 27%, transparent) 0%, transparent 62%),
-    radial-gradient(ellipse 55% 45% at 96% 6%,
-      color-mix(in oklab, var(--art-2) 24%, transparent) 0%, transparent 62%),
-    radial-gradient(ellipse 90% 60% at 50% 112%,
-      color-mix(in oklab, var(--red) 9%, transparent) 0%, transparent 60%);
-  animation: drift 34s ease-in-out infinite alternate;
+    radial-gradient(ellipse 72% 52% at calc(10% + var(--room-x) * 1%)
+        calc(-2% + var(--room-y) * 1%),
+      color-mix(in oklab, var(--art-1) 30%, transparent) 0%, transparent 62%),
+    radial-gradient(ellipse 58% 46% at calc(94% - var(--room-x) * 1.2%)
+        calc(7% + var(--room-y) * 0.8%),
+      color-mix(in oklab, var(--art-2) 27%, transparent) 0%, transparent 62%),
+    radial-gradient(ellipse 96% 62% at calc(50% + var(--room-x) * 0.6%)
+        calc(112% + var(--room-y) * 0.5%),
+      color-mix(in oklab, var(--red)
+        calc(8% + var(--room-bad) * 16%), transparent) 0%, transparent 60%);
+  scale: calc(1 + var(--room-k) * 0.05);
   /* Transition the colours here, not on <html> where they are set: keeps a
      change to one element's recalc instead of the whole inherited subtree. */
-  transition: opacity var(--motion-slow) var(--ease-out),
-    --art-1 var(--motion-slow) linear, --art-2 var(--motion-slow) linear;
+  transition:
+    --art-1 var(--motion-slow) linear,
+    --art-2 var(--motion-slow) linear,
+    --room-x 180ms linear,
+    --room-y 180ms linear,
+    --room-k 180ms linear,
+    opacity 180ms linear,
+    scale 180ms linear;
 }
 
 body::before {
@@ -377,32 +438,6 @@ body:has(.page) {
   }
 }
 
-/* Reduced motion keeps the cross-fade, drops every translate/scale/blur. */
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(root),
-  ::view-transition-new(root),
-  ::view-transition-old(page-body),
-  ::view-transition-new(page-body) {
-    animation-name: fade-in;
-    animation-duration: 120ms;
-  }
-
-  ::view-transition-old(root),
-  ::view-transition-old(page-body) {
-    animation-direction: reverse;
-  }
-
-  ::view-transition-group(page-header),
-  ::view-transition-group(page-body) {
-    animation-duration: 120ms;
-  }
-
-  @supports selector(::view-transition-group(*)) {
-    ::view-transition-group(*) {
-      animation-duration: 120ms;
-    }
-  }
-}
 
 /* @starting-style is the "before it existed" style; allow-discrete is what lets
    display/overlay transition at all — without it the exit never plays. */
@@ -899,6 +934,31 @@ textarea:disabled,
   animation: stripe-shift 0.8s linear infinite;
 }
 
+/* Ledger row: the row's own background IS its progress, so a phase, a torrent
+   and a disk all read in one visual language with no nested widget. The caller
+   owns grid-template-columns and sets --fill inline. */
+.led {
+  display: grid;
+  align-items: center;
+  gap: 0 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  background-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    var(--led-c, var(--glass-2)) 0 var(--fill),
+    transparent var(--fill)
+  );
+  transition: --fill var(--motion-slow) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .led:hover {
+    background-color: var(--glass);
+  }
+}
+
 .press {
   transition: transform var(--motion-fast) ease;
 }
@@ -1031,20 +1091,6 @@ textarea:disabled,
 @container rail (max-width: 640px) {
   .scroll-row .cards {
     scroll-padding-left: 16px;
-  }
-}
-
-@keyframes drift {
-  0% {
-    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
-  }
-
-  50% {
-    transform: translate3d(-2%, 1.5%, 0) rotate(2deg) scale(1.04);
-  }
-
-  100% {
-    transform: translate3d(2%, -1.5%, 0) rotate(-1.5deg) scale(1.02);
   }
 }
 
@@ -1221,39 +1267,8 @@ textarea:disabled,
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  html {
-    scroll-behavior: smooth;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
-/* Must stay the last block in the file so it wins; the blanket rule catches
-   the literal durations in component styles. */
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --motion-fast: 1ms;
-    --motion: 1ms;
-    --motion-slow: 1ms;
-    --motion-page: 1ms;
-  }
 
-  *,
-  *::before,
-  *::after {
-    animation-duration: 1ms !important;
-    animation-iteration-count: 1 !important;
-    animation-delay: 0ms !important;
-    transition-duration: 1ms !important;
-    scroll-behavior: auto !important;
-  }
-
-  .media-card:hover {
-    transform: none;
-  }
-
-  .cards:has(.media-card:hover) .media-card:not(:hover),
-  .grid:has(.media-card:hover) .media-card:not(:hover) {
-    scale: none;
-    filter: none;
-  }
-}
