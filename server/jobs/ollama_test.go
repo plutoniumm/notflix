@@ -108,3 +108,82 @@ func TestStripListMarker(t *testing.T) {
 		}
 	}
 }
+
+// Regression (2026-10-15): gemma4 answered 49 or 51 lines for 6 of 30 batches
+// on The Roundup: Punishment. The strict `len == want` check discarded all 50
+// cues of each, so 300 perfectly good translations were thrown away and 20% of
+// the file shipped in Korean. Indices make the count irrelevant.
+func TestParseTranslationKeyed(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    int
+		got     []string
+		wantErr bool
+	}{
+		{
+			name:    "index-keyed object",
+			content: `{"out":{"0":"hello","1":"world"}}`,
+			want:    2,
+			got:     []string{"hello", "world"},
+		},
+		{
+			name:    "out of order keys land by index, not arrival",
+			content: `{"out":{"2":"three","0":"one","1":"two"}}`,
+			want:    3,
+			got:     []string{"one", "two", "three"},
+		},
+		{
+			// The 49-of-50 case: one line short must cost that one cue only, and
+			// must NOT shift every later line onto the wrong timestamp.
+			name:    "missing key leaves an empty slot in place",
+			content: `{"out":{"0":"one","2":"three"}}`,
+			want:    3,
+			got:     []string{"one", "", "three"},
+		},
+		{
+			// The 51-of-50 case.
+			name:    "extra key past the batch is ignored",
+			content: `{"out":{"0":"one","1":"two","2":"spurious"}}`,
+			want:    2,
+			got:     []string{"one", "two"},
+		},
+		{
+			// gemma4 drops the "out" envelope on about a third of batches.
+			name:    "bare index map without the out envelope",
+			content: `{"0":"hello","1":"world"}`,
+			want:    2,
+			got:     []string{"hello", "world"},
+		},
+		{
+			name:    "non-numeric keys alone error out",
+			content: `{"out":{"line one":"hello"}}`,
+			want:    2,
+			wantErr: true,
+		},
+		{
+			name:    "bare map with no numeric keys errors out",
+			content: `{"error":"model is loading"}`,
+			want:    2,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseTranslation(tc.content, tc.want)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if strings.Join(got, "|") != strings.Join(tc.got, "|") {
+				t.Errorf("got %q, want %q", got, tc.got)
+			}
+		})
+	}
+}

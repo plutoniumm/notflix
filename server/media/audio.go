@@ -1,7 +1,6 @@
 package media
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -30,7 +29,7 @@ func AudioInfo(c *gin.Context, lib *library.Library) {
 	}
 
 	tracks := []AudioTrack{}
-	streams, _ := library.Prober.Streams(context.Background(), path)
+	streams, _ := library.Probes.Streams(path)
 	i := 0
 	for _, s := range streams {
 		if s.CodecType != "audio" {

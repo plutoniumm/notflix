@@ -1,7 +1,6 @@
 package media
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -20,7 +19,20 @@ var repairPool = jobs.NewPool(2)
 // RepairAll tries progressively harder strategies on the corrupt set; recovered
 // files replace the original, whose bytes stay as <file>.corrupt.bak.
 func RepairAll(lib *library.Library) {
-	paths := library.CorruptPaths()
+	all := library.CorruptPaths()
+	paths := make([]string, 0, len(all))
+	dead := 0
+	for _, p := range all {
+		if library.IsDead(p) {
+			dead++
+
+			continue
+		}
+		paths = append(paths, p)
+	}
+	if dead > 0 {
+		log.Printf("[repair] skipping %d file(s) already known unrecoverable", dead)
+	}
 	if len(paths) == 0 {
 		return
 	}
@@ -54,6 +66,10 @@ func RepairAll(lib *library.Library) {
 
 func repairOne(path string) bool {
 	name := filepath.Base(path)
+	if library.IsDead(path) {
+		return false
+	}
+
 	strategies := []struct {
 		label string
 		fn    func(string) error
@@ -64,11 +80,15 @@ func repairOne(path string) bool {
 	for _, s := range strategies {
 		if err := s.fn(path); err == nil {
 			log.Printf("[repair] %s: recovered via %s", name, s.label)
+			library.ClearDead(path)
+
 			return true
 		} else {
 			log.Printf("[repair] %s: %s failed: %v", name, s.label, err)
 		}
 	}
+	library.MarkDead(path)
+
 	return false
 }
 
@@ -88,7 +108,7 @@ func repairCopyRemux(path string) error {
 		args = append(args, "-movflags", "+faststart")
 	}
 	args = append(args, tmp)
-	stderr, err := library.FFRun{Args: args, Timeout: 5 * time.Minute}.Run()
+	stderr, err := library.FFRun{Args: args, Nice: true, Timeout: 5 * time.Minute}.Run()
 	if err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("%w: %s", err, tail(stderr))
@@ -119,7 +139,7 @@ func repairReencode(path string) error {
 		args = append(args, "-ac", "2")
 	}
 	args = append(args, "-movflags", "+faststart", "-f", "mp4", tmp)
-	stderr, err := library.FFRun{Args: args, Timeout: 60 * time.Minute}.Run()
+	stderr, err := library.FFRun{Args: args, Nice: true, Timeout: 60 * time.Minute}.Run()
 	if err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("%w: %s", err, tail(stderr))
@@ -132,9 +152,8 @@ func repairReencode(path string) error {
 }
 
 func verifyOutput(path string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	streams, err := library.Prober.Streams(ctx, path)
+	// Probe deadline lives in UFO now.
+	streams, err := library.Probes.Streams(path)
 	if err != nil {
 		return false
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,13 +161,26 @@ func TranslateSegments(texts []string, srcLang string, glossary []string) ([]str
 	}
 
 	const batchSize = 50
-	batches, failed := 0, 0
+	batches, failed, partial := 0, 0, 0
 	for i := 0; i < len(texts); i += batchSize {
 		batches++
 		end := min(i+batchSize, len(texts))
 		batch := texts[i:end]
 
-		inputJSON, _ := json.Marshal(batch)
+		// Numbered input, numbered output. A bare array makes the whole batch
+		// hostage to the model's COUNT: gemma4 returned 49 or 51 lines for 6 of
+		// 30 batches on The Roundup: Punishment and the strict length check threw
+		// away all 50 cues each time — 300 good translations discarded, 20% of
+		// the file shipped in Korean. The lines were fine; only the arithmetic
+		// was off. Keying each line by its input index removes the count from the
+		// contract entirely, and a merged or dropped line now costs that one cue
+		// instead of fifty, with no silent off-by-one shifting every later cue
+		// onto the wrong timestamp.
+		keyed := make(map[string]string, len(batch))
+		for j, t := range batch {
+			keyed[strconv.Itoa(j)] = t
+		}
+		inputJSON, _ := json.Marshal(keyed)
 		// Do NOT add "this is ASR output, infer the mis-heard words from context"
 		// here. Tried and MEASURED FLAT against City Hunter ep05's release sub:
 		// content-word overlap 15.5% (this prompt) vs 15.2% (the ASR-aware one),
@@ -178,11 +192,14 @@ func TranslateSegments(texts []string, srcLang string, glossary []string) ([]str
 		// to SUPPLY them — a glossary lifted from a sibling episode's existing
 		// English sidecar — not a prompt instruction.
 		prompt := fmt.Sprintf(
-			"Translate these %s subtitle lines to English. Natural dialogue, concise.%s Return ONLY a JSON array of strings, same order, no explanation.\nInput: %s",
+			"Translate these %s subtitle lines to English. Natural dialogue, concise.%s "+
+				"The input is a JSON object mapping a line number to its text. Return ONLY a JSON object "+
+				"with the SAME keys, each mapping to that line's English translation. "+
+				"Every key must appear exactly once. No explanation.\nInput: %s",
 			srcLang, names, string(inputJSON),
 		)
 
-		// format:"json" stops models wrapping the array in prose or markdown.
+		// format:"json" stops models wrapping the answer in prose or markdown.
 		// The object wrapper is asked for because some backends only accept
 		// object roots in format=json mode.
 		req := map[string]any{
@@ -194,7 +211,7 @@ func TranslateSegments(texts []string, srcLang string, glossary []string) ([]str
 			"think":      NoThink,
 			"messages": []map[string]string{
 				{"role": "user", "content": prompt +
-					`\nReturn a single JSON object with key "out" mapping to the array.`},
+					`\nReturn a single JSON object with key "out" mapping to that object.`},
 			},
 		}
 
@@ -223,18 +240,31 @@ func TranslateSegments(texts []string, srcLang string, glossary []string) ([]str
 			continue
 		}
 
+		// An empty slot means the model never answered for that index — keep the
+		// source line rather than blanking the cue.
+		got := 0
 		for j, t := range translated {
+			if t == "" {
+				continue
+			}
 			result[i+j] = t
+			got++
 		}
-		log.Printf("[ollama] batch %d translated %d segments", i/batchSize, len(batch))
+		if got < len(batch) {
+			log.Printf("[ollama] batch %d translated %d of %d segments (rest left in %s)",
+				i/batchSize, got, len(batch), srcLang)
+			partial += len(batch) - got
+		} else {
+			log.Printf("[ollama] batch %d translated %d segments", i/batchSize, len(batch))
+		}
 	}
 
 	// A mixed-language VTT is the one outcome that looks like nobody's fault, so
 	// say it out loud: per-batch failures leave those 50 cues in the source
 	// language and the file ships half-translated.
-	if failed > 0 {
+	if failed > 0 || partial > 0 {
 		log.Printf("[ollama] %d/%d batches failed — %d of %d cues left untranslated (%s)",
-			failed, batches, failed*batchSize, len(texts), srcLang)
+			failed, batches, failed*batchSize+partial, len(texts), srcLang)
 	}
 
 	return result, nil
@@ -246,6 +276,29 @@ func parseTranslation(content string, want int) ([]string, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, fmt.Errorf("empty content")
+	}
+
+	// Index-keyed object first — the format TranslateSegments asks for. Slots the
+	// model left out stay empty for the caller to fill with the source line, so a
+	// miscount costs one cue instead of the whole batch.
+	var keyed struct {
+		Out map[string]string `json:"out"`
+	}
+	if err := json.Unmarshal([]byte(content), &keyed); err == nil {
+		if out, ok := placeKeyed(keyed.Out, want); ok {
+			return out, nil
+		}
+	}
+
+	// The same object unwrapped. gemma4 drops the "out" envelope on about a
+	// third of batches and answers {"0": "...", "1": "..."} directly, which cost
+	// 100 of 300 cues on the first Roundup repair run — the translations were
+	// all there, one level up from where the parser looked.
+	var bare map[string]string
+	if err := json.Unmarshal([]byte(content), &bare); err == nil {
+		if out, ok := placeKeyed(bare, want); ok {
+			return out, nil
+		}
 	}
 
 	var obj struct {
@@ -298,6 +351,28 @@ func parseTranslation(content string, want int) ([]string, error) {
 
 	return nil, fmt.Errorf("could not extract %d translations (got %d via json, %d via lines)",
 		want, len(arr), len(lines))
+}
+
+// placeKeyed slots translations by their decimal key, ignoring anything outside
+// the batch. Position in the answer is never trusted: that is the whole point
+// of asking for indices.
+func placeKeyed(m map[string]string, want int) ([]string, bool) {
+	if len(m) == 0 {
+		return nil, false
+	}
+
+	out := make([]string, want)
+	hits := 0
+	for k, v := range m {
+		n, err := strconv.Atoi(k)
+		if err != nil || n < 0 || n >= want {
+			continue
+		}
+		out[n] = v
+		hits++
+	}
+
+	return out, hits > 0
 }
 
 func stripListMarker(s string) string {

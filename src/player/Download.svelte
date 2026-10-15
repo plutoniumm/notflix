@@ -97,7 +97,7 @@
     {:else}
       <!-- svelte-ignore a11y_consider_explicit_label -->
       <a
-        class="ibtn cc ptr rx5 p5"
+        class="ibtn cc ptr p5"
         href={fileURL}
         download={title}
         title="Save offline"
@@ -121,7 +121,11 @@
   .ibtn {
     color: var(--tx-3);
     border: 1px solid transparent;
-    border-radius: var(--r-md) !important;
+    border-radius: var(--r-md);
+    /* An <a>, unlike a <button>, does not inherit border-box from the reset, so
+       min-width 38 + 5px padding + 1px border measured 50 — the download sat 12px
+       taller than every sibling and stretched its whole group to match. */
+    box-sizing: border-box;
     min-width: 38px;
     min-height: 38px;
     transition:

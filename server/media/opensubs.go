@@ -16,31 +16,33 @@ import (
 const osUA = "notflix v1.0.0"
 
 type OpenSubtitlesClient struct {
-	apiKey string
-	user   string
-	pass   string
-
 	mu      sync.Mutex // guards tokVal/tokExp only
 	loginMu sync.Mutex // single-flights the login POST
 	tokVal  string
 	tokExp  time.Time
 }
 
-func NewOpenSubtitlesClient() *OpenSubtitlesClient {
-	return &OpenSubtitlesClient{
-		apiKey: os.Getenv("OPENSUBTITLES_API_KEY"),
-		user:   os.Getenv("OPENSUBTITLES_USER"),
-		pass:   os.Getenv("OPENSUBTITLES_PASS"),
-	}
-}
+func NewOpenSubtitlesClient() *OpenSubtitlesClient { return &OpenSubtitlesClient{} }
 
 var osClient = NewOpenSubtitlesClient()
 
-func (c *OpenSubtitlesClient) Enabled() bool { return c.apiKey != "" }
+// Credentials are read at CALL time, never at construction. osClient is a
+// package-level var, and Go initializes an imported package's vars before the
+// importing package's — so `media`'s init ran before main's godotenv.Load(),
+// every field came back "", and Enabled() was false forever. OpenSubtitles was
+// dead from v3 onward whenever the key lived only in .env (it only ever worked
+// if you happened to export it in the shell), which silently pushed the entire
+// subtitle waterfall onto whisper. Any fix in main.go is unreachable by
+// construction; it has to be lazy here.
+func (c *OpenSubtitlesClient) apiKey() string { return os.Getenv("OPENSUBTITLES_API_KEY") }
+func (c *OpenSubtitlesClient) user() string   { return os.Getenv("OPENSUBTITLES_USER") }
+func (c *OpenSubtitlesClient) pass() string   { return os.Getenv("OPENSUBTITLES_PASS") }
+
+func (c *OpenSubtitlesClient) Enabled() bool { return c.apiKey() != "" }
 
 // Search takes raw urlencoded params ("moviehash=..."); nil on any failure.
 func (c *OpenSubtitlesClient) Search(params string, byHash bool) []SubResult {
-	if c.apiKey == "" {
+	if c.apiKey() == "" {
 		return nil
 	}
 
@@ -48,7 +50,7 @@ func (c *OpenSubtitlesClient) Search(params string, byHash bool) []SubResult {
 	if err != nil {
 		return nil
 	}
-	req.Header.Set("Api-Key", c.apiKey)
+	req.Header.Set("Api-Key", c.apiKey())
 	req.Header.Set("User-Agent", osUA)
 	req.Header.Set("Accept", "application/json")
 
@@ -107,7 +109,7 @@ func (c *OpenSubtitlesClient) Search(params string, byHash bool) []SubResult {
 // c.mu covers only the cached value, never the login POST (a slow login used to
 // queue every downloader behind it); loginMu single-flights the login.
 func (c *OpenSubtitlesClient) token() string {
-	if c.user == "" || c.pass == "" {
+	if c.user() == "" || c.pass() == "" {
 		return ""
 	}
 
@@ -146,14 +148,14 @@ func (c *OpenSubtitlesClient) cachedToken() string {
 }
 
 func (c *OpenSubtitlesClient) login() string {
-	body, _ := json.Marshal(map[string]string{"username": c.user, "password": c.pass})
+	body, _ := json.Marshal(map[string]string{"username": c.user(), "password": c.pass()})
 	req, err := http.NewRequest("POST", "https://api.opensubtitles.com/api/v1/login", bytes.NewReader(body))
 	if err != nil {
 		return ""
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Api-Key", c.apiKey)
+	req.Header.Set("Api-Key", c.apiKey())
 	req.Header.Set("User-Agent", osUA)
 
 	resp, err := subHTTP.Do(req)
@@ -198,8 +200,8 @@ func (c *OpenSubtitlesClient) Download(fileID int) (link, filename, errMsg strin
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
-		if c.apiKey != "" {
-			req.Header.Set("Api-Key", c.apiKey)
+		if c.apiKey() != "" {
+			req.Header.Set("Api-Key", c.apiKey())
 		}
 		req.Header.Set("User-Agent", osUA)
 		if tok != "" {

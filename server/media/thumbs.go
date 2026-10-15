@@ -1,7 +1,6 @@
 package media
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"math/rand"
@@ -43,7 +42,7 @@ func GenerateThumbAsync(src string) {
 }
 
 func makeThumb(src, dst string) error {
-	f, err := library.Prober.Format(context.Background(), src)
+	f, err := library.Probes.Format(src)
 	if err != nil {
 		return fmt.Errorf("ffprobe: %w", err)
 	}
@@ -54,7 +53,7 @@ func makeThumb(src, dst string) error {
 	}
 
 	ts := fmt.Sprintf("%.2f", dur/2+rand.Float64()*10-5)
-	if stderr, err := library.FF("-y", "-ss", ts, "-i", src, "-vframes", "1", dst); err != nil {
+	if stderr, err := library.FFNice("-y", "-ss", ts, "-i", src, "-vframes", "1", dst); err != nil {
 		return library.FFErr(stderr, err)
 	}
 	return nil

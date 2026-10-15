@@ -31,7 +31,7 @@ type ProcessStatus struct {
 	Phases  []PhaseInfo `json:"phases"`
 }
 
-var phaseOrder = []string{"convert", "clean", "scan", "repair", "thumbs", "sprites", "posters", "whisper", "blurbs", "skips"}
+var phaseOrder = []string{"convert", "clean", "scan", "repair", "thumbs", "sprites", "posters", "anim", "whisper", "blurbs", "skips"}
 
 var (
 	statusMu sync.Mutex

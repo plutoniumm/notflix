@@ -131,7 +131,7 @@ func Subctx(c *gin.Context, lib *library.Library) {
 	}
 
 	embedded := []embedTrack{}
-	streams, _ := library.Prober.Streams(c.Request.Context(), path)
+	streams, _ := library.Probes.Streams(path)
 	textCodecs := map[string]bool{"subrip": true, "ass": true, "webvtt": true, "mov_text": true}
 	for _, s := range streams {
 		if s.CodecType != "subtitle" || !textCodecs[strings.ToLower(s.CodecName)] {

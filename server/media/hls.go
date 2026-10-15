@@ -1,7 +1,6 @@
 package media
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -132,6 +131,7 @@ type srcInfo struct {
 	avgBitrate  int       // bps, whole-file mean — HLS AVERAGE-BANDWIDTH
 	mu          sync.Mutex
 	ready       bool
+	logged      bool // a failed probe says its piece once, not per request
 }
 
 var srcInfoMap sync.Map // path -> *srcInfo
@@ -245,9 +245,25 @@ func getSrcInfo(path string) *srcInfo {
 	si.mu.Lock()
 	defer si.mu.Unlock()
 	if !si.ready {
-		streams, err := library.Prober.Streams(context.Background(), path)
+		// Disk first: everything below is derived from bytes that have not
+		// changed, and probePackets alone measured 31.9s on a cold master.
+		if loadSrcInfo(path, si) {
+			si.ready = true
+
+			return si
+		}
+		streams, err := library.Probes.Streams(path)
 		if err != nil {
-			log.Printf("[srcinfo] stream probe failed (will retry): %s: %v", filepath.Base(path), err)
+			// Still retried — a transient ffprobe failure under the startup
+			// ProcessAll storm must not condemn a copy-eligible AV1 to the h264
+			// ladder (see the note above). But a STRUCTURALLY broken file fails
+			// every time and is re-probed on every request: 366 corrupt mkvs in
+			// one archive folder wrote 2093 identical lines and buried the real
+			// errors. Say it once per path.
+			if !si.logged {
+				si.logged = true
+				log.Printf("[srcinfo] stream probe failed (will retry): %s: %v", filepath.Base(path), err)
+			}
 			return si
 		}
 		si.vCodec = ""
@@ -294,8 +310,20 @@ func getSrcInfo(path string) *srcInfo {
 			return si
 		}
 		si.dur = duration(path)
-		if si.vCodec != "h264" && si.vCodec != "av1" {
+		// AV1 only. probePackets reads the WHOLE file — measured 14s on a 2.2GB
+		// internal file and 43s on a 2.5GB one over the USB volume, which is
+		// most of a cold master. For h264 every consumer of what it produces
+		// (kfTimes, bounds, segBitrates, peak/avg) is gated behind codec==av1
+		// or canCopyVideo, and canCopyVideo is hardcoded false — so on an h264
+		// title that whole-file read buys literally nothing, while competing
+		// for the same disk the live transcode is reading.
+		//
+		// If h264 copy-passthrough is ever re-enabled, this gate must come back
+		// with it — see the canCopyVideo comment.
+		if si.vCodec != "av1" {
 			si.ready = true
+			saveSrcInfo(path, si)
+
 			return si
 		}
 		pkts, err := probePackets(path)
@@ -311,6 +339,7 @@ func getSrcInfo(path string) *srcInfo {
 		si.bounds = muxerBounds(si.kfTimes, pkts[0].pts, si.dur, hlsSegDur)
 		si.segBitrates, si.peakBitrate, si.avgBitrate = segmentBitrates(pkts, si.bounds)
 		si.ready = true
+		saveSrcInfo(path, si)
 	}
 	return si
 }
@@ -577,7 +606,7 @@ func HLSAVOffset(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	streams, err := library.Prober.Streams(context.Background(), path)
+	streams, err := library.Probes.Streams(path)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -798,7 +827,10 @@ func HLSPlaylist(c *gin.Context, lib *library.Library) {
 		return
 	}
 
-	dur := duration(path)
+	// getSrcInfo is called a few lines below anyway, and it already carries the
+	// duration — this line was its own ffprobe on EVERY playlist request, warm or
+	// cold, measured at 0.5-2.5s each.
+	dur := srcDur(getSrcInfo(path), path)
 	if dur <= 0 {
 		c.String(http.StatusInternalServerError, "could not probe duration")
 		return
@@ -1086,7 +1118,12 @@ func HLSSegment(c *gin.Context, lib *library.Library) {
 // codec must be the one the master just served THIS client — warming AV1 for a
 // downgraded client heats a cache it will never read.
 func Prewarm(file, path, codec string, srcHeight int, aTracks []audioMeta, defAudio int) {
-	const N = 10
+	// Match segPool's width. At 10 these queue three deep and the player's own
+	// first segment lands behind them: measured 7.9s for seg0 with no prewarm
+	// against 38.3s with it, same title, same rung, same load. Aggregate
+	// throughput is ~3.5x realtime, so a shallower head start refills during
+	// playback anyway.
+	const N = 4
 	multiAudio := len(aTracks) > 1
 	// These three must mirror HLSMaster's AV1→h264 fallbacks exactly.
 	if codec == CodecAV1 && multiAudio {

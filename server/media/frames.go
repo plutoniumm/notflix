@@ -1,7 +1,6 @@
 package media
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -105,7 +104,7 @@ func probeShot(path string) (shotGeom, error) {
 		}
 	}
 
-	streams, err := library.Prober.Streams(context.Background(), path)
+	streams, err := library.Probes.Streams(path)
 	if err != nil {
 		return shotGeom{}, err
 	}

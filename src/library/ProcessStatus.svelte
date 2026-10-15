@@ -24,7 +24,7 @@
   const CHAINS = [
     ["convert"],
     ["scan", "repair"],
-    ["thumbs", "sprites", "posters"],
+    ["thumbs", "sprites", "posters", "anim"],
     ["whisper"],
     ["blurbs"],
     ["skips"],
@@ -38,6 +38,7 @@
     thumbs: "Thumbs",
     sprites: "Sprites",
     posters: "Posters",
+    anim: "Animation",
     blurbs: "Blurbs",
     whisper: "Whisper",
     skips: "Intro/outro",

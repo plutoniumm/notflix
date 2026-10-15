@@ -1,7 +1,6 @@
 package media
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -90,6 +89,12 @@ func ProcessAll(lib *library.Library) {
 		PhaseStart("posters")
 		PosterAll(lib)
 		PhaseEnd("posters")
+
+		// Same sprite sheet, same 1-wide vision gate — running it beside
+		// posters would only queue behind it.
+		PhaseStart("anim")
+		AnimationAll(lib)
+		PhaseEnd("anim")
 	}()
 	go func() {
 		defer wg.Done()
@@ -302,7 +307,7 @@ func toMP4(srcPath, root string) error {
 }
 
 func duration(path string) float64 {
-	f, err := library.Prober.Format(context.Background(), path)
+	f, err := library.Probes.Format(path)
 	if err != nil {
 		return 0
 	}
@@ -310,7 +315,7 @@ func duration(path string) float64 {
 }
 
 func codecs(videoPath string) (videoCodec string, audioCodecs []string) {
-	streams, err := library.Prober.Streams(context.Background(), videoPath)
+	streams, err := library.Probes.Streams(videoPath)
 	if err != nil {
 		return "", nil
 	}
@@ -348,7 +353,7 @@ func mp4AudioOK(codecs []string) bool {
 // Marks the English audio track as the container default. Order follows
 // `-map 0:a` — output audio i == source audio i.
 func audioDispositionArgs(srcPath string) []string {
-	streams, err := library.Prober.Streams(context.Background(), srcPath)
+	streams, err := library.Probes.Streams(srcPath)
 	if err != nil {
 		return nil
 	}
@@ -386,7 +391,7 @@ func audioDispositionArgs(srcPath string) []string {
 }
 
 func audioNeedsTranscode(path string) bool {
-	streams, err := library.Prober.Streams(context.Background(), path)
+	streams, err := library.Probes.Streams(path)
 	if err != nil {
 		return false
 	}
@@ -451,6 +456,7 @@ func remuxAudio(srcPath string) error {
 		return err
 	}
 	srcInfoMap.Delete(srcPath) // rewritten in place; the probe cache is now stale
+	library.Probes.Forget(srcPath)
 
 	// `-c:v copy` kept the source's AV1; without the mark MediaCodec answers
 	// h264 and HLS re-encodes every segment.
@@ -529,7 +535,7 @@ func remux(src, dst string, durationSec float64, name string) error {
 }
 
 func extractAllSubs(srcPath, base string) {
-	streams, err := library.Prober.Streams(context.Background(), srcPath)
+	streams, err := library.Probes.Streams(srcPath)
 	if err != nil {
 		return
 	}
@@ -557,7 +563,7 @@ func extractAllSubs(srcPath, base string) {
 			continue
 		}
 
-		if stderr, err := library.FF("-y", "-i", srcPath,
+		if stderr, err := library.FFNice("-y", "-i", srcPath,
 			"-map", fmt.Sprintf("0:%d", s.Index),
 			"-c:s", "webvtt", outPath); err != nil {
 			log.Printf("[convert] sub extraction failed (stream %d, %s): %v %s", s.Index, lang, err, stderr)

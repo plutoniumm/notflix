@@ -158,7 +158,7 @@ func extractToWAV(src string) (string, error) {
 	tmpPath := tmp.Name()
 
 	log.Printf("[whisper] extracting audio: %s → %s", src, tmpPath)
-	if stderr, err := library.FF("-y", "-i", src, "-ar", "16000", "-ac", "1", tmpPath); err != nil {
+	if stderr, err := library.FFNice("-y", "-i", src, "-ar", "16000", "-ac", "1", tmpPath); err != nil {
 		os.Remove(tmpPath)
 		return "", library.FFErr(stderr, err)
 	}

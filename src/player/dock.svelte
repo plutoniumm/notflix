@@ -727,6 +727,12 @@
   .dgrp > * + * {
     box-shadow: inset 1px 0 0 color-mix(in oklab, var(--tx-5) 8%, transparent);
   }
+  /* Square by default, rounded only at the ends. Without this a MIDDLE cell
+     keeps .ctrl's own 10px radius and draws a rounded box floating inside the
+     group's straight run. */
+  .dgrp > * {
+    border-radius: 0;
+  }
   .dgrp > :first-child {
     border-radius: 10px 0 0 10px;
   }
@@ -750,6 +756,15 @@
   }
   @media (hover: none) {
     .speed-chip { min-height: 44px; min-width: 52px; }
+  }
+  /* A cell of the group, not a chip sitting inside one: its own surface and
+     30px height left a smaller rounded box inset in a 36px group. Stretch
+     instead of hard-coding a height, so the group stays the one that decides. */
+  .dgrp .speed-chip {
+    background: none;
+    border-color: transparent;
+    min-height: 0;
+    align-self: stretch;
   }
   .speed-chip:hover { background: var(--glass-2); color: var(--tx-5); }
   .speed-chip.flip-up { animation: flip-u 0.25s ease; }

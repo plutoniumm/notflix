@@ -51,7 +51,16 @@ func (r FFRun) Run() (string, error) {
 
 	var cmd *exec.Cmd
 	if r.Nice {
-		cmd = exec.CommandContext(ctx, "nice", append([]string{"-n", "19", "ffmpeg"}, args...)...)
+		// taskpolicy -b, not nice -n 19. `nice` moves CPU share only, and this
+		// library lives on a USB external SSD — the contended resource is that
+		// one IO queue, which Darwin exposes through a SEPARATE knob
+		// (setiopolicy_np / IOPOL_THROTTLE) that nice never touches. So the most
+		// carefully niced encode in the system was still starving playback at
+		// the disk. `taskpolicy -b` sets background CPU QoS (which on Apple
+		// silicon also parks the work on the E-cores) AND the throttled IO tier.
+		// Note `ps -o nice` reads 0 afterwards: background policy is not a nice
+		// value.
+		cmd = exec.CommandContext(ctx, "taskpolicy", append([]string{"-b", "ffmpeg"}, args...)...)
 	} else {
 		cmd = exec.CommandContext(ctx, "ffmpeg", args...)
 	}
@@ -75,6 +84,14 @@ func (r FFRun) Run() (string, error) {
 // FF is the common case: no progress, no timeout. Returns stderr, error.
 func FF(args ...string) (string, error) {
 	return FFRun{Args: args}.Run()
+}
+
+// FFNice is FF for background work. Thumbnails, sprite sheets, whisper's WAV
+// extract and subtitle extraction all ran at the SAME priority as live
+// streaming because they reached for FF; the sprite pass is a full-file
+// seek-decode, which is the most IO-expensive thing this system does.
+func FFNice(args ...string) (string, error) {
+	return FFRun{Args: args, Nice: true}.Run()
 }
 
 func FFErr(stderr string, err error) error {

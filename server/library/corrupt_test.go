@@ -88,3 +88,56 @@ func TestIsBusyTorrentCallback(t *testing.T) {
 		t.Fatalf("torrent callback false + no sidecars + old mtime → IsBusy false")
 	}
 }
+
+// 366 permanently-dead files were re-probed and re-repaired on every sweep and
+// every restart. The mark has to survive, but only for the exact bytes it was
+// proven on — a replaced download must get a fresh chance.
+func TestDeadMarkIsPerBytes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "cache"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	p := filepath.Join(dir, "broken.mp4")
+	if err := os.WriteFile(p, []byte("\x00\x00\x00\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if IsDead(p) {
+		t.Fatal("unmarked file reported dead")
+	}
+
+	MarkDead(p)
+	if !IsDead(p) {
+		t.Error("mark did not stick")
+	}
+
+	// Re-downloaded: different bytes, so the verdict must not carry over.
+	if err := os.WriteFile(p, []byte("a genuinely different payload"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if IsDead(p) {
+		t.Error("stale mark applied to replaced bytes")
+	}
+
+	MarkDead(p)
+	ClearDead(p)
+	if IsDead(p) {
+		t.Error("ClearDead did not clear")
+	}
+}
+
+func TestDeadMarkMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "cache"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	// No file to stamp: never claim dead, and never panic.
+	if IsDead(filepath.Join(dir, "nope.mp4")) {
+		t.Error("missing file reported dead")
+	}
+	MarkDead(filepath.Join(dir, "nope.mp4"))
+}

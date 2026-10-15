@@ -13,40 +13,73 @@ export class AVSync {
   private delay: DelayNode | null = null;
   private offset = 0;
   private el: HTMLVideoElement | null = null;
+  private ok = false;
   private wake = () => this.ctx?.resume().catch(() => {});
 
+  // init is deliberately cheap. The FIRST `new AudioContext()` in a page opens a
+  // CoreAudio device and measured 2010ms on this machine — synchronously, from
+  // the middle of the player's init block, so video.js could not even issue the
+  // HLS master request until it returned. A/B with the constructor stubbed out
+  // moved that request ~2.5s earlier. The second and later contexts cost 0.2ms,
+  // so this is a one-time device open and nothing but a manual sync nudge ever
+  // needs it. Build the graph then.
   init(videoEl: HTMLVideoElement): this {
     if (!usable()) return this;
 
-    try {
-      this.ctx = new AudioContext();
-      const src = this.ctx.createMediaElementSource(videoEl);
-      this.delay = this.ctx.createDelay(2.0);
-      this.delay.delayTime.value = 0;
-      src.connect(this.delay);
-      this.delay.connect(this.ctx.destination);
-      // Autoplay or an in-place episode swap can leave the context suspended
-      // (silent) — resume on any playback start, not just on `play`.
-      this.el = videoEl;
-      videoEl.addEventListener("play", this.wake);
-      videoEl.addEventListener("playing", this.wake);
-    } catch (e) {
-      console.warn("[avsync] init failed:", e);
-      this.ctx = null;
-      this.delay = null;
-    }
+    this.el = videoEl;
+    this.ok = true;
+    // Autoplay or an in-place episode swap can leave the context suspended
+    // (silent) — resume on any playback start, not just on `play`. Harmless
+    // before the graph exists; wake is a no-op while ctx is null.
+    videoEl.addEventListener("play", this.wake);
+    videoEl.addEventListener("playing", this.wake);
 
     return this;
   }
 
+  private build(): boolean {
+    if (this.delay) return true;
+    if (!this.ok || !this.el) return false;
+
+    try {
+      this.ctx = new AudioContext();
+      const src = this.ctx.createMediaElementSource(this.el);
+      this.delay = this.ctx.createDelay(2.0);
+      this.delay.delayTime.value = 0;
+      src.connect(this.delay);
+      this.delay.connect(this.ctx.destination);
+      this.ctx.resume().catch(() => {});
+    } catch (e) {
+      console.warn("[avsync] init failed:", e);
+      this.ctx = null;
+      this.delay = null;
+      this.ok = false;
+
+      return false;
+    }
+
+    return true;
+  }
+
+  // Capability, not construction: the sync control shows or hides on this, and
+  // it must not depend on whether the graph has been built yet.
   get on(): boolean {
-    return !!this.delay;
+    return this.ok;
   }
 
   set(ms: number): number {
-    if (!this.delay) return 0;
-    this.offset = Math.max(0, Math.min(2000, Math.round(ms)));
-    this.delay.delayTime.value = this.offset / 1000;
+    const want = Math.max(0, Math.min(2000, Math.round(ms)));
+    // Zero is the default. Opening an audio device to apply no delay is exactly
+    // the 2s this change exists to avoid.
+    if (want === 0 && !this.delay) {
+      this.offset = 0;
+
+      return 0;
+    }
+    if (!this.build()) return 0;
+
+    this.offset = want;
+    this.delay!.delayTime.value = this.offset / 1000;
 
     return this.offset;
   }
@@ -66,5 +99,6 @@ export class AVSync {
     this.ctx?.close();
     this.ctx = null;
     this.delay = null;
+    this.ok = false;
   }
 }

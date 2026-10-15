@@ -26,13 +26,14 @@
   import Clip from "./clip.svelte";
 
   import { clean, parseRaw, nextVid, hashKey } from "../core/video";
-  import { api, HEAD } from "../core/api";
+  import { api, GET, HEAD } from "../core/api";
   import { toast } from "../core/toast.svelte";
   import Subs from "./subs";
   import WatchProgress from "./watch";
   import { Down, isSupported } from "../library/dl";
   import { local } from "../core/store";
   import { Touch, Click, Hotkeys, togglePip, pipOk, av1Ok } from "./ux";
+  import { Upscaler, supported as upscaleOk, type Mode } from "./upscale";
   import { SAVE_INTERVAL_MS } from "../core/events.svelte";
   import { AVSync } from "./avsync";
   import { PlayerView } from "./view.svelte";
@@ -69,6 +70,57 @@
   const sprite = new Sprite();
 
   let videoEl: HTMLVideoElement | undefined;
+  // Which rung is actually on screen. Read off the decoded frame rather than
+  // VHS internals, so it is right for native HLS and the direct MP4 path too.
+  // rungTop is the best this session has reached, which is what makes a drop
+  // legible: 480p means nothing on its own, 480p next to a remembered 1080p does.
+  let rung = $state(0);
+  let rungTop = $state(0);
+
+  // Desktop only — see upscale.ts for why. The preference persists, but a phone
+  // never acts on it.
+  const upOn = local("upscale-on", false);
+  let upscaler: Upscaler | null = null;
+  let upCan = $state(false);
+  let upActive = $state(false);
+  // FSR unless the pipeline's vision pass classified this title as animation.
+  // Decided server-side off the sprite sheet, so playback never pays for it.
+  let upWhich = $state<Mode>("fsr");
+
+  function applyUpscale(want: boolean, m: Mode) {
+    const tech = player?.el()?.querySelector("video") as HTMLVideoElement | null;
+    if (!tech || !upscaler) return;
+
+    if (!want) {
+      upscaler.stop();
+      upActive = false;
+
+      return;
+    }
+    upActive = upscaler.start(tech, m);
+  }
+
+  // One small map for the whole library, cached for the session — same shape as
+  // /api/blurbs, and joined against the key the video list already carries.
+  let animMap: Promise<Record<string, boolean>> | null = null;
+
+  async function pickUpMode(key: string) {
+    animMap ??= GET("/api/anim", { silent: true }).catch(() => ({})) as Promise<
+      Record<string, boolean>
+    >;
+    const m = await animMap;
+    const want: Mode = m?.[key] ? "anime" : "fsr";
+    if (want === upWhich) return;
+
+    upWhich = want;
+    if (upActive) applyUpscale(true, want);
+  }
+
+  function toggleUpscale() {
+    const want = !upActive;
+    upOn.set(want);
+    applyUpscale(want, upWhich);
+  }
   let pageEl: HTMLElement | undefined;
   let player: any = null;
   let avSync: AVSync | null = null;
@@ -143,6 +195,7 @@
         .find((g: any) => g.dir === dir)
         ?.files?.find((f: any) => f.name === name)?.key ?? "";
     if (ps.videoKey) sprite.load(ps.videoKey);
+    if (ps.videoKey && upCan) pickUpMode(ps.videoKey);
     setMediaMeta();
   }
 
@@ -154,7 +207,11 @@
       if (param !== videoParam) return true;
       const d = player.duration();
       if (!Number.isFinite(d) || d <= 0) return false;
-      if (t < d - 2) player.currentTime(t);
+      // Below ~5s the seek costs more than it saves: it discards the segment
+      // that was just fetched to start playback and refetches a cold one.
+      // watch.resume already backs the position off by RESUME_THRESHOLD_S, so
+      // a 61s save arrives here as t=1.
+      if (t > 5 && t < d - 2) player.currentTime(t);
       resumeSeek = null;
       return true;
     };
@@ -234,6 +291,9 @@
       sprite.url = "";
       buffered = [];
       avSync?.set(0);
+      rung = 0;
+      rungTop = 0;
+      if (upActive) applyUpscale(true, upWhich);
       player.src({ src: masterSrc, type: "application/vnd.apple.mpegurl" });
       const clearSwap = () => (swapping = false);
       player.one("loadedmetadata", clearSwap);
@@ -244,25 +304,12 @@
     refreshMeta();
     watch.resume(param).then((t) => applyResume(param, t));
 
-    if (isOffline) {
-      const subUrl = `/subs/${sub}`;
-      if (await HEAD(subUrl)) {
-        Subs.reload(player, subUrl, "Subtitles", true);
-      }
-    } else {
-      const info = await Subs.start(player, param, sub);
-      if (param !== videoParam) return;
-      view.subs.setInfo(info);
-      if (info?.local?.length) {
-        const eng = info.local.findIndex((t) =>
-          ["eng", "en", "english", "sdh"].includes(
-            t.language.replace(/\d+$/, ""),
-          ),
-        );
-        view.subs.markActive(info.local[eng >= 0 ? eng : 0]?.file ?? null);
-      }
-    }
-
+    // Started before the subtitle branch, not after it. All three are
+    // fire-and-forget and already guard on `param !== videoParam`, but sitting
+    // behind `await Subs.start(...)` meant a 0.5-1.3s subs/info round trip
+    // delayed the skip buttons, A/V sync and the audio track list — and then
+    // all three landed during the first segment fetches, competing for the
+    // browser's six sockets. Nothing below depends on them.
     api
       .skip(param, { silent: true })
       .then((res: any) => {
@@ -291,6 +338,25 @@
           applyAudio();
         })
         .catch((err: any) => console.warn("[audio info]", err));
+    }
+
+    if (isOffline) {
+      const subUrl = `/subs/${sub}`;
+      if (await HEAD(subUrl)) {
+        Subs.reload(player, subUrl, "Subtitles", true);
+      }
+    } else {
+      const info = await Subs.start(player, param, sub);
+      if (param !== videoParam) return;
+      view.subs.setInfo(info);
+      if (info?.local?.length) {
+        const eng = info.local.findIndex((t) =>
+          ["eng", "en", "english", "sdh"].includes(
+            t.language.replace(/\d+$/, ""),
+          ),
+        );
+        view.subs.markActive(info.local[eng >= 0 ? eng : 0]?.file ?? null);
+      }
     }
   }
 
@@ -540,6 +606,27 @@
       pageEl?.style.setProperty("--art-2", b);
     }).attach(tech);
 
+    const readRung = () => {
+      const h = tech.videoHeight;
+      if (!h) return;
+      rung = h;
+      if (h > rungTop) rungTop = h;
+    };
+    tech.addEventListener("resize", readRung);
+    player.on("loadedmetadata", readRung);
+    cleanups.push(() => tech.removeEventListener("resize", readRung));
+
+    upCan = upscaleOk();
+    if (upCan) {
+      upscaler = new Upscaler();
+      if (upOn.get()) applyUpscale(true, upWhich);
+      cleanups.push(() => {
+        upscaler?.stop();
+        upscaler = null;
+        upActive = false;
+      });
+    }
+
     const readBuffered = () => {
       const b = player?.buffered?.();
       const out: [number, number][] = [];
@@ -611,9 +698,18 @@
         }),
       );
 
+      // Only write when the position actually moved. The timer fires every 2s
+      // regardless, and each write is a whole-file read-modify-write of the KV
+      // store under an exclusive lock — measured 18-1844ms, holding one of the
+      // browser's six sockets against the segment fetches. A paused or parked
+      // player was rewriting the same number indefinitely.
+      let lastSaved = -1;
       const saveProgress = () => {
         if (swapping) return;
-        watch.save(videoParam, player.currentTime() ?? 0, player.duration() ?? 0);
+        const t = player.currentTime() ?? 0;
+        if (Math.abs(t - lastSaved) < 1) return;
+        lastSaved = t;
+        watch.save(videoParam, t, player.duration() ?? 0);
       };
       const trackTimer = setInterval(() => {
         if (document.hidden) return;
@@ -747,6 +843,12 @@
     {title}
     {embed}
     {videoParam}
+    {rung}
+    {rungTop}
+    {upCan}
+    {upActive}
+    {upWhich}
+    onUpscale={toggleUpscale}
     {runWhisper}
     {tuneOpen}
     {helpOpen}

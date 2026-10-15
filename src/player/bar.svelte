@@ -10,6 +10,12 @@
     embed,
     videoParam,
     title,
+    rung = 0,
+    rungTop = 0,
+    upCan = false,
+    upActive = false,
+    upWhich = "fsr",
+    onUpscale = () => {},
     tuneOpen = false,
     helpOpen = false,
     shotOpen = false,
@@ -26,6 +32,12 @@
     onSubsOff,
     onSelectAudio,
   }: {
+    rung?: number;
+    rungTop?: number;
+    upCan?: boolean;
+    upActive?: boolean;
+    upWhich?: string;
+    onUpscale?: () => void;
     view: PlayerView;
     embed: boolean;
     videoParam: string;
@@ -56,6 +68,34 @@
       </svg>
     </a>
 
+    {#if rung}
+      <!-- Which rung is on screen. Dim at the session's best, lit when below it:
+           a number alone cannot tell you the stream dropped, a number that
+           changes colour can. -->
+      <span class="rung" class:low={rung < rungTop} title="Video quality">
+        {rung}p
+      </span>
+    {/if}
+
+    {#if upCan}
+      <button
+        class="ibtn up cc ptr p5"
+        class:active={upActive}
+        title={upActive
+          ? `Upscaler on — ${upWhich === "anime" ? "Anime4K" : "FSR 1.0"}`
+          : "Upscaler off"}
+        aria-label="Toggle upscaler"
+        onclick={onUpscale}
+      >
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 14v6h6" />
+          <path d="M20 10V4h-6" />
+          <path d="M14 10l6-6" />
+          <path d="M10 14l-6 6" />
+        </svg>
+      </button>
+    {/if}
+
     <div class="spacer"></div>
 
     <!-- Grouped by what the control acts on, not by what fits. Seven identical
@@ -67,7 +107,7 @@
       {#if view.audio.tracks.length > 1}
         <div class="btn-wrap p-rel">
           <button
-            class="ibtn cc rx5 ptr p5"
+            class="ibtn cc ptr p5"
             aria-label="Audio track"
             class:active={view.audio.open}
             onclick={() => view.audio.toggle()}
@@ -86,7 +126,7 @@
 
       <div class="btn-wrap p-rel">
         <button
-          class="ibtn cc rx5 ptr p5"
+          class="ibtn cc ptr p5"
           aria-label="Subtitles"
           class:active={view.subs.open || view.state.hasSubs}
           onclick={onToggleSubs}
@@ -109,7 +149,7 @@
       </div>
 
       <button
-        class="ibtn cc rx5 ptr p5"
+        class="ibtn cc ptr p5"
         aria-label="Transcribe with Whisper"
         class:pulse={!!view.state.wMsg}
         onclick={runWhisper}
@@ -121,7 +161,7 @@
       <!-- Capture: both of these hand you a file out of this video. -->
       <div class="grp f al-ct">
         <button
-        class="ibtn cc rx5 ptr p5"
+        class="ibtn cc ptr p5"
         aria-label="Grab a frame"
         title="Grab a frame (g)"
         class:active={shotOpen}
@@ -131,7 +171,7 @@
       </button>
 
       <button
-        class="ibtn cc rx5 ptr p5"
+        class="ibtn cc ptr p5"
         aria-label="Clip a section"
         title="Clip a section (i / o)"
         class:active={clipOpen}
@@ -144,7 +184,7 @@
       <!-- Everything else: adjust, keep, explain. -->
       <div class="grp f al-ct">
         <button
-        class="ibtn cc rx5 ptr p5"
+        class="ibtn cc ptr p5"
         aria-label="Picture and audio"
         class:active={tuneOpen}
         onclick={onTune}
@@ -153,7 +193,7 @@
       </button>
 
       <button
-        class="ibtn qmark cc rx5 ptr p5"
+        class="ibtn qmark cc ptr p5"
         aria-label="Keyboard shortcuts"
         title="Keyboard & gestures (?)"
         class:active={helpOpen}
@@ -221,6 +261,40 @@
     .back { min-width: 44px; min-height: 44px; }
   }
 
+  .rung {
+    font-size: 11px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    color: var(--tx-2);
+    padding: 3px 7px;
+    border-radius: 6px;
+    background: color-mix(in oklab, var(--tx-5) 6%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    backdrop-filter: blur(20px) saturate(150%);
+    transition:
+      color var(--m, 260ms) var(--ease-out),
+      background var(--m, 260ms) var(--ease-out);
+  }
+  .rung.low {
+    color: var(--red);
+    background: color-mix(in oklab, var(--red) 14%, transparent);
+  }
+
+  /* Standalone, not in a .grp: it sits beside the rung chip because the two
+     answer the same question — what am I actually looking at. */
+  .up {
+    min-width: 32px;
+    min-height: 32px;
+    border-radius: 8px;
+  }
+  .up.active {
+    color: var(--tx-5);
+    background: color-mix(in oklab, var(--red) 22%, transparent);
+    border-color: transparent;
+    box-shadow: none;
+  }
+
   .btn-wrap { display: flex; align-items: center; }
 
   /* A group is one object: shared surface, hairline seams, rounded only at the
@@ -262,7 +336,7 @@
     color: var(--tx-3);
     background: transparent;
     border: 1px solid transparent;
-    border-radius: var(--r-md) !important;
+    border-radius: var(--r-md);
     transition:
       color var(--m-fast, 130ms) var(--ease-out),
       background var(--m-fast, 130ms) var(--ease-out),
@@ -289,6 +363,17 @@
     background: var(--glass-2);
     border-color: var(--glass-bd);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+  /* Inside a group a cell owns no edges of its own — the group draws the
+     surface, the seams and the end radii. Keeping the standalone button's
+     border and inset ring drew a second outline one pixel inside the first,
+     which is the "button inside a button" this strip had. The fill stays: an
+     active cell should read as lit, not as its own object. */
+  .grp :global(.ibtn),
+  .grp :global(.ibtn:hover),
+  .grp :global(.ibtn.active) {
+    border-color: transparent;
+    box-shadow: none;
   }
   .ibtn.pulse { animation: pulse 1.5s ease infinite; }
 

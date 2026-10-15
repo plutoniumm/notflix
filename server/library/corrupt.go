@@ -1,7 +1,7 @@
 package library
 
 import (
-	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -50,6 +50,51 @@ func IsBusy(path string) bool {
 	return false
 }
 
+// deadKey marks bytes that every repair strategy has already failed on. Keyed
+// on the basename hash like skip:/codec:/poster:, and stamped with size+mtime
+// so a replaced or re-downloaded file re-qualifies on its own.
+//
+// Without this, 366 permanently-dead files were re-probed by ScanCorrupt (8
+// wide) and re-attempted by RepairAll (732 ffmpeg spawns, one of them a full
+// AV1 re-encode with a 60-minute timeout) on every sweep and every restart —
+// about six minutes of churn per boot, on files that are physically megabytes
+// of zeros, competing with live playback for the same USB drive.
+func deadKey(path string) string {
+	return "dead:" + Hash(filepath.Base(path))
+}
+
+func deadStamp(path string) string {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%d:%d", fi.Size(), fi.ModTime().UnixNano())
+}
+
+// IsDead reports whether this exact file has already failed every repair
+// strategy. A stamp mismatch means different bytes, so it gets a fresh chance.
+func IsDead(path string) bool {
+	stamp := deadStamp(path)
+	if stamp == "" {
+		return false
+	}
+	v, _ := KVGetValue(deadKey(path)).(string)
+
+	return v != "" && v == stamp
+}
+
+func MarkDead(path string) {
+	if stamp := deadStamp(path); stamp != "" {
+		KVSetValue(deadKey(path), stamp)
+	}
+}
+
+// ClearDead is called when a repair finally succeeds.
+func ClearDead(path string) {
+	KVDelete(deadKey(path))
+}
+
 // ScanCorrupt flags every video ffprobe can't open (truncated download,
 // missing moov atom) and replaces the previous set atomically.
 func ScanCorrupt(lib *Library) {
@@ -75,6 +120,16 @@ func ScanCorrupt(lib *Library) {
 			if IsBusy(path) {
 				return nil
 			}
+			// Already proven unopenable on these exact bytes. It still belongs
+			// in the corrupt set — dropping it would let the convert and thumbs
+			// phases treat it as healthy — but it does not need another probe.
+			if IsDead(path) {
+				nextMu.Lock()
+				next[path] = true
+				nextMu.Unlock()
+
+				return nil
+			}
 
 			wg.Add(1)
 			sem <- struct{}{}
@@ -82,9 +137,9 @@ func ScanCorrupt(lib *Library) {
 				defer wg.Done()
 				defer func() { <-sem }()
 
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				if _, err := Prober.Format(ctx, p); err != nil {
+				// Timeout lives in UFO now, which bounds every probe rather
+				// than only this one.
+				if _, err := Probes.Format(p); err != nil {
 					nextMu.Lock()
 					next[p] = true
 					nextMu.Unlock()

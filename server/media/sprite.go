@@ -1,7 +1,6 @@
 package media
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -78,7 +77,7 @@ func GenerateSprite(srcMP4, key string) error {
 
 	// tmp keeps the `.jpg` tail so ffmpeg's format auto-detect works.
 	tmp := strings.TrimSuffix(jpg, ".jpg") + ".tmp.jpg"
-	if stderr, err := library.FF(
+	if stderr, err := library.FFNice(
 		"-y", "-i", srcMP4,
 		"-vf", vf,
 		"-frames:v", "1",
@@ -96,7 +95,7 @@ func GenerateSprite(srcMP4, key string) error {
 
 	// Trust ffmpeg's actual output height — it rounds to keep the tile even.
 	tileH := 0
-	if streams, perr := library.Prober.Streams(context.Background(), tmp); perr == nil {
+	if streams, perr := library.Probes.Streams(tmp); perr == nil {
 		for _, s := range streams {
 			if s.CodecType == "video" && s.Width > 0 && s.Height > 0 {
 				tileH = s.Height / rows

@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"notflix/server/jobs"
 	"notflix/server/library"
 	"notflix/server/media"
+	"notflix/server/x/gz"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -64,13 +64,13 @@ func resolveRoot(raw, home string, homeOK bool) (string, bool) {
 	return raw, true
 }
 
-func pulse() {
-	if rand.Float64() < 0.01 {
-		for _, root := range lib.Roots {
-			go media.GenerateThumbnails(root)
-		}
-	}
-}
+// pulse used to call media.GenerateThumbnails per root on 1% of navigation
+// requests. That function has no CAS guard (unlike RegenerateThumbnails) and
+// runs ffmpeg INLINE in its WalkDir, so several unbounded tree walks could
+// overlap — fired by /list/video, which is the first thing Home fetches. The
+// thumbs phase of ProcessAll and toMP4's per-file dispatch already cover the
+// work, so this is a deletion, not a replacement.
+func pulse() {}
 
 func main() {
 	_ = godotenv.Load()
@@ -157,6 +157,7 @@ func main() {
 	gin.SetMode("release")
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(gz.Middleware())
 
 	router.Use(func(c *gin.Context) {
 		c.Header("Content-Security-Policy", "")
@@ -206,6 +207,7 @@ func main() {
 	router.POST("/api/aria2/add-torrent", func(c *gin.Context) { jobs.Aria2AddTorrent(c, lib) })
 	router.GET("/api/search", jobs.TorrentSearch)
 	router.GET("/api/blurbs", jobs.BlurbList)
+	router.GET("/api/anim", func(c *gin.Context) { c.JSON(http.StatusOK, media.AnimationList()) })
 	router.POST("/api/poster/redo", func(c *gin.Context) { media.PosterRedo(c, lib) })
 	router.GET("/api/aria2/list", jobs.Aria2List)
 	router.POST("/api/aria2/pause", jobs.Aria2Pause)
@@ -246,6 +248,12 @@ func main() {
 	router.POST("/api/subs/whisper", func(c *gin.Context) { jobs.SubsWhisper(c, lib) })
 	router.GET("/api/subs/whisper/status", jobs.SubsWhisperStatus)
 	router.GET("/api/subs/whisper/stream", func(c *gin.Context) { jobs.SubsWhisperStream(c, lib) })
+	// Repairs .whisper.vtt sidecars whose translate step failed, without
+	// redoing the ASR that didn't. Returns immediately; the 1-wide pool grinds.
+	router.POST("/api/subs/retranslate", func(c *gin.Context) {
+		go jobs.RetranslateAll(lib)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
 
 	// Take the children down too: an orphaned ffmpeg keeps writing outputs the
 	// next run then stomps them, and an orphaned aria2c squats :6800.

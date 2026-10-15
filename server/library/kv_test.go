@@ -169,3 +169,56 @@ func TestWatchedKeepsClearedEntriesAsZero(t *testing.T) {
 		t.Fatalf("Malformed.mp4 = %+v (present %v)", w, ok)
 	}
 }
+
+// The store is parsed once and kept in memory — 650 KB and 7000+ keys were
+// being unmarshalled on EVERY get, twice per MediaCodec call. The cache is only
+// safe if it still notices a file that changed underneath it, which is what
+// keeps "refuse to write to a malformed store" working.
+func TestKVCacheNoticesExternalRewrite(t *testing.T) {
+	kvTemp(t)
+
+	if err := KVSetValue("codec:abc", "av1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := KVGetValue("codec:abc"); got != "av1" {
+		t.Fatalf("got %v, want av1", got)
+	}
+
+	// Replace the file behind the cache's back, the way a restored backup or a
+	// hand edit would. Writing a DIFFERENT size guarantees the stat differs even
+	// if the clock has not ticked.
+	raw, err := json.Marshal(map[string]any{"codec:abc": "h264", "pad": "aaaaaaaaaaaaaaaa"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("cache", "kv.json"), raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := KVGetValue("codec:abc"); got != "h264" {
+		t.Errorf("served stale cached value %v, want h264", got)
+	}
+
+	// And a snapshot read must agree with the single-key read.
+	if got := kvRead()["codec:abc"]; got != "h264" {
+		t.Errorf("kvRead served stale %v, want h264", got)
+	}
+}
+
+// A snapshot is handed out without the lock, so it must not alias the live map:
+// a later write would otherwise mutate a map the caller is still ranging over.
+func TestKVReadSnapshotIsDetached(t *testing.T) {
+	kvTemp(t)
+
+	if err := KVSetValue("a", 1.0); err != nil {
+		t.Fatal(err)
+	}
+	snap := kvRead()
+	if err := KVSetValue("b", 2.0); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := snap["b"]; ok {
+		t.Error("snapshot aliases the live store")
+	}
+}
