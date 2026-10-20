@@ -18,6 +18,9 @@ type Downjob = {
   done: number;
   percent: number;
   speed: number;
+  // Basenames of the files this job will land. `name` is not a substitute: for
+  // a multi-file torrent it is the top-level directory.
+  files?: string[];
 };
 
 type Torrent = {

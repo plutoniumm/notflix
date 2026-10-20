@@ -1,18 +1,23 @@
 <script lang="ts">
   import Sect from "./Sect.svelte";
   import { bytes, rate, durWords } from "../core/fmt";
+  import { hashKey, parseRaw } from "../core/video";
 
   let {
     jobs,
     onRemove,
     onPause,
     onResume,
+    compat = {},
+    onCompat,
     i = 0,
   }: {
     jobs: Downjob[];
     onRemove: (gid: string) => void;
     onPause: (gid: string) => void;
     onResume: (gid: string) => void;
+    compat?: Record<string, boolean>;
+    onCompat?: (names: string[], on: boolean) => void;
     i?: number;
   } = $props();
 
@@ -77,10 +82,24 @@
         <span class="tr lf">Left</span>
         <span></span>
         <span></span>
+        <span></span>
       </div>
 
       {#each jobs as j (j.gid)}
         {@const paused = j.status === "paused"}
+        <!-- The server keys every per-file mark on filepath.Base(name), so hash
+             a basename here too or the two disagree. A yt-dlp job's name can be
+             a whole URL, and the empty name hashes to a real key — hence
+             parseRaw and the guard.
+
+             `files` is what actually gets marked: for a multi-file torrent
+             `name` is the top-level DIRECTORY, and marking that converts
+             nothing, because no episode's basename ever hashes to it. The row's
+             checked state follows the first file for the same reason — the
+             toggle sets them all together, so any one of them answers. -->
+        {@const names = j.files?.length ? j.files : j.name ? [j.name] : []}
+        {@const mark = names[0] ? hashKey(parseRaw(names[0]).name) : ""}
+        {@const h264 = !!compat[mark]}
         <div class="led row" class:paused style="--fill:{j.percent}%">
           <span class="nm fs-sm tx-4 trunc">{j.name || j.gid}</span>
 
@@ -100,6 +119,21 @@
             {paused ? "paused" : rate(j.speed)}
           </span>
           <span class="tr lf fs-xs tx-1 num">{left(j) || "—"}</span>
+
+          <button
+            class="btn-icon cp sh-0"
+            class:on={h264}
+            disabled={!names.length || !onCompat}
+            aria-pressed={h264}
+            title={!mark
+              ? "Waiting for the torrent name — nothing to mark yet"
+              : h264
+                ? "Compat on: converts to H.264 MP4 for TV playback. Tap for AV1 (smaller)."
+                : "Compat off: converts to AV1. Tap to convert to H.264 MP4 for TV playback."}
+            onclick={() => onCompat?.(names, !h264)}
+          >
+            Compat
+          </button>
 
           {#if paused}
             <button class="btn-icon sh-0" title="Resume" onclick={() => onResume(j.gid)}>
@@ -127,7 +161,7 @@
   .tbl :global(.led) {
     grid-template-columns:
       minmax(0, 1fr) 54px 104px 78px 52px
-      auto auto;
+      auto auto auto;
   }
   .hrow {
     padding-block: 2px;
@@ -162,9 +196,27 @@
     opacity: 1;
   }
 
+  /* Same .btn-icon control as pause/remove — it inherits the 44px touch
+     target — just labelled, since a glyph for "H.264 instead of AV1" is a
+     guess. The word stays; the title says what it means. */
+  .cp {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border: 1px solid var(--glass-bd);
+  }
+  .cp.on {
+    color: var(--grn);
+    border-color: color-mix(in oklab, var(--grn) 40%, transparent);
+    background: color-mix(in oklab, var(--grn) 14%, transparent);
+  }
+  .cp:disabled {
+    opacity: 0.35;
+    border-style: dashed;
+  }
+
   @media (max-width: 640px) {
     .tbl :global(.led) {
-      grid-template-columns: minmax(0, 1fr) 72px auto auto;
+      grid-template-columns: minmax(0, 1fr) 72px auto auto auto;
     }
     .sp,
     .sz,

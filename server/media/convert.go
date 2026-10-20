@@ -273,6 +273,10 @@ func toMP4(srcPath, root string) error {
 
 	extractAllSubs(srcPath, filepath.Join(dir, cleanedBase))
 
+	// Read before the encode so the mark written below can't disagree with the
+	// bytes if the switch is flipped mid-conversion.
+	compat := IsCompat(srcPath)
+
 	if err := remux(srcPath, mp4Path, dur, name); err != nil {
 		log.Printf("Conversion failed %s: %v", name, err)
 		library.PipelineMark(srcPath, "convert", library.StepFailed)
@@ -293,10 +297,19 @@ func toMP4(srcPath, root string) error {
 	library.PipelineMark(mp4Path, "convert", library.StepDone)
 
 	// The bytes really are AV1 now; without the mark HLS live-transcodes them.
+	// Under compat they're H.264, and the mark must say so explicitly — a stale
+	// av1 mark on the same basename (a re-download) would otherwise stick.
+	codec := CodecAV1
+	if compat {
+		codec = CodecH264
+	}
 	if rel, err := filepath.Rel(root, mp4Path); err == nil {
-		if err := SetMediaCodec(rel, CodecAV1); err != nil {
+		if err := SetMediaCodec(rel, codec); err != nil {
 			log.Printf("[convert] codec mark failed for %s: %v", name, err)
 		}
+	}
+	if compat {
+		carryCompat(srcName, mp4Path)
 	}
 
 	GenerateSpriteAsync(mp4Path, library.Hash(filepath.Base(mp4Path)))
@@ -475,6 +488,41 @@ func fresh(path string) bool {
 	return err == nil && time.Since(fi.ModTime()) < 10*time.Minute
 }
 
+// videoArgs is the video codec decision for a file conversion. Compat wins over
+// the AV1 passthrough on purpose: copying AV1 is exactly what compat exists to
+// avoid, so a marked AV1 source is re-encoded to H.264 rather than copied.
+func videoArgs(src, vc string) []string {
+	if IsCompat(src) {
+		// 8-bit yuv420p deliberately: High10 is refused by the same players AV1
+		// is, so losing the bit depth IS the downgrade being asked for. The
+		// source CICP rides along automatically here — unlike SVT-AV1, the h264
+		// encoders keep it — so an HDR source stays tagged HDR without a
+		// tonemap, same ceiling as everywhere else in this build (no zscale).
+		return append(h264File(compatCRF), "-pix_fmt", "yuv420p", "-profile:v", "high")
+	}
+
+	if vc == "av1" {
+		return []string{"-c:v", "copy"}
+	}
+
+	// Preserve a 10-bit/HDR source as 10-bit AV1 (no zscale here for a correct
+	// tonemap) and re-apply the source CICP so HDR survives on encoders that
+	// honor it.
+	si := getSrcInfo(src)
+	args := av1File(32, si.vBitDepth >= 10)
+	for flag, val := range map[string]string{
+		"-color_primaries": si.vPrimaries,
+		"-color_trc":       si.vTransfer,
+		"-colorspace":      si.vColorspace,
+	} {
+		if val != "" && val != "unknown" {
+			args = append(args, flag, val)
+		}
+	}
+
+	return args
+}
+
 func remux(src, dst string, durationSec float64, name string) error {
 	tmp := dst + ".tmp"
 	if fresh(tmp) {
@@ -484,25 +532,7 @@ func remux(src, dst string, durationSec float64, name string) error {
 
 	vc, ac := codecs(src)
 	args := []string{"-i", src, "-map", "0:v:0", "-map", "0:a"}
-
-	if vc == "av1" {
-		args = append(args, "-c:v", "copy")
-	} else {
-		// Preserve a 10-bit/HDR source as 10-bit AV1 (no zscale here for a correct
-		// tonemap) and re-apply the source CICP so HDR survives on encoders that
-		// honor it.
-		si := getSrcInfo(src)
-		args = append(args, av1File(32, si.vBitDepth >= 10)...)
-		for flag, val := range map[string]string{
-			"-color_primaries": si.vPrimaries,
-			"-color_trc":       si.vTransfer,
-			"-colorspace":      si.vColorspace,
-		} {
-			if val != "" && val != "unknown" {
-				args = append(args, flag, val)
-			}
-		}
-	}
+	args = append(args, videoArgs(src, vc)...)
 
 	if mp4AudioOK(ac) {
 		args = append(args, "-c:a", "copy")

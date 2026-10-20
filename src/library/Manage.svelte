@@ -6,7 +6,7 @@
   import { ARM_MS, JOBS_POLL_MS, DL_POLL_MS, PWA_POLL_MS } from "../core/events.svelte";
   import { usePoll } from "../core/poll";
   import { Down, isSupported } from "./dl";
-  import { clean } from "../core/video";
+  import { clean, hashKey, parseRaw } from "../core/video";
   import { join } from "../core/path";
   import { ago, pct } from "../core/fmt";
 
@@ -35,6 +35,7 @@
   let jobs: Job[] = $state([]);
   let dlJobs: Downjob[] = $state([]);
   let dlDown = $state(false);
+  let compat: Record<string, boolean> = $state({});
 
   // The room goes faintly red when something needs a person, so the state is
   // known from any page and this one is only opened once it already matters.
@@ -128,6 +129,15 @@
       })
       .catch((err) => console.warn("[dirSizes]", err));
 
+    // Read the real marks, so a reload shows what the server has rather than
+    // an empty local guess.
+    api.compat
+      .list({ silent: true })
+      .then((m) => {
+        if (m) compat = m;
+      })
+      .catch((err) => console.warn("[compat]", err));
+
     pollers.push(
       usePoll(async () => {
         jobs = (await api.conversions({ silent: true })) ?? [];
@@ -172,6 +182,19 @@
     } finally {
       loading = false;
     }
+  }
+
+  // Optimistic, then reconciled against the server's own map rather than the
+  // POST's body: the re-read reverts a failed write and also picks up the mark
+  // conversion carries onto the renamed file. The POST toasts its own error.
+  async function setCompat(names: string[], on: boolean) {
+    const prev = compat;
+    const next = { ...compat };
+    for (const n of names) next[hashKey(parseRaw(n).name)] = on;
+    compat = next;
+
+    await api.compat.set(names, on);
+    compat = (await api.compat.list({ silent: true })) ?? prev;
   }
 
   async function toggleHidden(dir: string) {
@@ -252,16 +275,50 @@
     delete data[dir];
   }
 
-  async function addDownload(magnet: string, dir: string) {
+  // A magnet has no filenames until its metadata resolves, so a Compat choice
+  // made at paste time cannot be written immediately — there is nothing to key
+  // it on yet. Remember the intent, then mark the job the moment aria2 knows
+  // what it is fetching. Plain Sets, not $state: these are bookkeeping, and
+  // making them reactive would re-run the effect that writes them.
+  let wantCompat = 0;
+  const seenGids = new Set<string>();
+  const pendingCompat = new Set<string>();
+
+  $effect(() => {
+    for (const j of dlJobs) {
+      if (seenGids.has(j.gid)) continue;
+      seenGids.add(j.gid);
+      if (wantCompat > 0) {
+        wantCompat--;
+        pendingCompat.add(j.gid);
+      }
+    }
+
+    for (const j of dlJobs) {
+      if (!pendingCompat.has(j.gid)) continue;
+      const names = j.files?.length ? j.files : j.name ? [j.name] : [];
+      if (!names.length) continue;
+      pendingCompat.delete(j.gid);
+      setCompat(names, true);
+    }
+  });
+
+  async function addDownload(magnet: string, dir: string, compat = false) {
     const res = await api.aria2.add(magnet, dir);
     if (res === null) return;
-    toast.ok("Torrent added");
+    if (compat) wantCompat++;
+    toast.ok(compat ? "Added — will convert to H.264 for TV" : "Torrent added");
   }
 
-  async function addTorrentFile(file: File, dir: string) {
+  async function addTorrentFile(file: File, dir: string, compat = false) {
     const res = await api.aria2.addTorrent(file, dir, { tag: "Torrent upload" });
     if (res === null) return;
-    toast.ok(`Torrent uploaded: ${file.name}`);
+    if (compat) wantCompat++;
+    toast.ok(
+      compat
+        ? `Uploaded: ${file.name} — will convert to H.264 for TV`
+        : `Torrent uploaded: ${file.name}`,
+    );
   }
 
   async function removeDownload(gid: string) {
@@ -385,6 +442,8 @@
           onRemove={removeDownload}
           onPause={pauseDownload}
           onResume={resumeDownload}
+          {compat}
+          onCompat={setCompat}
         />
 
         <Organize i={4} onApplied={() => loadAll()} />

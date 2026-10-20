@@ -111,6 +111,14 @@ export const api = {
   },
 
   skip: (file: string, opts?: ReqOpts) => GET(`/api/skip?file=${E(file)}`, opts),
+  // What the TV screen should actually be handed for this file: the raw mp4
+  // when the device can decode it, the h264 ladder when it cannot. Served only
+  // on the :4444 listener, which is the only thing that asks.
+  tvPlan: (file: string, caps: { av1: boolean; p10: boolean }, opts?: ReqOpts) =>
+    GET(
+      `/api/tv/plan?file=${E(file)}&av1=${caps.av1 ? 1 : 0}&p10=${caps.p10 ? 1 : 0}`,
+      opts,
+    ),
 
   // Encoding takes seconds: start returns a job, status polls it, and the file
   // is fetched by navigation so Content-Disposition can force the save.
@@ -159,6 +167,15 @@ export const api = {
     pause: (gid: string, opts?: ReqOpts) => POST(`/api/aria2/pause?gid=${gid}`, {}, opts),
     resume: (gid: string, opts?: ReqOpts) => POST(`/api/aria2/resume?gid=${gid}`, {}, opts),
     remove: (gid: string, opts?: ReqOpts) => DEL(`/api/aria2/remove?gid=${gid}`, opts),
+  },
+
+  // "When this lands, convert it to H.264 MP4 instead of AV1." Keyed on the
+  // file basename, not the gid — the gid is gone by the time convert runs.
+  // list() is a map of library.Hash(basename) -> true; presence = marked.
+  compat: {
+    list: (opts?: ReqOpts) => GET("/api/compat", opts),
+    set: (names: string[], on: boolean, opts?: ReqOpts) =>
+      POST("/api/compat", { names, on }, opts),
   },
 
   // Every file that ever existed here, joined across the saved .torrent

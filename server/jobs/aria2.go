@@ -357,6 +357,11 @@ type Downjob struct {
 	Done    int64   `json:"done"`
 	Percent float64 `json:"percent"`
 	Speed   int64   `json:"speed"`
+	// The payload's basenames, which is what a per-file mark like compat: can
+	// actually key on. Name is NOT a substitute: for a multi-file torrent it is
+	// bittorrent.info.name, i.e. the top-level DIRECTORY of a season pack, and
+	// for yt-dlp it is the video title with no extension at all.
+	Files []string `json:"files,omitempty"`
 }
 
 type a2StatusRaw struct {
@@ -390,9 +395,17 @@ func (s a2StatusRaw) toItem() Downjob {
 		pct = float64(done) / float64(total) * 100
 	}
 
+	files := make([]string, 0, len(s.Files))
+	for _, f := range s.Files {
+		if b := filepath.Base(f.Path); b != "" && b != "." && b != string(filepath.Separator) {
+			files = append(files, b)
+		}
+	}
+
 	return Downjob{
 		GID:     s.GID,
 		Name:    name,
+		Files:   files,
 		Status:  s.Status,
 		Total:   total,
 		Done:    done,

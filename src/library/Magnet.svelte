@@ -7,11 +7,15 @@
     onAddTorrent,
   }: {
     disks: DiskInfo[];
-    onAdd: (magnet: string, dir: string) => void;
-    onAddTorrent: (file: File, dir: string) => void;
+    onAdd: (magnet: string, dir: string, compat: boolean) => void;
+    onAddTorrent: (file: File, dir: string, compat: boolean) => void;
   } = $props();
 
   let magnet = $state("");
+  // Decided HERE, at paste time, not on the row that appears afterwards: by the
+  // time there is a row the download is already running, and the whole point is
+  // to choose before anything is converted.
+  let compat = $state(false);
   let dir = $state("");
   let drag = $state(false);
   let fileInput: HTMLInputElement | undefined;
@@ -40,13 +44,13 @@
       fileInput?.click();
       return;
     }
-    onAdd(magnet.trim(), dir);
+    onAdd(magnet.trim(), dir, compat);
     magnet = "";
   }
 
   function take(file: File | null | undefined) {
     if (!file) return;
-    onAddTorrent(file, dir);
+    onAddTorrent(file, dir, compat);
   }
 
   function onFileSelected(e: Event) {
@@ -93,6 +97,18 @@
     <span class="kind fs-xs num" class:bad={kind === "?"}>{kind}</span>
   {/if}
 
+  <button
+    class="compat fs-xs sh-0"
+    class:on={compat}
+    aria-pressed={compat}
+    title={compat
+      ? "Compat on: this download converts to H.264 MP4, which any TV can play. Tap for AV1 (smaller files)."
+      : "Compat off: this download converts to AV1. Tap for H.264 MP4, which any TV can play."}
+    onclick={() => (compat = !compat)}
+  >
+    TV
+  </button>
+
   <select class="field ptr" bind:value={dir}>
     {#each disks as d}
       <option value={d.path}>
@@ -105,6 +121,32 @@
 </div>
 
 <style>
+  /* Reads "TV", not "Compat": the word has to survive being glanced at next to
+     a disk picker, and what the viewer actually wants is "make this play on the
+     television". */
+  .compat {
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: var(--r-md, 10px);
+    border: 1px solid var(--glass-bd);
+    background: var(--glass);
+    color: var(--tx-2);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition:
+      color var(--m-fast, 130ms) var(--ease-out),
+      background var(--m-fast, 130ms) var(--ease-out);
+  }
+  .compat.on {
+    color: #fff;
+    background: var(--red);
+    border-color: transparent;
+  }
+  @media (hover: none) {
+    .compat { min-height: 44px; }
+  }
+
   .form-wrap {
     padding: 10px 40px;
     background: color-mix(in oklab, var(--bg-1) 62%, transparent);

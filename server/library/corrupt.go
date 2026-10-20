@@ -33,6 +33,18 @@ func CorruptPaths() []string {
 	return paths
 }
 
+// freshWindow is how long after its last write a file is still assumed to be
+// mid-download. It is a trade: too long and a finished download sits untouched
+// through every sweep that happens to land inside it — a Bleach episode landed
+// at 20:56:44 and was skipped by the sweeps at 20:56:49 and 20:57:13, including
+// a manual Process Library press, which looks exactly like the feature being
+// broken. Too short and the pipeline grabs a file still being written.
+//
+// 10s is enough: the real guards are the .aria2/.tmp sidecars and aria2
+// ownership, both of which are exact. This only catches a writer that leaves no
+// trace, and no such writer pauses for ten seconds mid-file.
+const freshWindow = 10 * time.Second
+
 // IsBusy is the single "hands off, come back later" gate for background work:
 // aria2 owns it, a .aria2/.tmp sidecar exists, or it was written in the last 30s.
 func IsBusy(path string) bool {
@@ -44,7 +56,7 @@ func IsBusy(path string) bool {
 			return true
 		}
 	}
-	if fi, err := os.Stat(path); err == nil && time.Since(fi.ModTime()) < 30*time.Second {
+	if fi, err := os.Stat(path); err == nil && time.Since(fi.ModTime()) < freshWindow {
 		return true
 	}
 	return false

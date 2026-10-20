@@ -14,6 +14,7 @@ import (
 	"notflix/server/jobs"
 	"notflix/server/library"
 	"notflix/server/media"
+	"notflix/server/tv"
 	"notflix/server/x/gz"
 
 	"github.com/gin-gonic/gin"
@@ -22,10 +23,15 @@ import (
 
 var buildTime = "dev"
 
+// One bus, shared by the :4242 router and the :4444 TV listener, so a desktop
+// tab can drive the screen exactly like the phone does.
+var tvBus = tv.New()
+
 const (
-	pubDir = "./public"
-	assDir = "./public/assets"
-	port   = "4242"
+	pubDir        = "./public"
+	assDir        = "./public/assets"
+	defaultPort   = "4242"
+	defaultTVPort = "4444"
 )
 
 // "~/…" roots are auto-created; any other absolute path must pre-exist —
@@ -72,8 +78,23 @@ func resolveRoot(raw, home string, homeOK bool) (string, bool) {
 // work, so this is a deletion, not a replacement.
 func pulse() {}
 
+// Ports are overridable so a second instance can be stood up beside the live
+// one — testing the TV bus against the running server means every command fans
+// out to the real screen in the living room, which is exactly as disruptive as
+// it sounds.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+
+	return fallback
+}
+
 func main() {
 	_ = godotenv.Load()
+
+	port := envOr("PORT", defaultPort)
+	tvPort := envOr("TV_PORT", defaultTVPort)
 
 	// Every step below is non-fatal: boot must survive missing drives.
 	lib.Caps = map[string]uint64{}
@@ -166,6 +187,15 @@ func main() {
 
 	router.GET("/", func(c *gin.Context) { pulse(); c.File("index.html") })
 	router.GET("/manage", func(c *gin.Context) { c.File("index.html") })
+
+	// The TV pages are also served from the MAIN router, not just the :4444
+	// listener. The tailnet hostname proxies to :4242, so without these the
+	// remote is reachable only by raw LAN IP and port — which is the one device
+	// (a phone, away from the house) most likely to want the tailnet name.
+	// Same bundle; it routes on pathname, and the bus is registered on both.
+	tvShell := func(c *gin.Context) { c.File(filepath.Join(pubDir, "tv.html")) }
+	router.GET("/rc", tvShell)
+	router.GET("/tv", tvShell)
 	router.GET("/history", func(c *gin.Context) { c.File("index.html") })
 	router.StaticFile("/manifest.json", "./public/manifest.json")
 	router.StaticFile("/sw.js", "./public/sw.js")
@@ -207,12 +237,16 @@ func main() {
 	router.POST("/api/aria2/add-torrent", func(c *gin.Context) { jobs.Aria2AddTorrent(c, lib) })
 	router.GET("/api/search", jobs.TorrentSearch)
 	router.GET("/api/blurbs", jobs.BlurbList)
+	router.POST("/api/compat", media.CompatSet)
+	router.GET("/api/compat", media.CompatList)
 	router.GET("/api/anim", func(c *gin.Context) { c.JSON(http.StatusOK, media.AnimationList()) })
 	router.POST("/api/poster/redo", func(c *gin.Context) { media.PosterRedo(c, lib) })
 	router.GET("/api/aria2/list", jobs.Aria2List)
 	router.POST("/api/aria2/pause", jobs.Aria2Pause)
 	router.POST("/api/aria2/resume", jobs.Aria2Resume)
 	router.DELETE("/api/aria2/remove", jobs.Aria2Remove)
+
+	tvBus.Routes(router)
 
 	router.GET("/kv/get", library.KVGet)
 	router.POST("/kv/set", library.KVSet)
@@ -280,6 +314,46 @@ func main() {
 			log.Printf("LAN URL: http://%s:%s", ipnet.IP.String(), port)
 		}
 	}
+
+	// The TV app is a SECOND LISTENER in this same process, not a second
+	// service: it shares the library, the KV store and every media handler by
+	// calling the same functions. A separate binary would have bought a proxy
+	// hop, a CORS story and two caches of the same probe results.
+	//
+	// Its route set is deliberately tiny — a TV screen and a phone remote need
+	// to list, play and seek, nothing else. Manage, organize, torrents and
+	// downloads stay off :4444 entirely.
+	go func() {
+		t := gin.New()
+		t.Use(gin.Recovery(), gz.Middleware())
+
+		// Both pages are the same bundle; it routes on pathname.
+		shell := func(c *gin.Context) { c.File(filepath.Join(pubDir, "tv.html")) }
+		t.GET("/", shell)
+		t.GET("/rc", shell)
+		t.Static("/assets", assDir)
+
+		t.GET("/list/video", func(c *gin.Context) { library.VideoList(c, lib) })
+		t.GET("/video/*filename", func(c *gin.Context) { media.VideoServe(c, lib) })
+		t.GET("/images/:filename", func(c *gin.Context) { media.Thumbnail(c, lib) })
+		t.GET("/subs/*filename", func(c *gin.Context) { media.SubsSend(c, lib) })
+		t.GET("/api/subs/info", func(c *gin.Context) { media.Subctx(c, lib) })
+		t.GET("/api/tv/plan", func(c *gin.Context) { media.TVPlan(c, lib) })
+		t.GET("/api/hls/master", func(c *gin.Context) { media.HLSMaster(c, lib) })
+		t.GET("/api/hls/playlist", func(c *gin.Context) { media.HLSPlaylist(c, lib) })
+		t.GET("/api/hls/segment", func(c *gin.Context) { media.HLSSegment(c, lib) })
+		t.GET("/api/hls/init", func(c *gin.Context) { media.HLSInit(c, lib) })
+		t.GET("/api/blurbs", jobs.BlurbList)
+		t.GET("/kv/get", library.KVGet)
+		t.POST("/kv/set", library.KVSet)
+
+		tvBus.Routes(t)
+
+		log.Printf("TV screen on http://localhost:%s  — remote on /rc", tvPort)
+		if err := t.Run(":" + tvPort); err != nil {
+			log.Printf("[tv] listener died: %v", err)
+		}
+	}()
 
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("Failed to run server: %v", err)

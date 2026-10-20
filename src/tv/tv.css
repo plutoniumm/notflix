@@ -1,0 +1,26 @@
+/* TV + remote only. These two pages are LAN/tailnet and must never reach the
+   public internet, so they cannot use the Google-hosted faces index.html pulls
+   in. Overriding the two font tokens is enough: everything downstream of them
+   in global.css resolves through these, so the rest of the token system — the
+   colours, radii and easings the remote is built on — keeps working untouched.
+
+   A system stack is also simply correct for a TV: whatever the panel's browser
+   ships is guaranteed present, already hinted for that screen, and costs no
+   fetch on a device that may be on the far end of a tailnet. */
+:root {
+  --font-display: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #000;
+  font-family: var(--font-body);
+  /* A TV is read from across a room and a phone remote is used one-handed in
+     the dark; neither wants a text-selection highlight on a mis-tap. */
+  -webkit-tap-highlight-color: transparent;
+}
