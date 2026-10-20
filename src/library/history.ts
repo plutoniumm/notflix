@@ -39,6 +39,7 @@ export type HRow = {
   sess?: number;
   t?: number;
   dur?: number;
+  resume?: number;
   dev?: string;
   marks?: string[];
   steps?: Record<string, string>;

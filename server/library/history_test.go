@@ -166,3 +166,40 @@ func TestHistoryJoins(t *testing.T) {
 		t.Errorf("ledger-only row missing: %+v", gone)
 	}
 }
+
+// Finishing a title clears its watched: record and the clear is never logged,
+// so the log alone cannot tell "done" from "parked at 90%". The live record
+// has to ride along on the row.
+func TestHistoryResume(t *testing.T) {
+	dir := kvTemp(t)
+	wAgg, wOff, wLines = map[string]*watchAgg{}, 0, 0
+
+	for _, n := range []string{"Done S01E01.mp4", "Parked S01E01.mp4"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := map[string]any{"t": 1290.0, "dur": 1440.0, "at": 1000.0}
+	statsTee("watched:Done S01E01.mp4", rec, "")
+	statsTee("watched:Parked S01E01.mp4", rec, "")
+	if err := KVSetValue("watched:Done S01E01.mp4", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := KVSetValue("watched:Parked S01E01.mp4", rec); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, _ := History(&Library{Roots: []string{dir}})
+	got := map[string]HistRow{}
+	for _, r := range rows {
+		got[r.Name] = r
+	}
+
+	if r := got["Done S01E01.mp4"]; r.MaxT != 1290 || r.Resume != 0 {
+		t.Errorf("cleared record: t=%v resume=%v, want 1290/0", r.MaxT, r.Resume)
+	}
+	if r := got["Parked S01E01.mp4"]; r.Resume != 1290 {
+		t.Errorf("live record: resume=%v, want 1290", r.Resume)
+	}
+}

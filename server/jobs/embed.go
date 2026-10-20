@@ -8,7 +8,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,25 +19,29 @@ import (
 // whole-file JSON blob rewritten under an exclusive lock on every set, and a
 // watch ping is a set — parking a few thousand floats per title there would
 // make every progress save rewrite megabytes. This file is written only when
-// the catalogue gains titles.
+// a title's text changes.
 //
-// The encoding is raw float32, not JSON numbers: a 3584-dim vector is 14 KB
-// binary against ~45 KB as text, and the whole store stays a single mmap-able
-// read. Records key on library.Hash(basename) exactly like codec:/skip: — a
-// dir-qualified key orphans the moment CleanAll or Organize moves the file.
+// The encoding is raw float32, not JSON numbers: a 2560-dim vector is 10 KB
+// binary against ~32 KB as text. Records key on the title's normalised name,
+// which survives the moves CleanAll and Organize make, and carry the exact
+// text they were embedded from, so a blurb arriving later re-embeds the title.
 const vecPath = "./cache/embed.bin"
 
 // Two models' vectors are different spaces; cosine between them is noise that
-// reads as "the recommendations are just bad" rather than as an error. The
+// reads as "search is just bad" rather than as an error. The
 // model name and the dimension are stamped in the header and a mismatch drops
 // the whole store rather than mixing.
-var vecMagic = [4]byte{'N', 'F', 'E', '1'}
+// NFE2: records are titles embedded with their blurbs, not bare file names.
+var vecMagic = [4]byte{'N', 'F', 'E', '2'}
 
 // A sane ceiling on dimensionality, so a corrupt header can't ask for a
 // gigabyte-sized allocation before the length checks catch it.
 const vecMaxDim = 16384
 
-const embedDefault = "nomic-embed-text:latest"
+// Must name a model that is actually on the host: the old nomic-embed-text
+// default vanished from it and every batch 404'd for a month with nothing but
+// a log line to show for it.
+const embedDefault = "qwen3-embedding:4b-q8_0"
 
 func embedModel() string {
 	if m := os.Getenv("EMBED_MODEL"); m != "" {
@@ -206,7 +209,7 @@ func loadVecs(path, model string) *vecs {
 	mb, err := c.take(mlen)
 	if err != nil || string(mb) != model {
 		if err == nil {
-			log.Printf("[reco] embed model changed %q → %q; dropping %d cached vectors", string(mb), model, count)
+			log.Printf("[find] embed model changed %q → %q; dropping %d cached vectors", string(mb), model, count)
 		}
 
 		return newVecs(model)
@@ -319,7 +322,7 @@ func (s *vecs) fill(ctx context.Context, want map[string]string) int {
 
 		got, err := embedOnce(ctx, model, texts)
 		if err != nil {
-			log.Printf("[reco] embed batch %d: %v", i/embedBatch, err)
+			log.Printf("[find] embed batch %d: %v", i/embedBatch, err)
 
 			continue
 		}
@@ -329,7 +332,7 @@ func (s *vecs) fill(ctx context.Context, want map[string]string) int {
 			// Anything of a different length is from a different space and
 			// must never reach a cosine.
 			if len(v) == 0 || (s.Dim != 0 && len(v) != s.Dim) {
-				log.Printf("[reco] %s returned dim %d, store is %d — dropping cache", model, len(v), s.Dim)
+				log.Printf("[find] %s returned dim %d, store is %d — dropping cache", model, len(v), s.Dim)
 				s.reset()
 
 				return done
@@ -341,6 +344,23 @@ func (s *vecs) fill(ctx context.Context, want map[string]string) int {
 	}
 
 	return done
+}
+
+// prune drops every record not in want — titles that left the library — and
+// reports how many went.
+func (s *vecs) prune(want map[string]string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	n := 0
+	for k := range s.Rec {
+		if _, ok := want[k]; !ok {
+			delete(s.Rec, k)
+			n++
+		}
+	}
+
+	return n
 }
 
 func (s *vecs) reset() {
@@ -386,76 +406,4 @@ func cosine(a, b vec) float64 {
 	}
 
 	return sum
-}
-
-// centerVecs subtracts the catalogue's mean vector and renormalises. Embeddings of
-// short titles all share a large "this is a video title" component: raw cosine
-// over this library sits at a median of 0.55 with everything crushed into
-// 0.45–0.9, so no threshold separates a real match from a coincidence.
-// Removing the mean spreads the same ranking over roughly -0.35 to 0.75.
-func centerVecs(in map[string]vec) map[string]vec {
-	out := make(map[string]vec, len(in))
-	if len(in) == 0 {
-		return out
-	}
-
-	// The reference dimension must be the MAJORITY one, never whichever key Go
-	// hands back first: map order is random, so one stray vector from an old
-	// model's space could define dim and every good vector was then dropped as
-	// ragged — a 1-in-3 flake in TestCenterEmptyAndRagged, and in production a
-	// silent purge of the whole store in favour of the stray.
-	counts := map[int]int{}
-	for _, v := range in {
-		counts[len(v)]++
-	}
-
-	dim, best := 0, 0
-	for d, c := range counts {
-		// Ties break toward the longer space so the choice is deterministic
-		// regardless of map order.
-		if c > best || (c == best && d > dim) {
-			dim, best = d, c
-		}
-	}
-
-	mean := make([]float64, dim)
-	n := 0
-
-	for _, v := range in {
-		if len(v) != dim {
-			continue
-		}
-
-		for i, x := range v {
-			mean[i] += float64(x)
-		}
-		n++
-	}
-
-	if n == 0 {
-		return out
-	}
-
-	for i := range mean {
-		mean[i] /= float64(n)
-	}
-
-	for k, v := range in {
-		if len(v) != dim {
-			continue
-		}
-
-		c := make(vec, dim)
-		for i, x := range v {
-			c[i] = x - float32(mean[i])
-		}
-
-		out[k] = unit(c)
-	}
-
-	return out
-}
-
-func embedReady() bool {
-	return strings.TrimSpace(ollamaHost()) != ""
 }

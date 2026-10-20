@@ -160,11 +160,9 @@ func main() {
 		// Convert's <dst>.tmp is a truncated partial after a crash — delete so
 		// the redo starts clean. No other step leaks a .tmp sibling.
 		if r.Step == "convert" {
-			base := strings.TrimSuffix(r.Path, filepath.Ext(r.Path))
-			for _, sfx := range []string{".mp4.tmp", ".audio.tmp", ".audio.tmp.mp4"} {
-				if err := os.Remove(base + sfx); err == nil {
-					log.Printf("[pipeline] cleaned stale %s%s", filepath.Base(base), sfx)
-				}
+			tmp := media.ConvertDst(r.Path) + ".tmp"
+			if err := os.Remove(tmp); err == nil {
+				log.Printf("[pipeline] cleaned stale %s", filepath.Base(tmp))
 			}
 		}
 	}
@@ -267,7 +265,7 @@ func main() {
 	router.POST("/api/clip", func(c *gin.Context) { media.ClipStart(c, lib) })
 	router.GET("/api/clip/status", media.ClipStatus)
 	router.GET("/api/clip/file", media.ClipFile)
-	router.GET("/api/reco", func(c *gin.Context) { jobs.RecoHandler(c, lib) })
+	router.GET("/api/find", func(c *gin.Context) { jobs.FindHandler(c, lib) })
 
 	router.POST("/api/organize/plan", func(c *gin.Context) { jobs.OrganizePlan(c, lib) })
 	router.GET("/api/organize/status", jobs.OrganizeStatus)
@@ -279,6 +277,8 @@ func main() {
 	router.GET("/api/subs/search", func(c *gin.Context) { media.SubsSearch(c, lib) })
 	router.POST("/api/subs/download", func(c *gin.Context) { media.GetSubs(c, lib) })
 	router.POST("/api/subs/extract", func(c *gin.Context) { media.SubsExtract(c, lib) })
+	router.POST("/api/subs/sync", func(c *gin.Context) { media.SubsSync(c, lib) })
+	router.DELETE("/api/subs/sync", func(c *gin.Context) { media.SubsUnsync(c, lib) })
 	router.POST("/api/subs/whisper", func(c *gin.Context) { jobs.SubsWhisper(c, lib) })
 	router.GET("/api/subs/whisper/status", jobs.SubsWhisperStatus)
 	router.GET("/api/subs/whisper/stream", func(c *gin.Context) { jobs.SubsWhisperStream(c, lib) })

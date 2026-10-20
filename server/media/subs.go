@@ -31,8 +31,9 @@ type embedTrack struct {
 }
 
 type localTrack struct {
-	File     string `json:"file"`
-	Language string `json:"language"`
+	File     string   `json:"file"`
+	Language string   `json:"language"`
+	Sync     *syncFit `json:"sync,omitempty"`
 }
 
 func nextSubPath(base, lang string) string {
@@ -147,6 +148,11 @@ func Subctx(c *gin.Context, lib *library.Library) {
 
 	if local == nil {
 		local = []localTrack{}
+	}
+	for i := range local {
+		if f, ok := subShift(filepath.Join(filepath.Dir(path), local[i].File)); ok {
+			local[i].Sync = &f
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"vtt": hasVTT, "srt": hasSRT, "embedded": embedded, "whisper": hasWhisper, "local": local})
 }
@@ -390,6 +396,7 @@ func GetSubs(c *gin.Context, lib *library.Library) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save vtt"})
 		return
 	}
+	go autoSync(path, outPath)
 
 	dir := filepath.Dir(path)
 	rel := strings.TrimPrefix(outPath, dir+string(os.PathSeparator))
@@ -435,6 +442,7 @@ func subdlFetch(c *gin.Context, videoPath, src string) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save vtt"})
 		return
 	}
+	go autoSync(videoPath, outPath)
 
 	dir := filepath.Dir(videoPath)
 	rel := strings.TrimPrefix(outPath, dir+string(os.PathSeparator))
@@ -478,8 +486,7 @@ func SubsSend(c *gin.Context, lib *library.Library) {
 
 	path, ok := lib.FindVid(filename)
 	if ok && strings.ToLower(filepath.Ext(path)) == ".vtt" {
-		c.Header("Content-Type", "text/vtt")
-		c.File(path)
+		sendVTT(c, path, "")
 		return
 	}
 
@@ -497,13 +504,11 @@ func SubsSend(c *gin.Context, lib *library.Library) {
 
 					if os.WriteFile(out, []byte(vtt), 0644) == nil {
 						os.Remove(srtP)
-						c.Header("Content-Type", "text/vtt")
-						c.File(out)
+						sendVTT(c, out, "")
 						return
 					}
 
-					c.Header("Content-Type", "text/vtt")
-					c.String(http.StatusOK, "%s", vtt)
+					sendVTT(c, out, vtt)
 					return
 				}
 			}

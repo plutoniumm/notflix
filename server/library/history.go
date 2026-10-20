@@ -333,6 +333,11 @@ type HistRow struct {
 	Marks    []string          `json:"marks,omitempty"`
 	Steps    map[string]string `json:"steps,omitempty"`
 	HLS      bool              `json:"hls,omitempty"`
+	// The live watched:<vp> position, if one is still stored. The log never
+	// holds the end of a finished title — reaching it CLEARS the record and a
+	// clear is not logged — so a live record is the only evidence that a title
+	// at 90% is mid-rewatch or parked on the credits rather than done.
+	Resume float64 `json:"resume,omitempty"`
 }
 
 type HistStats struct {
@@ -486,6 +491,7 @@ func History(lib *Library) ([]HistRow, HistStats) {
 
 	// 3. Watches. A vp with no torrent and no file is still a row: watched,
 	// since deleted.
+	kvStore := kvRead()
 	watch, lines := watchIndex()
 	st.WatchLines, st.WatchVideos = lines, len(watch)
 	for vp, a := range watch {
@@ -494,6 +500,11 @@ func History(lib *Library) ([]HistRow, HistStats) {
 		r.MaxT, r.Dur, r.Device = a.MaxT, a.Dur, a.Device
 		if !r.OnDisk && r.Rel == "" {
 			r.Rel = vp
+		}
+		if w, ok := kvStore["watched:"+vp].(map[string]any); ok {
+			if t, _ := w["t"].(float64); t > 0 {
+				r.Resume = t
+			}
 		}
 	}
 
@@ -524,7 +535,6 @@ func History(lib *Library) ([]HistRow, HistStats) {
 	}
 
 	// 5. KV marks (basename hash) and HLS cache (rel-path hash).
-	kvStore := kvRead()
 	hls := hlsKeys()
 	out := make([]HistRow, 0, len(rows))
 	for _, r := range rows {

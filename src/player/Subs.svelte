@@ -3,6 +3,7 @@
   import Badge from "../components/Badge.svelte";
   import { langLabel } from "./subs";
   import type { SubsInfo } from "./subs";
+  import { shift } from "../core/fmt";
 
   let {
     open,
@@ -14,6 +15,8 @@
     onSelectEmbedded,
     onSelectOnline,
     onSubsOff,
+    onSync,
+    onUnsync,
     onClose,
   }: {
     open: boolean;
@@ -25,10 +28,20 @@
     onSelectEmbedded: (idx: number, lang: string) => Promise<void>;
     onSelectOnline: (pick: any) => Promise<void>;
     onSubsOff: () => void;
+    onSync: () => Promise<void>;
+    onUnsync: () => Promise<void>;
     onClose: () => void;
   } = $props();
 
   let busy = $state<string | null>(null);
+
+  const active = $derived(info?.local?.find((t) => t.file === activeSub));
+
+  async function sync() {
+    busy = "sync";
+    await (active?.sync ? onUnsync() : onSync());
+    busy = null;
+  }
 
   function pickKey(r: any): string {
     return r.provider === "subdl" ? "u:" + r.url : "o:" + r.file_id;
@@ -65,8 +78,22 @@
       >
         <span class="bullet">{activeSub === track.file ? "●" : "○"}</span>
         {label}
+        {#if track.sync}<Badge variant="dim" class="num">{shift(track.sync.offset)}</Badge>{/if}
       </button>
     {/each}
+
+    {#if active}
+      <button class="item" class:busy={busy === "sync"} disabled={busy === "sync"} onclick={sync}>
+        <span class="bullet">⇆</span>
+        {#if busy === "sync"}
+          Listening to the audio…
+        {:else if active.sync}
+          Undo sync ({shift(active.sync.offset)})
+        {:else}
+          Sync to audio
+        {/if}
+      </button>
+    {/if}
   {/if}
 
   {#if info?.embedded?.length}

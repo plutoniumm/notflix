@@ -159,6 +159,14 @@ func parseCues(raw string) []cue {
 	return out
 }
 
+// Cue is exported for the subtitle aligner, which wants exactly this reader:
+// it drops "[DOOR SLAMS]" and "♪" cues, the ones that mark no speech.
+type Cue = cue
+
+func ParseCues(raw string) []Cue {
+	return parseCues(raw)
+}
+
 const (
 	// blurbWindow is the only fraction of a title we are ever willing to
 	// read. The back of a story is where the twist, the death and the

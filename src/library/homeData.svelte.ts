@@ -7,7 +7,7 @@ import { JOBS_POLL_MS } from "../core/events.svelte";
 import { usePoll } from "../core/poll";
 import { Down } from "./dl";
 import { parseDirSeason } from "./torrentName";
-import { episodic } from "./series";
+import { episodic, gaps, holes, showKey } from "./series";
 
 export type ContinueItem = {
   dir: string;
@@ -29,11 +29,17 @@ export type HomeRow =
   | { kind: "dir"; dir: string; files: VideoEntry[]; series: boolean }
   | { kind: "show"; key: string; title: string; seasons: SeasonEntry[] };
 
-const showKey = (title: string) =>
-  title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+const names = (files: VideoEntry[]) => files.map((f) => f.name);
+
+// Whether any row could show a gap before watch history rules some out — the
+// history is ~800 KB, so it is only fetched when there is a question to answer.
+const askable = (rows: HomeRow[]) =>
+  rows.some((r) =>
+    r.kind === "show"
+      ? holes(r.title, r.seasons).length > 0 ||
+        r.seasons.some((s) => gaps(s.dir, names(s.files)).length > 0)
+      : r.series && gaps(r.dir, names(r.files)).length > 0,
+  );
 
 // A show forms only from ≥2 dirs whose parsed titles match exactly and that
 // each carry a season number or episode range; anything looser stays a plain
@@ -129,6 +135,9 @@ export class HomeData {
   loading = $state(true);
   offline = $state(false);
   disks = $state<DiskInfo[]>([]);
+  // Every rel with a watch record, deleted files included. Null until known:
+  // a gap is only shown once it is certain it wasn't watched and let go.
+  watched = $state<string[] | null>(null);
 
   // The server already orders groups LRU (recently-watched dirs first).
   rows = $derived(groupRows(this.data));
@@ -157,6 +166,7 @@ export class HomeData {
           const d = normalizeVideoData(raw);
           this.data = d;
           if (d.length) this.loadState(d);
+          if (askable(this.rows)) this.loadWatched();
         }
       } catch (err) {
         console.error("[Home load]", err);
@@ -271,6 +281,15 @@ export class HomeData {
         at: store[`watched:${v.param}`]!.at,
         dur: store[`watched:${v.param}`]!.dur,
       }));
+  }
+
+  private async loadWatched() {
+    const h = await api.history({ silent: true });
+    if (!Array.isArray(h?.rows)) return;
+
+    this.watched = h.rows
+      .filter((r: { firstAt?: number }) => r.firstAt)
+      .map((r: { rel?: string; name?: string }) => r.rel || r.name || "");
   }
 
   private buildOfflineData(records: DownloadRecord[]): VideoData {

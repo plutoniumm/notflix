@@ -74,23 +74,56 @@ func TestCompatUnmarkedFileIsFalse(t *testing.T) {
 func TestCompatBeatsAV1Copy(t *testing.T) {
 	chdirTemp(t)
 
-	if got := strings.Join(videoArgs("x.mkv", "av1"), " "); got != "-c:v copy" {
-		t.Fatalf("unmarked av1 source: got %q, want a copy", got)
+	if in, out := videoArgs("x.mkv", "av1"); in != nil || strings.Join(out, " ") != "-c:v copy" {
+		t.Fatalf("unmarked av1 source: got %q %q, want a copy", in, out)
 	}
 
 	if err := SetCompat("x.mkv", true); err != nil {
 		t.Fatal(err)
 	}
 
-	got := strings.Join(videoArgs("x.mkv", "av1"), " ")
+	in, out := videoArgs("x.mkv", "av1")
+	got := strings.Join(out, " ")
 	if strings.Contains(got, "copy") {
 		t.Fatalf("compat copied AV1: %q", got)
 	}
 	if !strings.Contains(got, pickH264()) {
 		t.Fatalf("compat did not pick the h264 encoder: %q", got)
 	}
-	if !strings.Contains(got, "-pix_fmt yuv420p") {
-		t.Fatalf("compat must force 8-bit: %q", got)
+
+	// 8-bit either way: VideoToolbox converts hardware frames to the High
+	// profile's 8-bit itself, everything else gets an explicit yuv420p.
+	if !strings.Contains(got, "-profile:v high") {
+		t.Fatalf("compat must encode H.264 High (8-bit): %q", got)
+	}
+	if in == nil && !strings.Contains(got, "-pix_fmt yuv420p") {
+		t.Fatalf("software compat must force 8-bit: %q", got)
+	}
+	if in != nil && strings.Contains(got, "-pix_fmt") {
+		t.Fatalf("hardware frames with -pix_fmt would round-trip through the CPU: %q", got)
+	}
+}
+
+// Hardware frames skip ffmpeg's autorotate: a portrait phone clip came out
+// sideways with its rotation tag dropped. A rotated source must stay on the
+// software path, where autorotate runs.
+func TestCompatRotatedStaysOnCPU(t *testing.T) {
+	if testing.Short() {
+		t.Skip("needs ffmpeg")
+	}
+
+	chdirTemp(t)
+	src := makeRotatedMP4(t, filepath.Join(t.TempDir(), "lib"), "phone.mp4")
+	if err := SetCompat(src, true); err != nil {
+		t.Fatal(err)
+	}
+
+	in, out := videoArgs(src, "h264")
+	if in != nil {
+		t.Fatalf("rotated source got hardware decode: %q", in)
+	}
+	if !strings.Contains(strings.Join(out, " "), "-pix_fmt yuv420p") {
+		t.Fatalf("rotated compat lost its 8-bit force: %q", out)
 	}
 }
 
@@ -102,7 +135,8 @@ func TestCompatOverridesAV1Encode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := strings.Join(videoArgs("y.mkv", "h264"), " ")
+	_, out := videoArgs("y.mkv", "h264")
+	got := strings.Join(out, " ")
 	if strings.Contains(got, "av1") {
 		t.Fatalf("compat produced AV1 args: %q", got)
 	}

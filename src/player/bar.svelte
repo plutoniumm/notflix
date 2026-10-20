@@ -30,6 +30,8 @@
     onSelectEmbedded,
     onSelectOnline,
     onSubsOff,
+    onSync,
+    onUnsync,
     onSelectAudio,
   }: {
     rung?: number;
@@ -56,6 +58,8 @@
     onSelectEmbedded: (idx: number, lang: string) => Promise<void>;
     onSelectOnline: (pick: any) => Promise<void>;
     onSubsOff: () => void;
+    onSync: () => Promise<void>;
+    onUnsync: () => Promise<void>;
     onSelectAudio: (track: number) => void;
   } = $props();
 </script>
@@ -144,6 +148,8 @@
           {onSelectEmbedded}
           {onSelectOnline}
           {onSubsOff}
+          {onSync}
+          {onUnsync}
           onClose={() => view.subs.close()}
         />
       </div>

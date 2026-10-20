@@ -284,10 +284,26 @@ func MoveSidecars(oldBase, newBase string) int {
 		}
 		if os.Rename(old, dst) == nil {
 			moved++
+			carrySync(old, dst)
 		}
 	}
 
 	return moved
+}
+
+// carrySync moves a subtitle's timing fit (media/subsync.go) onto its new
+// name. Conversion renames the stem, and a fit keyed on the old basename would
+// silently stop applying.
+func carrySync(old, dst string) {
+	from, to := "subsync:"+Hash(filepath.Base(old)), "subsync:"+Hash(filepath.Base(dst))
+	v := KVGetValue(from)
+	if v == nil || from == to {
+		return
+	}
+
+	if KVSetValue(to, v) == nil {
+		KVDelete(from)
+	}
 }
 
 func Rename(c *gin.Context, lib *Library) {

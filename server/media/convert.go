@@ -106,11 +106,15 @@ func ProcessAll(lib *library.Library) {
 	// beside this one, so a title transcribed during this sweep gets its
 	// blurb on the next one. Deliberate: waiting on whisper would make an
 	// optional, network-bound phase hold the sweep open for hours.
+	// The search index embeds each title WITH its blurbs, so it follows them.
 	go func() {
 		defer wg.Done()
 		PhaseStart("blurbs")
 		jobs.BackfillBlurbs(lib, func(total, done int) { PhaseSet("blurbs", total, done) })
 		PhaseEnd("blurbs")
+		PhaseStart("embed")
+		jobs.EmbedTitles(lib)
+		PhaseEnd("embed")
 	}()
 	go func() {
 		defer wg.Done()
@@ -232,12 +236,20 @@ func convertRoot(root string, pool *jobs.Pool) {
 
 var errNoSpace = fmt.Errorf("no space left on device")
 
+// ConvertDst is where src's conversion lands; remux stages it at +".tmp". Boot
+// recovery deletes that partial by the same name — it used to guess the source
+// stem instead, missed every renamed release, and the leftover .tmp then read
+// as "another encoder is writing" and blocked the redo.
+func ConvertDst(src string) string {
+	return filepath.Join(filepath.Dir(src), library.CleanName(filepath.Base(src))+".mp4")
+}
+
 func toMP4(srcPath, root string) error {
 	dir := filepath.Dir(srcPath)
 	srcName := filepath.Base(srcPath)
 	cleanedBase := library.CleanName(srcName)
 
-	mp4Path := filepath.Join(dir, cleanedBase+".mp4")
+	mp4Path := ConvertDst(srcPath)
 	name := srcName
 
 	// Never blow away an existing .mp4 to restart: a fresh mtime on it or its
@@ -488,21 +500,37 @@ func fresh(path string) bool {
 	return err == nil && time.Since(fi.ModTime()) < 10*time.Minute
 }
 
-// videoArgs is the video codec decision for a file conversion. Compat wins over
-// the AV1 passthrough on purpose: copying AV1 is exactly what compat exists to
-// avoid, so a marked AV1 source is re-encoded to H.264 rather than copied.
-func videoArgs(src, vc string) []string {
+// videoArgs is the video codec decision for a file conversion: decoder args for
+// before `-i`, encoder args for after it, decided together so they can't
+// disagree. Compat wins over the AV1 passthrough on purpose: copying AV1 is
+// exactly what compat exists to avoid, so a marked AV1 source is re-encoded to
+// H.264 rather than copied.
+func videoArgs(src, vc string) (in, out []string) {
 	if IsCompat(src) {
-		// 8-bit yuv420p deliberately: High10 is refused by the same players AV1
-		// is, so losing the bit depth IS the downgrade being asked for. The
-		// source CICP rides along automatically here — unlike SVT-AV1, the h264
-		// encoders keep it — so an HDR source stays tagged HDR without a
-		// tonemap, same ceiling as everywhere else in this build (no zscale).
-		return append(h264File(compatCRF), "-pix_fmt", "yuv420p", "-profile:v", "high")
+		// 8-bit deliberately: High10 is refused by the same players AV1 is, so
+		// losing the bit depth IS the downgrade being asked for. The source CICP
+		// rides along automatically here — unlike SVT-AV1, the h264 encoders keep
+		// it — so an HDR source stays tagged HDR without a tonemap, same ceiling
+		// as everywhere else in this build (no zscale).
+		out = append(h264File(compatCRF), "-profile:v", "high")
+
+		// On VideoToolbox the frames never leave the media engine: hardware
+		// decode, and the High profile makes the encoder do the 10→8-bit itself.
+		// Software-decoding 4K HEVC on the E-cores ran Knives Out at 12 fps;
+		// this is 54 on the same cores, same picture (50 dB PSNR between the
+		// two). Anything VT can't decode (Hi10P, MPEG-4 ASP) falls
+		// back to software on its own. Rotated sources stay on the CPU path:
+		// hardware frames skip autorotate, and a portrait clip came out sideways
+		// with its rotation tag dropped.
+		if pickH264() == "h264_videotoolbox" && getSrcInfo(src).vRotation == 0 {
+			return []string{"-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"}, out
+		}
+
+		return nil, append(out, "-pix_fmt", "yuv420p")
 	}
 
 	if vc == "av1" {
-		return []string{"-c:v", "copy"}
+		return nil, []string{"-c:v", "copy"}
 	}
 
 	// Preserve a 10-bit/HDR source as 10-bit AV1 (no zscale here for a correct
@@ -520,7 +548,7 @@ func videoArgs(src, vc string) []string {
 		}
 	}
 
-	return args
+	return nil, args
 }
 
 func remux(src, dst string, durationSec float64, name string) error {
@@ -531,8 +559,9 @@ func remux(src, dst string, durationSec float64, name string) error {
 	os.Remove(tmp)
 
 	vc, ac := codecs(src)
-	args := []string{"-i", src, "-map", "0:v:0", "-map", "0:a"}
-	args = append(args, videoArgs(src, vc)...)
+	in, out := videoArgs(src, vc)
+	args := append(in, "-i", src, "-map", "0:v:0", "-map", "0:a")
+	args = append(args, out...)
 
 	if mp4AudioOK(ac) {
 		args = append(args, "-c:a", "copy")

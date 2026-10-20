@@ -3,6 +3,8 @@ export type Parsed = {
   year?: number;
   season?: number;
   episode?: number;
+  // Last episode a multi-episode file covers (S01E01-E02 → 2).
+  upto?: number;
   kind?: string; // "OVA" | "ONA" | "Batch" | "Specials"
   pack?: boolean; // full season / complete series / batch / episode range
   res?: string;
@@ -20,6 +22,9 @@ const RES = /\b(4320p|2160p|1440p|1080p|720p|576p|480p|360p)\b|\b(4k|uhd)\b/i;
 // (?!\d) not \b, so "S01E10v2" still matches; \d{1,3} caps the episode digits.
 const SE = /\bS(\d{1,2})[ ._]?E(\d{1,3})(?!\d)/i;
 const SXE = /\b(\d{1,2})x(\d{2,3})(?!\d)/i;
+// Right after an SxxEyy: "E02", "-E02", " - E02" or "-02". The trailing
+// look-ahead keeps "S01E05-720p" from reading as episodes 5 to 720.
+const MULTI = /^(?:[ ._]?-[ ._]?E|E|-)(\d{1,3})(?![\dp])/i;
 // \b sits happily between an apostrophe and the s, so "Ocean's 11" read as
 // season 11 and faked a show row. Real markers never follow a quote.
 const SEASON = /(?<!['‘’ʼ])\bS(?:eason)?[ ._-]?(\d{1,2})\b/i;
@@ -164,6 +169,8 @@ function parseImpl(input: string): Parsed {
         ? +name.match(SEASON)![1]
         : undefined;
   let episode = seM ? +seM[2] : name.match(EP)?.[1] ? +name.match(EP)![1] : undefined;
+  const mm = seM && name.slice(seM.index! + seM[0].length).match(MULTI);
+  const upto = mm && episode !== undefined && +mm[1] > episode && +mm[1] - episode < 10 ? +mm[1] : undefined;
 
   const kind = name.match(KIND)?.[1]?.toUpperCase();
 
@@ -244,6 +251,7 @@ function parseImpl(input: string): Parsed {
     year,
     season,
     episode,
+    upto,
     kind: kind === "BATCH" ? undefined : kind,
     pack,
     res: res || undefined,

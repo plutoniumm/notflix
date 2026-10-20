@@ -60,5 +60,12 @@ export function ago(atMs: number): string {
   return "just now";
 }
 
+// Signed seconds for a timing nudge: "+2.4s", "−7.5s".
+export function shift(sec: number): string {
+  const n = Number.isFinite(sec) ? Math.round(sec * 10) / 10 : 0;
+
+  return `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(1)}s`;
+}
+
 export const pct = (n: number, digits = 0) =>
   `${(Number.isFinite(n) ? n : 0).toFixed(digits)}%`;

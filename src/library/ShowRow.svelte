@@ -1,6 +1,7 @@
 <script lang="ts">
   import { local } from "../core/store";
   import SeriesStrip from "./SeriesStrip.svelte";
+  import { holes } from "./series";
   import type { SeasonEntry, ContinueItem } from "./homeData.svelte";
 
   let {
@@ -9,13 +10,19 @@
     seasons,
     continues,
     downloadedSet,
+    watched = null,
+    onFind,
   }: {
     title: string;
     key: string;
     seasons: SeasonEntry[];
     continues: ContinueItem[];
     downloadedSet: Set<string>;
+    watched?: string[] | null;
+    onFind?: (term: string) => void;
   } = $props();
+
+  const missing = $derived(watched ? holes(title, seasons, watched) : []);
 
   let picked = $state<string | null>(null);
 
@@ -62,6 +69,15 @@
     <span class="count fs-xs tx-1">{seasons.length} {noun}</span>
     <div class="pills f al-ct g2" role="tablist" aria-label="{title} seasons">
       {#each seasons as s (s.dir)}
+        {#each missing.filter((h) => h.n < s.n && !seasons.some((x) => x.n < s.n && x.n > h.n)) as h (h.n)}
+          <button
+            class="pill gone fs-xs ptr"
+            title="Not on disk — search torrents for {h.term}"
+            onclick={() => onFind?.(h.term)}
+          >
+            {h.label}
+          </button>
+        {/each}
         <button
           class="pill fs-xs ptr"
           class:on={s.dir === sel}
@@ -82,6 +98,8 @@
       files={season.files}
       {continues}
       {downloadedSet}
+      {watched}
+      {onFind}
     />
   {/key}
 </section>
@@ -126,6 +144,14 @@
   .pill:hover {
     color: var(--tx-4);
     background: var(--glass-2);
+  }
+  .pill.gone {
+    color: var(--tx-1);
+    outline: 1px dashed color-mix(in oklab, var(--tx-2) 45%, transparent);
+    outline-offset: -1px;
+  }
+  .pill.gone:hover {
+    color: var(--tx-4);
   }
   .pill.on {
     color: var(--tx-5);

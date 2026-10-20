@@ -10,6 +10,7 @@ import { ago, durWords } from "../core/fmt";
 import { clean } from "../core/video";
 import { join } from "../core/path";
 import { parseName, parseDirSeason, epTag } from "./torrentName";
+import { order, gaps } from "./series";
 import type { ContinueItem } from "./homeData.svelte";
 
 export type Pick = {
@@ -28,6 +29,8 @@ export type Pick = {
   pct: number;
   // The stopping cue streaming services leave out on purpose.
   end: string;
+  // A missing episode: the action is a torrent search for this, not playback.
+  find?: string;
 };
 
 export const MAX = 4;
@@ -56,11 +59,15 @@ function tail(files: string[], name: string, dir: string): string {
   return `${rest} more after this`;
 }
 
-export function tonight(data: VideoData, continues: ContinueItem[]): Pick[] {
+export function tonight(
+  data: VideoData,
+  continues: ContinueItem[],
+  watched: string[] | null = null,
+): Pick[] {
   const byDir = new Map<string, string[]>();
   const keyOf = new Map<string, string>();
   for (const g of data) {
-    const names = (g.files ?? []).map((f) => f.name).sort();
+    const names = order((g.files ?? []).map((f) => f.name).sort());
     byDir.set(g.dir, names);
     for (const f of g.files ?? []) keyOf.set(join(g.dir, f.name), f.key);
   }
@@ -121,7 +128,14 @@ export function tonight(data: VideoData, continues: ContinueItem[]): Pick[] {
     const next = i >= 0 ? names[i + 1] : undefined;
     if (!next || seen.has(join(c.dir, next))) continue;
 
-    const p = make(c.dir, next, `after ${epTag(parseName(c.name)) || clean(c.name)}`, "Next episode");
+    // The file after this one is not the episode after it when one is
+    // missing — say so instead of quietly skipping ahead. Unknown until the
+    // watch history is in, since a gap that was watched is no gap.
+    const gap = watched && gaps(c.dir, names, watched).find((g) => g.after === i);
+    const p = gap
+      ? make(c.dir, next, `${gap.tag} missing`, "Search torrents")
+      : make(c.dir, next, `after ${epTag(parseName(c.name)) || clean(c.name)}`, "Next episode");
+    if (p && gap) Object.assign(p, { tag: "", sub: "", end: "", find: gap.term });
     if (p) push(p);
     break;
   }

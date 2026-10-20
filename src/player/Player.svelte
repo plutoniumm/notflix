@@ -28,7 +28,8 @@
   import { clean, parseRaw, nextVid, hashKey } from "../core/video";
   import { api, GET, HEAD } from "../core/api";
   import { toast } from "../core/toast.svelte";
-  import Subs from "./subs";
+  import Subs, { langLabel } from "./subs";
+  import { shift } from "../core/fmt";
   import WatchProgress from "./watch";
   import { Down, isSupported } from "../library/dl";
   import { local } from "../core/store";
@@ -471,10 +472,51 @@
     if ("file" in res) {
       view.subs.markActive(res.file);
       view.subs.setInfo(await api.subs.info(videoParam));
+      // A provider's file was timed against someone else's release. The
+      // server is already fitting it; this call joins that and reloads the
+      // track if it moved. Quiet unless it changed something.
+      syncSub(true);
     } else {
       toast.err(res.error || "Failed to download subtitle");
     }
     view.subs.close();
+  }
+
+  function reloadActive() {
+    const file = view.subs.activeSub;
+    const track = view.subs.info?.local?.find((t) => t.file === file);
+    if (!file || !track) return;
+
+    const slash = videoParam.lastIndexOf("/");
+    const dir = slash >= 0 ? videoParam.slice(0, slash + 1) : "";
+    Subs.reload(player, `/subs/${dir}${file}?v=${Date.now()}`, langLabel(track.language), true);
+  }
+
+  async function syncSub(quiet = false) {
+    const file = view.subs.activeSub;
+    if (!file) return;
+
+    const res = await api.subs.sync(videoParam, file, { silent: quiet });
+    if (!res) return;
+
+    view.subs.setInfo(await api.subs.info(videoParam, { silent: true }));
+
+    if (res.applied) {
+      reloadActive();
+      const rescaled = res.scale !== 1 ? ", rescaled for frame rate" : "";
+      toast.ok(`Subtitles shifted ${shift(res.offset)}${rescaled}`);
+    } else if (!quiet) {
+      toast.info(res.verdict === "in sync" ? "Subtitles already in sync" : "No clear match — left as is");
+    }
+  }
+
+  async function unsyncSub() {
+    const file = view.subs.activeSub;
+    if (!file || !(await api.subs.unsync(videoParam, file))) return;
+
+    view.subs.setInfo(await api.subs.info(videoParam, { silent: true }));
+    reloadActive();
+    toast.info("Subtitle timing restored");
   }
 
   function subsOff() {
@@ -863,6 +905,8 @@
     onSelectEmbedded={selectEmbedded}
     onSelectOnline={selectOnline}
     onSubsOff={subsOff}
+    onSync={() => syncSub()}
+    onUnsync={unsyncSub}
     onSelectAudio={selectAudio}
   />
 

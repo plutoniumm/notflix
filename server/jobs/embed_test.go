@@ -8,10 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/gin-gonic/gin"
 
 	"notflix/server/library"
 )
@@ -256,39 +253,5 @@ func TestFillStopsOnCancelledContext(t *testing.T) {
 	s := newVecs("m")
 	if n := s.fill(ctx, map[string]string{"a": "alpha"}); n != 0 {
 		t.Fatalf("embedded %d after cancellation", n)
-	}
-}
-
-func TestRecoHandlerNeverErrors(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	t.Setenv("OLLAMA_HOST", "http://127.0.0.1:1")
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/reco", nil)
-
-	RecoHandler(c, &library.Library{})
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d", w.Code)
-	}
-
-	if body := w.Body.String(); !strings.Contains(body, `"items":[]`) {
-		t.Fatalf("want an empty item list, got %s", body)
-	}
-}
-
-func TestRecoHandlerWithNilLibrary(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/reco", nil)
-
-	RecoHandler(c, nil)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d", w.Code)
 	}
 }

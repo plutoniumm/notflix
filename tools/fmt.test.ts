@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { ago, bytes, dur, durWords, pct, rate } from "../src/core/fmt.ts";
+import { ago, bytes, dur, durWords, pct, rate, shift } from "../src/core/fmt.ts";
 
 // The implementations fmt.ts replaced, kept verbatim so their bugs stay pinned.
 const legacy = {
@@ -112,4 +112,12 @@ test("pct", () => {
   assert.equal(pct(12.345, 1), "12.3%");
   assert.equal(pct(100), "100%");
   assert.equal(pct(NaN), "0%");
+});
+
+test("shift", () => {
+  assert.equal(shift(2.43), "+2.4s");
+  assert.equal(shift(-7.5), "−7.5s");
+  assert.equal(shift(0.04), "0.0s");
+  assert.equal(shift(-0.04), "0.0s");
+  assert.equal(shift(NaN), "0.0s");
 });

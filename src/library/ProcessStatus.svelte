@@ -26,7 +26,7 @@
     ["scan", "repair"],
     ["thumbs", "sprites", "posters", "anim"],
     ["whisper"],
-    ["blurbs"],
+    ["blurbs", "embed"],
     ["skips"],
   ];
 
@@ -40,6 +40,7 @@
     posters: "Posters",
     anim: "Animation",
     blurbs: "Blurbs",
+    embed: "Search",
     whisper: "Whisper",
     skips: "Intro/outro",
   };

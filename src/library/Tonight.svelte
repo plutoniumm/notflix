@@ -7,14 +7,31 @@
   let {
     data,
     continues,
+    watched = null,
     onLibrary,
+    onFind,
   }: {
     data: VideoData;
     continues: ContinueItem[];
+    watched?: string[] | null;
     onLibrary: () => void;
+    onFind?: (term: string) => void;
   } = $props();
 
-  let picks = $derived(tonight(data, continues));
+  let picks = $derived(tonight(data, continues, watched));
+
+  const href = (p: Pick) => (p.find ? "#" : vidURL(p.dir, p.name));
+
+  function open(p: Pick, e?: Event) {
+    if (!p.find) {
+      if (!e) location.href = vidURL(p.dir, p.name);
+
+      return;
+    }
+
+    e?.preventDefault();
+    onFind?.(p.find);
+  }
   let at = $state(0);
   let cur = $derived(picks[Math.min(at, picks.length - 1)]);
   // The strip is always picks[1..] and never reorders. Promoting the hovered
@@ -48,7 +65,7 @@
         e.preventDefault();
       }
     } else if (e.key === "Enter" && cur) {
-      location.href = vidURL(cur.dir, cur.name);
+      open(cur);
     } else if (e.key.toLowerCase() === "l") {
       onLibrary();
     }
@@ -115,15 +132,20 @@
           {#if cur.end}<span class="end">{cur.end}</span>{/if}
         </p>
 
-        <a class="go" href={vidURL(cur.dir, cur.name)}>
+        <a class="go" href={href(cur)} onclick={(e) => open(cur, e)}>
           <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
-            <path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none" />
+            {#if cur.find}
+              <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2" />
+              <path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+            {:else}
+              <path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none" />
+            {/if}
           </svg>
           {cur.action}
         </a>
       </article>
 
-      <a class="plate" href={vidURL(cur.dir, cur.name)}>
+      <a class="plate" href={href(cur)} onclick={(e) => open(cur, e)}>
         {#key cur.key}
           <img src="/images/{cur.key}.jpg" alt="" onerror={thumbFail} />
         {/key}
@@ -143,7 +165,7 @@
             onmouseenter={() => (at = i + 1)}
             onmouseleave={() => (at = 0)}
             onfocus={() => (at = i + 1)}
-            onclick={() => (location.href = vidURL(p.dir, p.name))}
+            onclick={() => open(p)}
           >
             <img src="/images/{p.key}.jpg" alt="" onerror={thumbFail} />
             <span class="txt">

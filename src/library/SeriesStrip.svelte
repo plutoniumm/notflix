@@ -2,7 +2,7 @@
   import { join } from "../core/path";
   import MediaCard from "../components/MediaCard.svelte";
   import ScrollRow from "../components/ScrollRow.svelte";
-  import { ordinals } from "./series";
+  import { ordinals, order, gaps } from "./series";
   import type { ContinueItem } from "./homeData.svelte";
 
   let {
@@ -10,14 +10,26 @@
     files,
     continues = [],
     downloadedSet,
+    watched = null,
+    onFind,
   }: {
     dir: string;
     files: VideoEntry[];
     continues?: ContinueItem[];
     downloadedSet: Set<string>;
+    watched?: string[] | null;
+    onFind?: (term: string) => void;
   } = $props();
 
-  const marks = $derived(ordinals(files.map((f) => f.name)));
+  const eps = $derived.by(() => {
+    const by = new Map(files.map((f) => [f.name, f]));
+
+    return order(files.map((f) => f.name)).map((n) => by.get(n)!);
+  });
+  const marks = $derived(ordinals(eps.map((f) => f.name)));
+  const holes = $derived(
+    watched ? gaps(dir, eps.map((f) => f.name), watched) : [],
+  );
 
   // The rail's one piece of live state. Newest watch wins when several
   // episodes of the same set are part-watched.
@@ -36,7 +48,7 @@
 
 <ScrollRow>
   <div class="spine flow-x-s f g10">
-    {#each files as f, idx (f.name)}
+    {#each eps as f, idx (f.name)}
       <div class="ep f-col" class:here={f.name === resume}>
         <MediaCard
           {dir}
@@ -52,6 +64,25 @@
           <span class="ord fs-xs">{marks[idx]}</span>
         </div>
       </div>
+      {#each holes.filter((g) => g.after === idx) as g (g.label)}
+        <button
+          class="ep gap f-col ptr"
+          title="Not on disk — search torrents for {g.term}"
+          onclick={() => onFind?.(g.term)}
+        >
+          <span class="hole f-col cc g5 fs-xs">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2" />
+              <path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            missing
+          </span>
+          <div class="mark p-rel f al-ct">
+            <span class="node"></span>
+            <span class="ord fs-xs">{g.label}</span>
+          </div>
+        </button>
+      {/each}
     {/each}
   </div>
 </ScrollRow>
@@ -134,6 +165,37 @@
     letter-spacing: 0.1em;
   }
 
+  /* A hole in the sequence, not a card: narrow, hollow, on the same rail. */
+  .gap {
+    width: 92px;
+    padding: 0;
+    color: var(--tx-2);
+    text-align: left;
+  }
+  .hole {
+    flex: 1;
+    min-height: 60px;
+    border-radius: var(--r-lg);
+    border: 1px dashed color-mix(in oklab, var(--tx-2) 45%, transparent);
+    transition:
+      color var(--motion-fast, 0.18s) var(--ease-out),
+      border-color var(--motion-fast, 0.18s) var(--ease-out);
+  }
+  .gap:hover .hole,
+  .gap:focus-visible .hole {
+    color: var(--tx-5);
+    border-color: var(--red);
+  }
+  .gap .node {
+    background: var(--bg-2);
+    box-shadow:
+      0 0 0 3px var(--bg-2),
+      inset 0 0 0 1.5px color-mix(in oklab, var(--red) 62%, var(--bg-2));
+  }
+  .gap .ord {
+    color: var(--tx-2);
+  }
+
   .here .ord {
     padding-left: 8px;
     margin-left: -8px;
@@ -158,6 +220,9 @@
     }
     .ep {
       width: 148px;
+    }
+    .ep.gap {
+      width: 72px;
     }
   }
 

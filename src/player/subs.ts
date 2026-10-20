@@ -5,7 +5,9 @@ const E = encodeURIComponent;
 
 let reloadSeq = 0;
 
-export type LocalTrack = { file: string; language: string };
+export type SubSync = { scale: number; offset: number };
+
+export type LocalTrack = { file: string; language: string; sync?: SubSync };
 
 export type SubsInfo = {
   vtt: boolean;

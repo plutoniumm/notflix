@@ -10,7 +10,6 @@
   import { HomeData } from "./homeData.svelte";
   import { parseName, epTag, type Parsed } from "./torrentName";
   import Continues from "./Continues.svelte";
-  import Recommended from "./Recommended.svelte";
   import ShowRow from "./ShowRow.svelte";
   import SeriesStrip from "./SeriesStrip.svelte";
   import MediaCard from "../components/MediaCard.svelte";
@@ -140,6 +139,42 @@
 
   let localResults = $derived(torrentMode ? null : home.filter(debouncedSearch));
 
+  // Meaning, not spelling: "korean crime" finds The Roundup. Settles slower
+  // than the substring filter because each settle is an embedding round-trip,
+  // and the previous answer stays up until the next lands so the row doesn't
+  // blink out on every keystroke.
+  type Hit = { dir: string; name: string; key: string };
+  let near = $state<Hit[]>([]);
+  let nearTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    const q = search.trim();
+    clearTimeout(nearTimer);
+    if (torrentMode || q.length < 3) {
+      near = [];
+      return;
+    }
+
+    nearTimer = setTimeout(async () => {
+      const r = await api.find(q, { silent: true });
+      if (search.trim() === q) near = Array.isArray(r) ? r : [];
+    }, 400);
+  });
+
+  let nearHits = $derived.by(() => {
+    if (!localResults) return [];
+
+    const shown = new Set(localResults.map((r) => join(r.dir, r.name)));
+    const known = new Set(
+      home.data.flatMap((g) => (g.files ?? []).map((f) => join(g.dir, f.name))),
+    );
+
+    return near.filter((h) => {
+      const p = join(h.dir, h.name);
+
+      return known.has(p) && !shown.has(p);
+    });
+  });
+
   async function runTorrent() {
     const term = search.trim();
     if (!term) return;
@@ -217,6 +252,12 @@
     search = term;
     searchFocus = false;
     runTorrent();
+  }
+
+  // A gap marker can sit far down the page; the results render at the top.
+  function find(term: string) {
+    pickHistory(term);
+    scrollTo({ top: 0 });
   }
 
   const items = () => [
@@ -373,7 +414,9 @@
     <Tonight
       data={home.data}
       continues={home.continues}
+      watched={home.watched}
       onLibrary={() => setMode("library")}
+      onFind={find}
     />
   {:else}
   <main>
@@ -507,12 +550,41 @@
           </MediaCard>
         {/each}
 
-        {#if localResults.length === 0}
+        {#if localResults.length === 0 && nearHits.length === 0}
           <EmptyState variant="hero" gridSpan icon="🔍">
             Nothing in the library matches. Press Enter to search torrents.
           </EmptyState>
         {/if}
       </div>
+
+      {#if nearHits.length > 0}
+        <div class="search-header near f al-ct g20">
+          <span>
+            Close in meaning
+            <span class="tx-1">· {nearHits.length}</span>
+          </span>
+        </div>
+
+        <div class="grid spotlight">
+          {#each nearHits as item, idx (join(item.dir, item.name))}
+            <MediaCard
+              dir={item.dir}
+              name={item.name}
+              key={item.key}
+              idx={idx + localResults.length}
+              downloaded={home.downloadedSet.has(join(item.dir, item.name))}
+            >
+              {#snippet footer()}
+                {#if item.dir !== "."}
+                  <div class="card-dir fs-xs trunc">
+                    {item.dir}
+                  </div>
+                {/if}
+              {/snippet}
+            </MediaCard>
+          {/each}
+        </div>
+      {/if}
     {:else}
       {#if home.offline}
         <div class="offline-banner f al-ct g10">
@@ -535,7 +607,6 @@
         downloadedSet={home.downloadedSet}
         onRemove={removeContinue}
       />
-      <Recommended downloadedSet={home.downloadedSet} />
       {#each home.rows as row (row.kind === "dir" ? row.dir : row.key)}
         {#if row.kind === "show"}
           <ShowRow
@@ -544,6 +615,8 @@
             seasons={row.seasons}
             continues={home.continues}
             downloadedSet={home.downloadedSet}
+            watched={home.watched}
+            onFind={find}
           />
         {:else}
           {@const dir = row.dir}
@@ -569,6 +642,8 @@
                 {files}
                 continues={home.continues}
                 downloadedSet={home.downloadedSet}
+                watched={home.watched}
+                onFind={find}
               />
             {:else}
               <ScrollRow>
@@ -856,6 +931,9 @@
   .card-dir {
     color: var(--tx-1);
     padding-top: 1px;
+  }
+  .near {
+    margin-top: 36px;
   }
 
   .row {

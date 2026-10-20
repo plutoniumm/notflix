@@ -16,6 +16,7 @@
   import FolderRow from "./FolderRow.svelte";
   import Organize from "./Organize.svelte";
   import Storage from "./Storage.svelte";
+  import Reclaim from "./Reclaim.svelte";
   import Sect from "./Sect.svelte";
   import DeleteBtn from "../components/DeleteBtn.svelte";
   import ProcessStatusPanel from "./ProcessStatus.svelte";
@@ -451,6 +452,7 @@
 
       <div class="col">
         <Storage i={5} {disks} {dirSizes} />
+        <Reclaim i={5} {data} {armed} onDelFile={delFile} onDelDir={delDir} />
 
     {#if pwaDownloads.length > 0}
       <Sect i={3} label="Saving to this device" meta="{pwaDownloads.length} files">
@@ -540,6 +542,9 @@
 
   .bad-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+  }
+  .bad-row :global(.btn-icon) {
+    opacity: 1;
   }
   .pwa {
     grid-template-columns: minmax(0, 1fr) 48px;

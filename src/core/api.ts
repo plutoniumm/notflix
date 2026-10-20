@@ -87,6 +87,9 @@ export const api = {
 
   search: (q: string, opts?: ReqOpts) => GET(`/api/search?q=${E(q)}`, opts),
 
+  // The library by meaning, not spelling: [{dir, name, key, score}], best first.
+  find: (q: string, opts?: ReqOpts) => GET(`/api/find?q=${E(q)}`, opts),
+
   audio: {
     info: (file: string, opts?: ReqOpts) => GET(`/api/audio/info?file=${E(file)}`, opts),
   },
@@ -105,6 +108,10 @@ export const api = {
     ) => POST("/api/subs/download", { ...pick, file }, opts),
     extract: (file: string, track: number, language: string, opts?: ReqOpts) =>
       POST("/api/subs/extract", { file, track, language }, opts),
+    sync: (file: string, sub: string, opts?: ReqOpts) =>
+      POST("/api/subs/sync", { file, sub }, opts),
+    unsync: (file: string, sub: string, opts?: ReqOpts) =>
+      DEL(`/api/subs/sync?file=${E(file)}&sub=${E(sub)}`, opts),
     whisper: (file: string, opts?: ReqOpts) => POST("/api/subs/whisper", { file }, opts),
     whisperStatus: (file: string, opts?: ReqOpts) =>
       GET(`/api/subs/whisper/status?file=${E(file)}`, opts),

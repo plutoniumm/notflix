@@ -51,16 +51,19 @@ func (r FFRun) Run() (string, error) {
 
 	var cmd *exec.Cmd
 	if r.Nice {
-		// taskpolicy -b, not nice -n 19. `nice` moves CPU share only, and this
+		// taskpolicy, not nice -n 19. `nice` moves CPU share only, and this
 		// library lives on a USB external SSD — the contended resource is that
 		// one IO queue, which Darwin exposes through a SEPARATE knob
 		// (setiopolicy_np / IOPOL_THROTTLE) that nice never touches. So the most
 		// carefully niced encode in the system was still starving playback at
-		// the disk. `taskpolicy -b` sets background CPU QoS (which on Apple
-		// silicon also parks the work on the E-cores) AND the throttled IO tier.
-		// Note `ps -o nice` reads 0 afterwards: background policy is not a nice
-		// value.
-		cmd = exec.CommandContext(ctx, "taskpolicy", append([]string{"-b", "ffmpeg"}, args...)...)
+		// the disk. `-d throttle` is that IO tier.
+		//
+		// The CPU side is `-c utility`, NOT `-b`: background QoS pins work to
+		// the E-cores even on an idle machine, which ran a 4K SVT-AV1 encode at
+		// 1 fps (~52h for a film) with 12 P-cores asleep; utility measured 27
+		// fps and still yields to anything interactive. Note `ps -o nice` reads
+		// 0 afterwards: a QoS clamp is not a nice value.
+		cmd = exec.CommandContext(ctx, "taskpolicy", append([]string{"-c", "utility", "-d", "throttle", "ffmpeg"}, args...)...)
 	} else {
 		cmd = exec.CommandContext(ctx, "ffmpeg", args...)
 	}
