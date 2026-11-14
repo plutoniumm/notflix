@@ -367,6 +367,8 @@ type Downjob struct {
 type a2StatusRaw struct {
 	GID             string `json:"gid"`
 	Status          string `json:"status"`
+	InfoHash        string `json:"infoHash"`
+	Dir             string `json:"dir"`
 	TotalLength     string `json:"totalLength"`
 	CompletedLength string `json:"completedLength"`
 	DownloadSpeed   string `json:"downloadSpeed"`
@@ -626,6 +628,11 @@ func refreshTorrentPaths() {
 			if f.Path != "" {
 				next[f.Path] = true
 			}
+		}
+		// The metadata --bt-load-saved-metadata resumes from: CleanAll's stash
+		// must leave it where aria2 looks.
+		if s.InfoHash != "" && s.Dir != "" {
+			next[filepath.Join(s.Dir, s.InfoHash+".torrent")] = true
 		}
 	}
 

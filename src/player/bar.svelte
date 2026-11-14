@@ -4,6 +4,7 @@
   import AudioPicker from "./AudioPicker.svelte";
   import Icon from "../components/Icon.svelte";
   import type { PlayerView } from "./view.svelte";
+  import { MODES, type Mode, type Pick } from "./upscale";
 
   let {
     view,
@@ -12,16 +13,15 @@
     title,
     rung = 0,
     rungTop = 0,
+    rungMax = 0,
     upCan = false,
     upActive = false,
-    upWhich = "fsr",
+    upPick = "off",
+    upAuto = "fsrcnnx",
     onUpscale = () => {},
     tuneOpen = false,
-    helpOpen = false,
     shotOpen = false,
     clipOpen = false,
-    runWhisper,
-    onHelp,
     onShot,
     onClip,
     onTune,
@@ -36,20 +36,19 @@
   }: {
     rung?: number;
     rungTop?: number;
+    rungMax?: number;
     upCan?: boolean;
     upActive?: boolean;
-    upWhich?: string;
-    onUpscale?: () => void;
+    upPick?: Pick;
+    upAuto?: Mode;
+    onUpscale?: (p: Pick) => void;
     view: PlayerView;
     embed: boolean;
     videoParam: string;
     title: string;
     tuneOpen?: boolean;
-    helpOpen?: boolean;
     shotOpen?: boolean;
     clipOpen?: boolean;
-    runWhisper: () => void;
-    onHelp: () => void;
     onTune: () => void;
     onShot: () => void;
     onClip: () => void;
@@ -77,27 +76,27 @@
            a number alone cannot tell you the stream dropped, a number that
            changes colour can. -->
       <span class="rung" class:low={rung < rungTop} title="Video quality">
-        {rung}p
+        {rung}p{#if rungMax}<span class="max">{` / ${rungMax}p`}</span>{/if}
       </span>
     {/if}
 
     {#if upCan}
-      <button
-        class="ibtn up cc ptr p5"
-        class:active={upActive}
-        title={upActive
-          ? `Upscaler on — ${upWhich === "anime" ? "Anime4K" : "FSR 1.0"}`
-          : "Upscaler off"}
-        aria-label="Toggle upscaler"
-        onclick={onUpscale}
-      >
-        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 14v6h6" />
-          <path d="M20 10V4h-6" />
-          <path d="M14 10l6-6" />
-          <path d="M10 14l-6 6" />
-        </svg>
-      </button>
+      <!-- One button per algorithm, for A/B on the same frame; the lit one
+           again turns the upscaler off. -->
+      <div class="ups f al-ct" role="group" aria-label="Upscaler">
+        {#each [{ id: "auto", short: "Auto", label: `Auto — ${MODES.find((m) => m.id === upAuto)?.label} for this title` }, ...MODES] as m (m.id)}
+          <button
+            class="up ptr"
+            class:on={upPick === m.id}
+            class:dead={upPick === m.id && !upActive}
+            title={upPick === m.id ? `${m.label} — click to turn off` : m.label}
+            aria-pressed={upPick === m.id}
+            onclick={() => onUpscale(m.id as Pick)}
+          >
+            {m.short}
+          </button>
+        {/each}
+      </div>
     {/if}
 
     <div class="spacer"></div>
@@ -153,15 +152,6 @@
           onClose={() => view.subs.close()}
         />
       </div>
-
-      <button
-        class="ibtn cc ptr p5"
-        aria-label="Transcribe with Whisper"
-        class:pulse={!!view.state.wMsg}
-        onclick={runWhisper}
-      >
-        <Icon name="whisper" />
-        </button>
       </div>
 
       <!-- Capture: both of these hand you a file out of this video. -->
@@ -196,16 +186,6 @@
         onclick={onTune}
       >
         <Icon name="settings" />
-      </button>
-
-      <button
-        class="ibtn qmark cc ptr p5"
-        aria-label="Keyboard shortcuts"
-        title="Keyboard & gestures (?)"
-        class:active={helpOpen}
-        onclick={onHelp}
-      >
-        ?
       </button>
 
         <Down {videoParam} {title} />
@@ -282,23 +262,46 @@
       color var(--m, 260ms) var(--ease-out),
       background var(--m, 260ms) var(--ease-out);
   }
+  .rung .max {
+    opacity: 0.55;
+  }
   .rung.low {
     color: var(--red);
     background: color-mix(in oklab, var(--red) 14%, transparent);
   }
 
-  /* Standalone, not in a .grp: it sits beside the rung chip because the two
-     answer the same question — what am I actually looking at. */
-  .up {
-    min-width: 32px;
-    min-height: 32px;
+  /* Beside the rung chip because the two answer the same question — what am I
+     actually looking at. Text, not icons: an A/B row has to say which is which. */
+  .ups {
+    gap: 2px;
+    padding: 2px;
     border-radius: 8px;
+    background: color-mix(in oklab, var(--tx-5) 6%, transparent);
   }
-  .up.active {
+  .up {
+    min-height: 28px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--tx-3);
+    background: transparent;
+    transition:
+      color var(--m-fast, 130ms) var(--ease-out),
+      background var(--m-fast, 130ms) var(--ease-out);
+  }
+  .up:hover {
     color: var(--tx-5);
-    background: color-mix(in oklab, var(--red) 22%, transparent);
-    border-color: transparent;
-    box-shadow: none;
+  }
+  .up.on {
+    color: var(--tx-5);
+    background: color-mix(in oklab, var(--red) 26%, transparent);
+  }
+  /* Picked but not running: no float render targets, or no video yet. */
+  .up.dead {
+    background: color-mix(in oklab, var(--tx-5) 10%, transparent);
   }
 
   .btn-wrap { display: flex; align-items: center; }
@@ -380,18 +383,5 @@
   .grp :global(.ibtn.active) {
     border-color: transparent;
     box-shadow: none;
-  }
-  .ibtn.pulse { animation: pulse 1.5s ease infinite; }
-
-  .qmark {
-    font-family: var(--font-display);
-    font-size: 15px;
-    font-weight: 600;
-    line-height: 1;
-  }
-
-  @keyframes pulse {
-    0%, 100% { color: var(--tx-3); }
-    50% { color: var(--red); filter: drop-shadow(0 0 6px var(--red-glow)); }
   }
 </style>

@@ -131,6 +131,7 @@ func IsProcessing() bool {
 }
 
 func ConvertAll(lib *library.Library) {
+	sweepChunks()
 	var wg sync.WaitGroup
 	for _, root := range lib.Roots {
 		if _, err := os.Stat(root); err != nil {
@@ -505,6 +506,8 @@ func fresh(path string) bool {
 // disagree. Compat wins over the AV1 passthrough on purpose: copying AV1 is
 // exactly what compat exists to avoid, so a marked AV1 source is re-encoded to
 // H.264 rather than copied.
+const sceneTargeted = false
+
 func videoArgs(src, vc string) (in, out []string) {
 	if IsCompat(src) {
 		// 8-bit deliberately: High10 is refused by the same players AV1 is, so
@@ -535,20 +538,8 @@ func videoArgs(src, vc string) (in, out []string) {
 
 	// Preserve a 10-bit/HDR source as 10-bit AV1 (no zscale here for a correct
 	// tonemap) and re-apply the source CICP so HDR survives on encoders that
-	// honor it.
-	si := getSrcInfo(src)
-	args := av1File(32, si.vBitDepth >= 10)
-	for flag, val := range map[string]string{
-		"-color_primaries": si.vPrimaries,
-		"-color_trc":       si.vTransfer,
-		"-colorspace":      si.vColorspace,
-	} {
-		if val != "" && val != "unknown" {
-			args = append(args, flag, val)
-		}
-	}
-
-	return nil, args
+	// honor it. SVT goes through remuxChunked instead; this is the HW encoders.
+	return nil, av1EncodeArgs(src, 32)
 }
 
 func remux(src, dst string, durationSec float64, name string) error {
@@ -559,6 +550,13 @@ func remux(src, dst string, durationSec float64, name string) error {
 	os.Remove(tmp)
 
 	vc, ac := codecs(src)
+	// SVT encodes are scene-targeted (chunked.go); copy, compat and HW AV1
+	// encoders keep the single pass below.
+	// ponytail: off until chunked.go's end-to-end check (frame-exact joins,
+	// HLS copy-passthrough on its output) has passed on real files.
+	if sceneTargeted && vc != "av1" && !IsCompat(src) && pickAV1() == "libsvtav1" {
+		return remuxChunked(src, dst, durationSec, name, ac)
+	}
 	in, out := videoArgs(src, vc)
 	args := append(in, "-i", src, "-map", "0:v:0", "-map", "0:a")
 	args = append(args, out...)

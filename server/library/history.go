@@ -369,7 +369,7 @@ func walkRoots(roots []string) (vids []diskFile, tors []string) {
 				return nil
 			}
 			if d.IsDir() {
-				if p != root && strings.HasPrefix(d.Name(), ".") {
+				if p != root && strings.HasPrefix(d.Name(), ".") && d.Name() != TorrentStash {
 					return filepath.SkipDir
 				}
 

@@ -124,7 +124,11 @@ func TestNormKeyJoinsRenames(t *testing.T) {
 func TestHistoryJoins(t *testing.T) {
 	root := t.TempDir()
 	tor := "d4:infod5:filesld6:lengthi11e4:pathl38:Show.S01E01.1080p.WEBRip.x264-LESS.mkveed6:lengthi22e4:pathl38:Show.S01E02.1080p.WEBRip.x264-LESS.mkveee4:name8:Show.S01ee"
-	if err := os.WriteFile(filepath.Join(root, "abc123.torrent"), []byte(tor), 0644); err != nil {
+	// Stashed by CleanAll: History must still find it.
+	if err := os.MkdirAll(filepath.Join(root, TorrentStash), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, TorrentStash, "abc123.torrent"), []byte(tor), 0644); err != nil {
 		t.Fatal(err)
 	}
 	// E01 landed and was renamed + remuxed by the pipeline; E02 never did.

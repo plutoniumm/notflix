@@ -84,7 +84,7 @@ check("skip clears the landscape notch", skip.css.includes("env(safe-area-inset-
 
 const rail = built("related.svelte");
 check("rail toggles on click", /onclick[\s\S]{0,80}open\s*=\s*!open/.test(rail.source));
-check("rail hides without hover", /@media \(hover: none\)[\s\S]{0,80}display: none/.test(rail.css));
+check("rail hides until opened", /\.rail\.out[\w.\-]*\s*\{[^}]*display: none/.test(rail.css));
 check("rail clears the landscape notch", rail.css.includes("left: env(safe-area-inset-left)"));
 
 const ux = src("ux.ts");

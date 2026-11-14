@@ -42,13 +42,11 @@
   const selected = $derived((moves ?? []).filter((m) => !excluded.has(key(m))));
 
   const stageText = (s: Plan) =>
-    s.stage === "loading model"
-      ? "loading model into memory…"
-      : s.stage === "merging"
-        ? "merging…"
-        : s.run
-          ? `classifying — run ${s.run} of ${s.runs}…`
-          : "classifying…";
+    s.stage === "searching"
+      ? "looking films up…"
+      : s.runs
+        ? `classifying — ${s.run} of ${s.runs} batches done…`
+        : "classifying…";
 
   function stopPoll() {
     stop?.();
@@ -102,7 +100,6 @@
   }
 
   onMount(() => {
-    api.organize.warm({ silent: true });
     api.organize.status({ silent: true }).then((s: Plan | null) => {
       if (!s) return;
       if (s.stage === "done" && s.moves?.length) moves = s.moves;

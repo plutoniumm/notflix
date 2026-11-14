@@ -1,9 +1,12 @@
 package media
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -129,5 +132,52 @@ func TestSegmentBitratesPeakVersusAverage(t *testing.T) {
 	}
 	if avg >= peak {
 		t.Error("average must be below the peak when one segment is fat")
+	}
+}
+
+// Transcoded segments dropped their last frame: the encoder snapped a 23.976
+// source's timestamps onto a grid starting at the cut, sliding the 96th frame
+// past -t. Whether a cut drops one depends on its phase against the frame
+// grid (4s is 95.9 frames, so about half do); the 24s cut here does.
+// Consecutive segments must meet one frame interval apart, not two.
+func TestE2E_SegmentBoundaryKeepsEveryFrame(t *testing.T) {
+	if testing.Short() {
+		t.Skip("ffmpeg-driven; -short")
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "film.mp4")
+	if out, err := exec.Command("ffmpeg", "-v", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24000/1001:duration=33",
+		"-c:v", "libx264", "-g", "48", "-bf", "2", "-pix_fmt", "yuv420p", src,
+	).CombinedOutput(); err != nil {
+		t.Fatalf("fixture: %v\n%s", err, out)
+	}
+
+	pts := func(start float64) []float64 {
+		seg := filepath.Join(dir, fmt.Sprintf("seg%.0f.ts", start))
+		if err := generateSegment(src, seg, start, hlsSegDur, hlsProfiles["144p"], 0, segVideoOnly, false); err != nil {
+			t.Fatalf("generateSegment(%v): %v", start, err)
+		}
+		out, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v",
+			"-show_entries", "frame=pts_time", "-of", "csv=p=0", seg).Output()
+		if err != nil {
+			t.Fatalf("ffprobe: %v", err)
+		}
+		var ts []float64
+		for _, l := range strings.Fields(strings.ReplaceAll(string(out), ",", " ")) {
+			if v, err := strconv.ParseFloat(l, 64); err == nil {
+				ts = append(ts, v)
+			}
+		}
+		sort.Float64s(ts)
+		return ts
+	}
+	a, b := pts(24), pts(24+hlsSegDur)
+	if len(a) == 0 || len(b) == 0 {
+		t.Fatalf("empty segment: %d and %d frames", len(a), len(b))
+	}
+	frame := 1001.0 / 24000
+	if gap := b[0] - a[len(a)-1]; gap > 1.5*frame {
+		t.Errorf("boundary gap %.4fs = a dropped frame (spacing %.4fs; the first segment has %d frames)", gap, frame, len(a))
 	}
 }

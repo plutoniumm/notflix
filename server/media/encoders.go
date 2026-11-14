@@ -138,8 +138,14 @@ func h264File(crf int) []string {
 }
 
 // No -vf scale: source resolution is kept, so ffmpeg carries the source color
-// metadata through. 10-bit only on sw/NVENC/QSV — HW 10-bit AV1 support is
-// uneven, so VideoToolbox/AMF stay 8-bit.
+// metadata through. HW 10-bit AV1 support is uneven, so VideoToolbox/AMF stay
+// 8-bit and NVENC/QSV follow the source.
+//
+// SVT is where the effort goes, because a file is encoded once and streamed
+// for years: preset 3 (was 6) searches far harder for the same picture in fewer
+// bytes, at roughly 3-4x the encode time; and it is ALWAYS 10-bit, even from an
+// 8-bit source — the extra precision costs next to nothing and is what stops
+// banding in skies and shadows. Measure the encode cost before going lower.
 func av1File(crf int, tenbit bool) []string {
 	pf := "yuv420p"
 	switch pickAV1() {
@@ -158,10 +164,7 @@ func av1File(crf int, tenbit bool) []string {
 	case "av1_amf":
 		return []string{"-c:v", "av1_amf", "-rc", "cqp", "-qp_i", strconv.Itoa(crf), "-qp_p", strconv.Itoa(crf), "-pix_fmt", pf}
 	}
-	if tenbit {
-		pf = "yuv420p10le"
-	}
-	return []string{"-c:v", "libsvtav1", "-preset", "6", "-crf", strconv.Itoa(crf), "-pix_fmt", pf}
+	return []string{"-c:v", "libsvtav1", "-preset", "3", "-crf", strconv.Itoa(crf), "-pix_fmt", "yuv420p10le"}
 }
 
 // Returns nil when no AV1 encoder exists; caller falls back to h264.

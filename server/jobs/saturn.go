@@ -2,8 +2,9 @@ package jobs
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"html"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -11,38 +12,46 @@ import (
 	"notflix/server/x/httpc"
 )
 
-// Saturn is the house LLM gateway. It is NOT ollama: one POST /llm/chat answers
-// a single {response,done}, and it takes an OpenAI-style response_format, so the
-// shape of the answer is enforced by a grammar rather than requested in prose.
-// That is the whole reason organize lives here — a schema makes a malformed plan
-// unrepresentable, where ollama's loose `format:"json"` still needed brace
-// slicing and still lost whole runs to stray prose.
+// Saturn is the house LLM gateway, reached through its OpenAI-compatible
+// /v1/chat/completions. Organize uses whatever model saturn's chat lane resolves
+// to right now (GET /agent/model — the owner's pick, healed if it has left the
+// catalogue), so it follows the fleet instead of pinning an id that vanishes:
+// the old pinned qwen id, and the /llm/chat route it was called through, both
+// disappeared and took organize down with them.
 //
-// The fleet assigns models by size and deliberately hides the host, but organize
-// pins one id: the plan is vote-merged across runs, so a model swapped underneath
-// would make two runs disagree for a reason that isn't the library.
-const (
-	saturnHostDefault = "https://saturn.god.manav.ch"
-	organizeModelID   = "llama/qwen3.8-flash-next-uncensored-q4-k-s"
-)
+// The model is resolved ONCE per plan and held for every run, because the plan
+// is vote-merged and a model swapped between runs would make them disagree for
+// a reason that isn't the library.
+const saturnHostDefault = "https://saturn.god.manav.ch"
 
-func saturnHost() string {
+func SaturnHost() string {
 	if h := strings.TrimRight(os.Getenv("SATURN_HOST"), "/"); h != "" {
 		return h
 	}
 	return saturnHostDefault
 }
 
-func organizeModel() string {
+// organizeModel doubles as the up-probe: an answer means the gateway is reachable.
+func organizeModel(ctx context.Context, timeout time.Duration) (string, error) {
 	if m := os.Getenv("ORGANIZE_MODEL"); m != "" {
-		return m
+		return m, nil
 	}
-	return organizeModelID
+	var resp struct {
+		Model string `json:"model"`
+	}
+	if err := httpc.GetJSON(ctx, SaturnHost()+"/agent/model", &resp, timeout); err != nil {
+		return "", err
+	}
+	if resp.Model == "" {
+		return "", fmt.Errorf("saturn has no default model")
+	}
+	return resp.Model, nil
 }
 
-// jsonSchema wraps a bare JSON Schema in the response_format envelope saturn
-// forwards to llama.cpp. strict:true is what turns the schema into a grammar
-// instead of a hint.
+// jsonSchema wraps a bare JSON Schema in the response_format envelope. A local
+// llama.cpp backend turns strict:true into a grammar; a hosted one (DeepSeek on
+// novita, measured) ignores it entirely, so the prompt must spell the shape out
+// too and parseOrganize still slices to the braces.
 func jsonSchema(name string, schema map[string]any) map[string]any {
 	return map[string]any{
 		"type": "json_schema",
@@ -54,56 +63,45 @@ func jsonSchema(name string, schema map[string]any) map[string]any {
 	}
 }
 
-// saturnChat returns the model's raw text. A schema is optional; when present the
-// reply is guaranteed to parse as that schema.
-func saturnChat(ctx context.Context, system, user string, format map[string]any, timeout time.Duration) (string, error) {
-	req := map[string]any{
-		"model":       organizeModel(),
-		"temperature": 0,
-		"messages":    []map[string]string{{"role": "user", "content": user}},
-	}
+// saturnChat returns the model's reply text. Reasoning models answer their
+// trace in a separate reasoning_content, so content is the answer alone.
+func saturnChat(ctx context.Context, model, system, user string, format map[string]any, timeout time.Duration) (string, error) {
+	msgs := []map[string]string{{"role": "user", "content": user}}
 	if system != "" {
-		req["system"] = system
+		msgs = append([]map[string]string{{"role": "system", "content": system}}, msgs...)
 	}
+	req := map[string]any{"model": model, "temperature": 0, "messages": msgs}
 	if format != nil {
 		req["response_format"] = format
 	}
 
 	var resp struct {
-		Response string `json:"response"`
-		Done     bool   `json:"done"`
-		Error    string `json:"error"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
-	if err := httpc.PostJSON(ctx, saturnHost()+"/llm/chat", req, &resp, timeout); err != nil {
+	if err := httpc.PostJSON(ctx, SaturnHost()+"/v1/chat/completions", req, &resp, timeout); err != nil {
 		return "", err
 	}
-	if resp.Error != "" {
-		return "", fmt.Errorf("saturn: %s", resp.Error)
-	}
-	if strings.TrimSpace(resp.Response) == "" {
+	if len(resp.Choices) == 0 || strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
 		return "", fmt.Errorf("saturn returned an empty response")
 	}
-	return resp.Response, nil
+	return resp.Choices[0].Message.Content, nil
 }
 
-// saturnUp reports whether the gateway is reachable and carries the pinned model,
-// so the UI can say which of the two is wrong instead of timing out per run.
-func saturnUp(ctx context.Context, timeout time.Duration) error {
-	var reg json.RawMessage
-	if err := httpc.GetJSON(ctx, saturnHost()+"/llm/registry", &reg, timeout); err != nil {
-		return err
+// saturnSearch is saturn's raw web search (no LLM): the top n results as
+// "title: snippet" lines, highlight tags stripped and trimmed for a prompt.
+func saturnSearch(ctx context.Context, q string, n int) ([]string, error) {
+	var res []struct{ Title, Content string }
+	if err := httpc.GetJSON(ctx, SaturnHost()+"/search/web?q="+url.QueryEscape(q), &res, 20*time.Second); err != nil {
+		return nil, err
 	}
-	if !strings.Contains(string(reg), organizeModel()) {
-		return fmt.Errorf("model %q not in saturn's catalogue", organizeModel())
+	var out []string
+	for _, r := range res[:min(n, len(res))] {
+		line := []rune(html.UnescapeString(tagRe.ReplaceAllString(r.Title+": "+r.Content, "")))
+		out = append(out, string(line[:min(220, len(line))]))
 	}
-	return nil
-}
-
-// saturnWarm pays the cold-load minute before the user asks for a plan.
-// /llm/llamacpp/load is explicit warmup and returns once the server answers
-// /health, so it is bounded by the request rather than by the checkpoint size.
-func saturnWarm(ctx context.Context) error {
-	body := map[string]string{"id": organizeModel()}
-	var out json.RawMessage
-	return httpc.PostJSON(ctx, saturnHost()+"/llm/llamacpp/load", body, &out, 5*time.Minute)
+	return out, nil
 }

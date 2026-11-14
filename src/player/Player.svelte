@@ -34,7 +34,7 @@
   import { Down, isSupported } from "../library/dl";
   import { local } from "../core/store";
   import { Touch, Click, Hotkeys, togglePip, pipOk, av1Ok } from "./ux";
-  import { Upscaler, supported as upscaleOk, type Mode } from "./upscale";
+  import { Upscaler, supported as upscaleOk, type Mode, type Pick } from "./upscale";
   import { SAVE_INTERVAL_MS } from "../core/events.svelte";
   import { AVSync } from "./avsync";
   import { PlayerView } from "./view.svelte";
@@ -77,22 +77,28 @@
   // legible: 480p means nothing on its own, 480p next to a remembered 1080p does.
   let rung = $state(0);
   let rungTop = $state(0);
+  // The best the title offers at all: the master's tallest rendition, or the
+  // file's own height on the direct MP4 path. 0 on native HLS, which exposes
+  // no ladder.
+  let rungMax = $state(0);
 
-  // Desktop only — see upscale.ts for why. The preference persists, but a phone
-  // never acts on it.
-  const upOn = local("upscale-on", false);
+  // Desktop only — see upscale.ts for why. The pick persists, but a phone never
+  // acts on it. The old on/off preference seeds it once.
+  const upPref = local<Pick>("upscale-mode", local("upscale-on", false).get() ? "auto" : "off");
   let upscaler: Upscaler | null = null;
   let upCan = $state(false);
   let upActive = $state(false);
-  // FSR unless the pipeline's vision pass classified this title as animation.
-  // Decided server-side off the sprite sheet, so playback never pays for it.
-  let upWhich = $state<Mode>("fsr");
+  let upPick = $state<Pick>(upPref.get());
+  // Auto: FSRCNNX unless the pipeline's vision pass classified this title as
+  // animation. Decided server-side off the sprite sheet, so playback never pays.
+  let upAuto = $state<Mode>("fsrcnnx");
+  const upMode = $derived<Mode | null>(upPick === "off" ? null : upPick === "auto" ? upAuto : upPick);
 
-  function applyUpscale(want: boolean, m: Mode) {
+  function applyUpscale(m: Mode | null) {
     const tech = player?.el()?.querySelector("video") as HTMLVideoElement | null;
     if (!tech || !upscaler) return;
 
-    if (!want) {
+    if (!m) {
       upscaler.stop();
       upActive = false;
 
@@ -110,17 +116,18 @@
       Record<string, boolean>
     >;
     const m = await animMap;
-    const want: Mode = m?.[key] ? "anime" : "fsr";
-    if (want === upWhich) return;
+    const want: Mode = m?.[key] ? "anime" : "fsrcnnx";
+    if (want === upAuto) return;
 
-    upWhich = want;
-    if (upActive) applyUpscale(true, want);
+    upAuto = want;
+    if (upPick === "auto" && upActive) applyUpscale(want);
   }
 
-  function toggleUpscale() {
-    const want = !upActive;
-    upOn.set(want);
-    applyUpscale(want, upWhich);
+  // Picking the active one again turns the upscaler off.
+  function pickUpscale(p: Pick) {
+    upPick = p === upPick ? "off" : p;
+    upPref.set(upPick);
+    applyUpscale(upMode);
   }
   let pageEl: HTMLElement | undefined;
   let player: any = null;
@@ -294,7 +301,8 @@
       avSync?.set(0);
       rung = 0;
       rungTop = 0;
-      if (upActive) applyUpscale(true, upWhich);
+      rungMax = 0;
+      if (upActive) applyUpscale(upMode);
       player.src({ src: masterSrc, type: "application/vnd.apple.mpegurl" });
       const clearSwap = () => (swapping = false);
       player.one("loadedmetadata", clearSwap);
@@ -416,10 +424,6 @@
 
   let introRange = $state<[number, number] | null>(null);
   let outroRange = $state<[number, number] | null>(null);
-
-  const hasEps = $derived(
-    (ps.rows.find(([d]) => d === dir)?.[1]?.length ?? 0) > 1,
-  );
 
   const asRange = (v: any): [number, number] | null =>
     Array.isArray(v) && v.length === 2 && v.every((n) => Number.isFinite(n))
@@ -653,6 +657,11 @@
       if (!h) return;
       rung = h;
       if (h > rungTop) rungTop = h;
+      if (rungMax) return;
+      const ladder = player.tech(true)?.vhs?.playlists?.main?.playlists ?? [];
+      rungMax = ladder.length
+        ? Math.max(...ladder.map((p: any) => p.attributes?.RESOLUTION?.height ?? 0))
+        : player.currentType() === "video/mp4" ? h : 0;
     };
     tech.addEventListener("resize", readRung);
     player.on("loadedmetadata", readRung);
@@ -661,7 +670,7 @@
     upCan = upscaleOk();
     if (upCan) {
       upscaler = new Upscaler();
-      if (upOn.get()) applyUpscale(true, upWhich);
+      if (upMode) applyUpscale(upMode);
       cleanups.push(() => {
         upscaler?.stop();
         upscaler = null;
@@ -887,16 +896,15 @@
     {videoParam}
     {rung}
     {rungTop}
+    {rungMax}
     {upCan}
     {upActive}
-    {upWhich}
-    onUpscale={toggleUpscale}
-    {runWhisper}
+    {upPick}
+    {upAuto}
+    onUpscale={pickUpscale}
     {tuneOpen}
-    {helpOpen}
     {shotOpen}
     {clipOpen}
-    onHelp={() => (helpOpen = !helpOpen)}
     onShot={() => (shotOpen = !shotOpen)}
     onClip={() => (clipOpen = !clipOpen)}
     onTune={() => (tuneOpen = !tuneOpen)}
@@ -975,7 +983,6 @@
       if (!m && player.volume() === 0) player.volume(0.5);
     }}
     onSpeedSet={(r) => player?.playbackRate(r)}
-    onEpisodes={hasEps ? () => (railOpen = !railOpen) : undefined}
     onSpeedDown={() =>
       player?.playbackRate(
         Math.max(0.25, Math.round((player.playbackRate() - 0.25) * 4) / 4),
@@ -1029,7 +1036,6 @@
     {dir}
     {name}
     {embed}
-    paused={ps.paused}
     bind:open={railOpen}
   />
 </div>

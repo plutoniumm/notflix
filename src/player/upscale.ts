@@ -1,23 +1,22 @@
 // Real-time spatial upscaling in a WebGL2 overlay.
 //
-// Both modes are ANALYTIC shaders, not networks: no weights, no model download,
-// no WebGPU. That is the whole point — an ESRGAN-class model cannot hold 60fps
-// on a phone, and the ones that can are not meaningfully better than these at
-// the sharpening job a bilinear-upscaled stream actually needs.
+// FSR is an ANALYTIC shader; the other modes are small convnets whose weights
+// are the shader itself (mpvshader.ts), so nothing is downloaded at runtime.
+// Which one plays is the viewer's call: they are here to be compared by eye.
 //
 //   fsr    FSR 1.0 — EASU (edge-adaptive directional resample) then RCAS
 //          (contrast-adaptive sharpening), hand-written here. Analytic, so it
 //          only redistributes contrast the frame already has: measured +15-18%
 //          detail on content with real edges.
 //
-//          FSRCNNX (a trained CNN for live action) was tried here and REMOVED.
-//          It compiled and ran GL-clean through the same runtime, but measured
-//          -3% — identical to a plain passthrough, i.e. contributing nothing.
-//          The likely cause is a range mismatch: mpv hands these shaders the
-//          video's actual Y' plane in limited range, while this pipeline could
-//          only offer full-range Rec.709 luma computed from RGB, which is not
-//          what the network was trained on. Worth revisiting; not worth
-//          shipping a 14-pass no-op.
+//   fsrcnnx  FSRCNNX x2 16-0-4-1 and
+//   nnedi3   NNEDI3 nns64 — trained live-action upscalers that hook LUMA (see
+//          livenets/README.md). An earlier FSRCNNX run "measured -3%, a
+//          no-op"; that was the runtime, not the network: LUMA was the RED
+//          channel and `HOOKED.w` sizes resolved to 0. Fixed, on six 4K
+//          frames FSRCNNX beats FSR by +0.6 dB on average (+2.4 at best),
+//          NNEDI3 ties it, and the luma range (the old suspect) made no
+//          difference.
 //
 //          Newer FSR and DLSS do not apply at all: FSR 2/3/4 and DLSS 2/3/4 are
 //          temporal, requiring per-pixel motion vectors, depth and jitter from
@@ -38,11 +37,31 @@
 // straight to the display compositor without ever waking the GPU shader
 // pipeline. That is why this is desktop-only (see `supported`).
 
-import { Chain, debug as a4kDebug } from "./mpvshader";
+import { Chain, debug as a4kDebug, type Luma } from "./mpvshader";
 import restoreCNN from "./anime4k/Anime4K_Restore_CNN_M.glsl?raw";
 import upscaleCNN from "./anime4k/Anime4K_Upscale_CNN_x2_M.glsl?raw";
+import fsrcnnx from "./livenets/FSRCNNX_x2_16-0-4-1.glsl?raw";
+import nnedi3 from "./livenets/nnedi3-nns64-win8x4.hook?raw";
 
-export type Mode = "fsr" | "anime";
+export type Mode = "fsr" | "fsrcnnx" | "nnedi3" | "anime";
+
+// Picker order: the analytic default, the live-action nets, then animation.
+export const MODES: { id: Mode; label: string; short: string }[] = [
+  { id: "fsr", label: "FSR 1.0", short: "FSR" },
+  { id: "fsrcnnx", label: "FSRCNNX", short: "CNNX" },
+  { id: "nnedi3", label: "NNEDI3", short: "NNEDI" },
+  { id: "anime", label: "Anime4K", short: "A4K" },
+];
+
+// What the viewer picked: a mode to A/B, "auto" (the anim mark decides), or off.
+export type Pick = Mode | "auto" | "off";
+
+// Modes that run a network, and whether it hooks LUMA.
+const NETS: Partial<Record<Mode, [string[], Luma | null]>> = {
+  anime: [[restoreCNN, upscaleCNN], null],
+  fsrcnnx: [[fsrcnnx], "full"],
+  nnedi3: [[nnedi3], "full"],
+};
 
 const VERT = `#version 300 es
 in vec2 p;
@@ -196,16 +215,6 @@ void main() {
   frag = vec4(clamp(outc, 0.0, 1.0), 1.0);
 }`;
 
-const SHARP = `#version 300 es
-precision highp float;
-in vec2 uv;
-out vec4 frag;
-uniform sampler2D src;
-uniform vec2 srcPx;
-uniform float amount;
-${RCAS}
-void main() { frag = vec4(rcas(src, uv, srcPx, 0.2 * amount, 0.4 * amount), 1.0); }`;
-
 // Phones are excluded on purpose, and not because the shader is too slow.
 // Giving up the hardware overlay means the GPU wakes for every frame, which
 // costs battery, and a phone is usually the device on cellular where the stream
@@ -294,7 +303,6 @@ export class Upscaler {
       height: "100%",
       objectFit: "contain",
       pointerEvents: "none",
-      zIndex: "1",
     } as CSSStyleDeclaration);
 
     const gl = canvas.getContext("webgl2", {
@@ -315,7 +323,6 @@ export class Upscaler {
     try {
       this.#progs.set("fsr", compile(gl, VERT, EASU));
       this.#progs.set("anime", compile(gl, VERT, ANIME));
-      this.#progs.set("sharp", compile(gl, VERT, SHARP));
     } catch (e) {
       console.warn("[upscale]", e);
       return false;
@@ -338,11 +345,12 @@ export class Upscaler {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
-    // 17 convolution passes. Built once per session, not per frame, and only
-    // when it is the mode in use — compiling them costs ~100ms.
-    if (mode === "anime") {
+    // Up to 17 convolution passes. Built once per session, not per frame, and
+    // only when it is the mode in use — compiling them costs ~100ms.
+    const net = NETS[mode];
+    if (net) {
       a4kDebug.on = !!(window as any).__a4kDebug;
-      const chain = new Chain(gl, [restoreCNN, upscaleCNN]);
+      const chain = new Chain(gl, ...net);
       if (chain.ok) {
         this.#chain = chain;
       } else {
@@ -355,7 +363,10 @@ export class Upscaler {
     this.#gl = gl;
     this.#tex = tex;
 
-    video.parentElement?.appendChild(canvas);
+    // Straight after the video, unstacked, so it takes the video's place:
+    // appended last with z-index 1 it painted over video.js's caption layer
+    // and every subtitle vanished while the upscaler was on.
+    video.after(canvas);
     // The video keeps playing and stays the element that owns audio, PiP and
     // fullscreen — it is only visually replaced by its own upscaled frames.
     video.style.opacity = "0";
@@ -447,7 +458,8 @@ export class Upscaler {
         return;
       }
 
-      const prog = this.#progs.get(this.#mode) ?? this.#progs.get("sharp")!;
+      // A live-action net without float targets falls back to FSR.
+      const prog = this.#progs.get(this.#mode) ?? this.#progs.get("fsr")!;
       gl.useProgram(prog);
       gl.uniform1i(gl.getUniformLocation(prog, "src"), 0);
       gl.uniform2f(

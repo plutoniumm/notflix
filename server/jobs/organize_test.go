@@ -43,73 +43,6 @@ func TestParseOrganize(t *testing.T) {
 	}
 }
 
-func TestMergeAssigns(t *testing.T) {
-	runs := [][]orgAssign{
-		{{I: 0, Folder: "A"}, {I: 1, Folder: "A"}, {I: 5, Folder: "X"}},
-		{{I: 0, Folder: "B"}, {I: 5, Folder: "Y"}},
-		{{I: 0, Folder: "B"}, {I: 2, Folder: "C"}, {I: 2, Folder: "Z"}, {I: 3, Folder: " "}},
-	}
-	got := map[int]string{}
-	for _, a := range mergeAssigns(runs) {
-		got[a.I] = a.Folder
-	}
-
-	if got[0] != "B" {
-		t.Errorf("i=0: majority should win, got %q", got[0])
-	}
-	if got[5] != "X" {
-		t.Errorf("i=5: tie should resolve to earlier run, got %q", got[5])
-	}
-	if got[1] != "A" {
-		t.Errorf("i=1: single-run assignment should pass through, got %q", got[1])
-	}
-	if got[2] != "C" {
-		t.Errorf("i=2: duplicate index within a run should vote once, got %q", got[2])
-	}
-	if _, ok := got[3]; ok {
-		t.Error("blank folder should not vote")
-	}
-	if len(mergeAssigns(nil)) != 0 {
-		t.Error("no runs should merge to nothing")
-	}
-}
-
-func TestRunsAgree(t *testing.T) {
-	a := []orgAssign{{0, "A"}, {1, "B"}, {2, "C"}, {3, "D"}, {4, "E"}}
-
-	same := []orgAssign{{4, "E"}, {3, "D"}, {2, "C"}, {1, "B"}, {0, "A"}}
-	if got := runsAgree(a, same); got != 1 {
-		t.Errorf("identical runs: got %v, want 1", got)
-	}
-
-	oneOff := []orgAssign{{0, "A"}, {1, "B"}, {2, "C"}, {3, "D"}, {4, "X"}}
-	if got := runsAgree(a, oneOff); got < organizeConverge {
-		t.Errorf("4/5 agreement should converge: got %v", got)
-	}
-
-	// 3 matches over a union of 6 indices — well under the bar.
-	drift := []orgAssign{{0, "A"}, {1, "B"}, {2, "C"}, {5, "F"}}
-	if got := runsAgree(a, drift); got >= organizeConverge {
-		t.Errorf("3/6 agreement should not converge: got %v", got)
-	}
-
-	disjoint := []orgAssign{{9, "Z"}}
-	if got := runsAgree(a, disjoint); got != 0 {
-		t.Errorf("disjoint runs: got %v, want 0", got)
-	}
-
-	if got := runsAgree(nil, nil); got != 0 {
-		t.Errorf("empty runs: got %v, want 0", got)
-	}
-
-	// Blank folders and duplicate indices dedup like mergeAssigns votes.
-	messy := []orgAssign{{0, " A "}, {0, "Q"}, {1, ""}, {2, "C"}}
-	clean := []orgAssign{{0, "A"}, {2, "C"}}
-	if got := runsAgree(messy, clean); got != 1 {
-		t.Errorf("trim+dedup: got %v, want 1", got)
-	}
-}
-
 func TestFolderOK(t *testing.T) {
 	for _, bad := range []string{"", ".hidden", "a/b", `a\b`, "..", strings.Repeat("x", folderMaxLen+1)} {
 		if folderOK(bad) {
@@ -136,24 +69,26 @@ func TestValidMoves(t *testing.T) {
 		{File: "hp2.mp4", Root: "Ravan"},
 		{File: "lone.mp4", Root: "Ravan"},
 		{File: "doc.mp4", Root: "Oni"},
+		{File: "outlaws.mp4", Root: "Oni"},
 	}
 	existing := map[string]map[string]int{
-		"Oni": {"Documentaries": 3},
+		"Oni": {"Documentaries": 3, "The Roundup (2022)": 2},
 	}
 
 	assigns := []orgAssign{
 		{I: 0, Folder: "Harry Potter"},
-		{I: 1, Folder: " Harry Potter "}, // whitespace trimmed, same group
-		{I: 2, Folder: "Solo"},           // singleton folder → dropped
-		{I: 3, Folder: "Documentaries"},  // 1 new + 3 existing → kept
-		{I: 3, Folder: "Dup"},            // duplicate index → ignored
+		{I: 1, Folder: " Harry Potter "},         // whitespace trimmed, same group
+		{I: 2, Folder: "Solo"},                   // singleton folder → dropped
+		{I: 3, Folder: "Documentaries"},          // 1 new + 3 existing → kept
+		{I: 4, Folder: "The Roundup (2022) (2)"}, // listing's count copied back → existing folder
+		{I: 3, Folder: "Dup"},                    // duplicate index → ignored
 		{I: 99, Folder: "OutOfRange"},
 		{I: 0, Folder: "bad/name"},
 	}
 
 	moves := validMoves(items, assigns, existing)
-	if len(moves) != 3 {
-		t.Fatalf("got %d moves, want 3: %+v", len(moves), moves)
+	if len(moves) != 4 {
+		t.Fatalf("got %d moves, want 4: %+v", len(moves), moves)
 	}
 	byFile := map[string]string{}
 	for _, m := range moves {
@@ -164,6 +99,9 @@ func TestValidMoves(t *testing.T) {
 	}
 	if byFile["doc.mp4"] != "Documentaries" {
 		t.Errorf("existing-folder top-up dropped: %v", byFile)
+	}
+	if byFile["outlaws.mp4"] != "The Roundup (2022)" {
+		t.Errorf("count suffix not snapped to the existing folder: %v", byFile)
 	}
 	if _, ok := byFile["lone.mp4"]; ok {
 		t.Error("singleton folder should have been dropped")
@@ -274,18 +212,23 @@ func TestApplyMoveTakesSidecars(t *testing.T) {
 }
 
 func TestOrganizePrompt(t *testing.T) {
-	items := []OrgItem{{File: "Harry.Potter.2001.1080p.mp4", Root: "Ravan"}}
-	p := organizePrompt(items, map[string]map[string]int{"Ravan": {"Marvel": 5}})
-	// No `"moves"` here any more: the response_format schema makes the envelope
-	// unrepresentable, so asking for it in prose was the part that could be
-	// ignored. The schema is asserted below instead.
-	for _, want := range []string{`"i":0`, "Harry Potter", "Marvel", `"year":2001`, "Ravan/Marvel (5)"} {
+	items := []OrgItem{
+		{File: "Harry.Potter.2001.1080p.mp4", Root: "Ravan"},
+		{File: "The.Outlaws.2017.1080p.mp4", Root: "Ravan"},
+	}
+	web := map[int][]string{1: {"The Outlaws (2017 film): the first installment of The Roundup series"}, 0: {"not in this batch"}}
+	p := organizePrompt(items, map[string]map[string]int{"Ravan": {"Marvel": 5}}, []int{1}, web)
+	for _, want := range []string{`"i":0`, "Harry Potter", `"year":2001`, "Ravan/Marvel (5)", `"moves"`,
+		"Decide only these files: [1]", "first installment of The Roundup"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt missing %q", want)
 		}
 	}
 	if strings.Contains(p, "1080p") {
 		t.Error("prompt should carry cleaned names, not raw rip tags")
+	}
+	if strings.Contains(p, "not in this batch") {
+		t.Error("web results for files outside the batch leaked into the prompt")
 	}
 }
 
@@ -316,9 +259,6 @@ func TestFileYear(t *testing.T) {
 func TestOrganizeSchemaBounds(t *testing.T) {
 	sch := organizeSchema(7)
 	props := sch["properties"].(map[string]any)
-	if _, ok := props["reasoning"]; ok != organizeThink {
-		t.Errorf("reasoning field present=%v, organizeThink=%v", ok, organizeThink)
-	}
 	item := props["moves"].(map[string]any)["items"].(map[string]any)
 	ip := item["properties"].(map[string]any)
 	if got := ip["i"].(map[string]any)["maximum"]; got != 6 {

@@ -44,7 +44,10 @@ const (
 	// this bump evicts the empty inits already sitting in clients.
 	// 10: an already-AAC <=2ch source now copies instead of re-encoding, so a
 	// regenerated audio rendition carries different bytes than cv=9 served.
-	hlsURLVer = "10"
+	// 11: h264 transcode segments dropped one frame at every boundary (the
+	// encoder's time base moved the last frame past -t); fixed segments carry
+	// one more frame, so the cached 95-frame ones must not be served as cv=11.
+	hlsURLVer = "11"
 )
 
 var hlsInFlight sync.Map
@@ -99,6 +102,9 @@ func ladderFor(profiles map[string]hlsProfile, srcW, srcH int) []string {
 		}
 		qs = append(qs, q)
 	}
+	if q, _, ok := srcRung(profiles, srcW, srcH); ok {
+		qs = append(qs, q)
+	}
 	if len(qs) == 0 {
 		for _, q := range hlsQualityOrder {
 			if _, ok := profiles[q]; ok {
@@ -107,6 +113,42 @@ func ladderFor(profiles map[string]hlsProfile, srcW, srcH int) []string {
 		}
 	}
 	return qs
+}
+
+// srcRung is a rung at the source's own height, for a source whose height
+// falls between standard rungs: a 1920x800 scope film otherwise topped out at
+// 720p and a 1280x688 one at 480p, a third of its lines thrown away. It borrows
+// the next standard rung's caps and CRF. Landscape only (p.scale sets the
+// HEIGHT), even (yuv420p can't encode an odd one), and never past 2160p.
+func srcRung(profiles map[string]hlsProfile, srcW, srcH int) (string, hlsProfile, bool) {
+	h := srcH &^ 1
+	if h < 144 || srcW < srcH {
+		return "", hlsProfile{}, false
+	}
+	for _, q := range hlsQualityOrder {
+		p, ok := profiles[q]
+		if !ok || p.h < h {
+			continue
+		}
+		if p.h == h {
+			return "", hlsProfile{}, false // already a standard rung
+		}
+		p.h = h
+		p.scale = fmt.Sprintf("scale=-2:%d", h)
+		return fmt.Sprintf("%dp", h), p, true
+	}
+	return "", hlsProfile{}, false
+}
+
+// rungProfile resolves q against the standard ladder plus this source's own rung.
+func rungProfile(profiles map[string]hlsProfile, q string, srcW, srcH int) (hlsProfile, bool) {
+	if p, ok := profiles[q]; ok {
+		return p, true
+	}
+	if sq, p, ok := srcRung(profiles, srcW, srcH); ok && sq == q {
+		return p, true
+	}
+	return hlsProfile{}, false
 }
 
 type srcInfo struct {
@@ -498,7 +540,12 @@ func rungBandwidth(si *srcInfo, q string, profile hlsProfile) int {
 	if canCopyVideo(si, profile) && si.peakBitrate > 0 {
 		return si.peakBitrate + si.peakBitrate/5
 	}
-	return hlsBandwidth[q]
+	if b, ok := hlsBandwidth[q]; ok {
+		return b
+	}
+	// A source rung (srcRung) borrows the next rung's cap; 0 here read as a free
+	// rendition to hls.js's ABR.
+	return rungAvgBandwidth(si, q, profile)
 }
 
 // AVERAGE-BANDWIDTH: transcode rungs report the VBR target so ABR gets a
@@ -598,9 +645,20 @@ var hlsBandwidth = map[string]int{
 	"2160p": 25_000_000,
 }
 
+// source is where an HLS request's bytes are: a library title, or a file saturn serves off one of
+// its Macs (AMOS's `wcat`) by URL, which ffprobe and ffmpeg read like a path. Nothing else: an
+// arbitrary URL would make this an open fetcher. An unmarked source takes the h264 ladder, so any
+// format plays, and its cache is keyed on the whole URL, which carries the file's ETag.
+func source(lib *library.Library, file string) string {
+	if strings.HasPrefix(file, jobs.SaturnHost()+"/ring/file?") {
+		return file
+	}
+	return lib.FindFile(file)
+}
+
 func HLSAVOffset(c *gin.Context, lib *library.Library) {
 	file := c.Query("file")
-	path := lib.FindFile(file)
+	path := source(lib, file)
 	if path == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
@@ -662,7 +720,7 @@ func av1Client(c *gin.Context) bool {
 
 func HLSMaster(c *gin.Context, lib *library.Library) {
 	file := c.Query("file")
-	path := lib.FindFile(file)
+	path := source(lib, file)
 	if path == "" {
 		c.String(http.StatusNotFound, "not found")
 		return
@@ -772,7 +830,7 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 
 		si := getSrcInfo(path)
 		for _, q := range ladderFor(profiles, srcWidth, srcHeight) {
-			p := profiles[q]
+			p, _ := rungProfile(profiles, q, srcWidth, srcHeight)
 			sb.WriteString(streamInfLine(si, q, p, codec, srcWidth, srcHeight, "AUDIO=\"audio\""))
 			sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s%s\n", encFile, q, codecParam))
 		}
@@ -781,7 +839,7 @@ func HLSMaster(c *gin.Context, lib *library.Library) {
 		audio := fmt.Sprintf("%d", defIdx)
 		si := getSrcInfo(path)
 		for _, q := range ladderFor(profiles, srcWidth, srcHeight) {
-			p := profiles[q]
+			p, _ := rungProfile(profiles, q, srcWidth, srcHeight)
 			sb.WriteString(streamInfLine(si, q, p, codec, srcWidth, srcHeight, ""))
 			sb.WriteString(fmt.Sprintf("/api/hls/playlist?file=%s&q=%s&audio=%s%s\n", encFile, q, audio, codecParam))
 		}
@@ -810,18 +868,7 @@ func HLSPlaylist(c *gin.Context, lib *library.Library) {
 		codec = CodecH264
 	}
 
-	// AV1 is copy-passthrough (q=qSrc); profiles exist only for the h264 ladder.
-	var profile hlsProfile
-	if !audioOnly && codec == CodecH264 {
-		var ok bool
-		profile, ok = hlsProfiles[q]
-		if !ok {
-			c.String(http.StatusBadRequest, "invalid quality")
-			return
-		}
-	}
-
-	path := lib.FindFile(file)
+	path := source(lib, file)
 	if path == "" {
 		c.String(http.StatusNotFound, "not found")
 		return
@@ -840,6 +887,18 @@ func HLSPlaylist(c *gin.Context, lib *library.Library) {
 	var segBitrates []int
 	copyMode := false
 	si := getSrcInfo(path)
+
+	// AV1 is copy-passthrough (q=qSrc); profiles exist only for the h264 ladder.
+	// Resolved after the probe: the source's own rung depends on its size.
+	var profile hlsProfile
+	if !audioOnly && codec == CodecH264 {
+		var ok bool
+		profile, ok = rungProfile(hlsProfiles, q, si.vWidth, si.vHeight)
+		if !ok {
+			c.String(http.StatusBadRequest, "invalid quality")
+			return
+		}
+	}
 	if codec == CodecAV1 {
 		// Each rendition is declared on the grid its own pass actually writes:
 		// video on the muxer's keyframe grid, audio on the uniform audioStep grid.
@@ -998,20 +1057,19 @@ func ensureSegment(srcPath, hash, codec, q string, segNum, audioIdx, mode int, u
 
 	// Copy-passthrough is a remux, so it needs no profile.
 	avCopy := codec == CodecAV1 && useCopy
+	si := getSrcInfo(srcPath)
 	var p hlsProfile
 	if mode != segAudioOnly && !avCopy {
-		var ok bool
+		profiles := hlsProfiles
 		if codec == CodecAV1 {
-			p, ok = av1Profiles[q]
-		} else {
-			p, ok = hlsProfiles[q]
+			profiles = av1Profiles
 		}
-		if !ok {
+		var ok bool
+		if p, ok = rungProfile(profiles, q, si.vWidth, si.vHeight); !ok {
 			return segPath, fmt.Errorf("invalid quality %q for codec %q", q, codec)
 		}
 	}
 
-	si := getSrcInfo(srcPath)
 	start := float64(segNum) * hlsSegDur
 	segDur := hlsSegDur
 	switch {
@@ -1094,7 +1152,7 @@ func HLSSegment(c *gin.Context, lib *library.Library) {
 		}
 	}
 
-	path := lib.FindFile(file)
+	path := source(lib, file)
 	if path == "" {
 		c.String(http.StatusNotFound, "not found")
 		return
@@ -1201,7 +1259,12 @@ func generateSegment(srcPath, segPath string, start, segDur float64, p hlsProfil
 	}
 
 	p.scale = scaleFilter(getSrcInfo(srcPath), p.h)
-	encodeArgs := h264HLS(p)
+	// The encoder re-times frames onto its own 1/fps grid starting at the cut,
+	// which slid a 23.976 source's frames +10ms (0.0315 → 0.0417) and pushed
+	// each segment's 96th frame from 3.994s past the -t 4 cut — in neither
+	// segment, so every h264 title hitched once per segment. The demuxer's
+	// time base keeps the source's own timestamps, so the cut selects by them.
+	encodeArgs := append(h264HLS(p), "-enc_time_base:v", "demux")
 
 	switch mode {
 	case segMuxed:
@@ -1654,7 +1717,7 @@ func HLSInit(c *gin.Context, lib *library.Library) {
 	var audioIdx int
 	fmt.Sscanf(audioStr, "%d", &audioIdx)
 
-	path := lib.FindFile(file)
+	path := source(lib, file)
 	if path == "" {
 		c.String(http.StatusNotFound, "not found")
 		return

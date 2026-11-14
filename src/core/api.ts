@@ -138,7 +138,6 @@ export const api = {
   organize: {
     plan: (opts?: ReqOpts) => POST("/api/organize/plan", {}, opts),
     status: (opts?: ReqOpts) => GET("/api/organize/status", opts),
-    warm: (opts?: ReqOpts) => POST("/api/organize/warm", {}, opts),
     apply: (moves: { file: string; root: string; folder: string }[], opts?: ReqOpts) =>
       POST("/api/organize/apply", { moves }, opts),
   },

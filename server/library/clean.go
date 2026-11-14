@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -32,6 +33,12 @@ var junkExts = map[string]bool{
 	".htm": true, ".html": true,
 }
 
+// Release-group ads ("www.YTS.MX.jpg", "WWW.YIFY-TORRENTS.COM.jpg") ride along
+// with every YTS download. Once the film converts and flattens out, the ad is
+// all that's left, and pruneEmpty rightly never removes a non-empty dir — so 17
+// empty release folders had piled up across both roots.
+var adRe = regexp.MustCompile(`\b(yts|yify)\b.*\.(jpe?g|png)$`)
+
 // keepSuffixes are compound suffixes filepath.Ext can't match — recovery
 // files like .corrupt.bak must survive the junk sweep.
 var keepSuffixes = []string{".corrupt.bak"}
@@ -48,7 +55,39 @@ func CleanAll(roots []string) {
 	log.Println("[CleanAll] finished")
 }
 
+// TorrentStash holds aria2's saved .torrent files once their download is done.
+// They are History's only record of what was ever downloaded (the file's mtime
+// IS the download date, which a rename keeps), so they are moved out of the
+// library, never deleted. Same drive, so the rename is atomic.
+const TorrentStash = ".torrents"
+
+func stashTorrents(root string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".torrent") {
+			continue
+		}
+		src := filepath.Join(root, e.Name())
+		if IsBusy(src) {
+			continue
+		}
+		dst := filepath.Join(root, TorrentStash, e.Name())
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return
+		}
+		// A re-download of the same infohash replaces the stashed copy: its mtime
+		// is the newer download date.
+		if err := os.Rename(src, dst); err == nil {
+			log.Printf("[CleanAll] stashed: %s", e.Name())
+		}
+	}
+}
+
 func cleanRoot(root string) {
+	stashTorrents(root)
 	active := activeDirs(root)
 
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -67,7 +106,7 @@ func cleanRoot(root string) {
 			}
 		}
 
-		if !junkExts[filepath.Ext(lower)] {
+		if !junkExts[filepath.Ext(lower)] && !adRe.MatchString(lower) {
 			return nil
 		}
 

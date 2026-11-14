@@ -1,6 +1,7 @@
 package media
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -83,6 +84,42 @@ func TestLadderFor_NeverEmpty(t *testing.T) {
 	}
 }
 
+// A short side between standard rungs gets a rung of its own: a scope film
+// (1920x800) topped out at 720p and a 1280x688 one at 480p before this.
+func TestLadderFor_SourceRung(t *testing.T) {
+	for _, c := range []struct {
+		w, h int
+		top  string
+	}{
+		{1920, 800, "800p"},
+		{1280, 688, "688p"},
+		{1920, 1037, "1036p"}, // odd → even, yuv420p can't encode it
+		{1920, 1080, "1080p"}, // exact rung: nothing added
+		{1080, 1920, "1080p"}, // portrait: scale sets the height, so no source rung
+		{5120, 2880, "2160p"}, // past the top rung: capped as before
+	} {
+		got := ladderFor(hlsProfiles, c.w, c.h)
+		if top := got[len(got)-1]; top != c.top {
+			t.Errorf("%dx%d ladder tops at %s, want %s (%v)", c.w, c.h, top, c.top, got)
+		}
+		p, ok := rungProfile(hlsProfiles, c.top, c.w, c.h)
+		if !ok {
+			t.Errorf("%dx%d: %s does not resolve to a profile", c.w, c.h, c.top)
+		} else if want := fmt.Sprintf("scale=-2:%d", p.h); p.scale != want || fmt.Sprintf("%dp", p.h) != c.top {
+			t.Errorf("%dx%d: %s resolved to %+v", c.w, c.h, c.top, p)
+		}
+	}
+	if _, ok := rungProfile(hlsProfiles, "800p", 1920, 1080); ok {
+		t.Error("another title's source rung must not resolve")
+	}
+	if p, _ := rungProfile(hlsProfiles, "800p", 1920, 800); p.vbr != hlsProfiles["1080p"].vbr {
+		t.Errorf("800p should borrow the 1080p caps, got %+v", p)
+	}
+	if p, _ := rungProfile(hlsProfiles, "800p", 1920, 800); rungBandwidth(&srcInfo{}, "800p", p) != 8_000_000 {
+		t.Errorf("800p BANDWIDTH = %d, want the borrowed 1080p cap", rungBandwidth(&srcInfo{}, "800p", p))
+	}
+}
+
 func TestHLSMaster_TinySourceStillPlayable(t *testing.T) {
 	chdirTemp(t)
 	root := filepath.Join(t.TempDir(), "lib")
@@ -135,5 +172,20 @@ func TestHLSMaster_SilentAV1FallsBackToH264(t *testing.T) {
 	}
 	if !strings.Contains(body, "avc1.") {
 		t.Errorf("expected h264 fallback ladder: %s", body)
+	}
+}
+
+// A file saturn serves (AMOS's wcat) streams by its URL; any other URL is refused.
+func TestSource_SaturnOnly(t *testing.T) {
+	t.Setenv("SATURN_HOST", "https://hub")
+	lib := &library.Library{Roots: []string{t.TempDir()}}
+	ok := "https://hub/ring/file?path=%2Ftmp%2Fx.mkv&peer=god&v=%2210-7%22"
+	if got := source(lib, ok); got != ok {
+		t.Errorf("saturn's file: %q", got)
+	}
+	for _, bad := range []string{"https://evil/ring/file?path=x", "https://hub.evil/ring/file?x", "https://hub/other?x", "file:///etc/passwd"} {
+		if got := source(lib, bad); got != "" {
+			t.Errorf("%s: %q, want refused", bad, got)
+		}
 	}
 }

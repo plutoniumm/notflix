@@ -269,7 +269,6 @@ func main() {
 
 	router.POST("/api/organize/plan", func(c *gin.Context) { jobs.OrganizePlan(c, lib) })
 	router.GET("/api/organize/status", jobs.OrganizeStatus)
-	router.POST("/api/organize/warm", jobs.OrganizeWarm)
 	router.POST("/api/organize/apply", func(c *gin.Context) { jobs.OrganizeApply(c, lib) })
 
 	router.GET("/api/audio/info", func(c *gin.Context) { media.AudioInfo(c, lib) })

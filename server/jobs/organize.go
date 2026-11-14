@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,7 +23,15 @@ import (
 // The model only ever sees an indexed file list + existing folder names and
 // answers {index → folder} — filenames never round-trip, so a hallucination
 // can't corrupt a move. Nothing touches disk until the user approves a subset.
-// A single completion is flaky, so runs are merged by per-file vote.
+//
+// Only series and franchises are grouped; a standalone film stays loose. The
+// model reasons ~1.5k chars PER FILE whatever the prompt says (a rules-free
+// prompt measured the same 63k chars as the full one), so one call over the
+// library took 70–120s and the gateway cuts at 120s. Small batches fired
+// together keep every call short: the plan takes about as long as one batch.
+// Each batch is sent twice at once and the answers unioned: a reply's failure
+// mode is OMISSION (a batch of four obvious episodes came back {"moves": []}
+// one run and fully placed the next), never a wrong index.
 
 type OrgItem struct {
 	File string `json:"file"` // basename, lives at the root level
@@ -126,42 +133,53 @@ func organizeFolders(folders map[string]map[string]int) []string {
 	return out
 }
 
-func organizePrompt(items []OrgItem, folders map[string]map[string]int) string {
+func organizePrompt(items []OrgItem, folders map[string]map[string]int, idx []int, web map[int][]string) string {
 	filesJSON, _ := json.Marshal(organizeFiles(items))
 	foldersJSON, _ := json.Marshal(organizeFolders(folders))
+	idxJSON, _ := json.Marshal(idx)
+	hits := map[int][]string{}
+	for _, i := range idx {
+		if len(web[i]) > 0 {
+			hits[i] = web[i]
+		}
+	}
+	webJSON, _ := json.Marshal(hits)
 
-	return fmt.Sprintf(`You organize a home movie library. Below is a list of loose video files, plus the folders that already exist.
+	return fmt.Sprintf(`You tidy a home video library. Below are its loose video files and the folders that already exist ("root/folder (file count)").
 
-Assign files to folders:
-- Films of one franchise or series belong in one folder named after it (e.g. "Harry Potter", "Mission Impossible").
-- Documentaries and docuseries go in "Documentaries".
-- Reuse an existing folder when one fits. Prefer a folder that already holds several files; match its name EXACTLY, character for character.
-- Remaining movies: group by decade from the year field (e.g. "1980s", "2000s"). If a decade group would mix languages, split it by language (e.g. "Hindi 2000s"). If a group grows past ~15 files, split it into parts (e.g. "2000s A-M", "2000s N-Z").
-- A file may only move to a folder on its own root. Existing folders are listed "root/folder (file count)"; answer with the folder name alone, without the root prefix.
-- Never invent a folder that would hold a single file; leave such files out entirely.
-- If a file is ambiguous, leave it out.
+Group ONLY series and franchises:
+- an episode or part of a show, web series or video series goes in that series' folder
+- a film that is one installment of a film series or franchise goes in the franchise's folder (name the folder after the franchise)
+- reuse an existing folder when it already holds that series or franchise: answer its exact name, without the root
+- a file may only move to a folder on its own root
+- a standalone film, a one-off video, or anything you are unsure of: leave it out
+Web results are given for some of the files you decide; trust them on which franchise or series a title belongs to.
+
+Answer with JSON only, no prose: {"moves": [{"i": <file index>, "folder": "<folder name>"}]}
 
 Existing folders: %s
-Files: %s`, string(foldersJSON), string(filesJSON))
+All files (context): %s
+
+Decide only these files: %s
+Web results: %s`, foldersJSON, filesJSON, idxJSON, webJSON)
 }
 
-// Generous (whole-library prompt, cold model) but finite: an asleep host
-// accepts the connection and never answers.
-const organizeTimeout = 10 * time.Minute
+// Finite: an asleep host accepts the connection and never answers. The
+// gateway itself gives up at 120s.
+const organizeTimeout = 3 * time.Minute
 
-// organizeThink: whether the schema gives the model a scratchpad field before
-// the moves. A grammar forces the first token, so with a bare moves-only schema
-// the model CANNOT think — structured output turns reasoning off for free.
-// Measured on 40 held-out files that already live in known folders (see
-// organize_bench_test.go) — set from that measurement, not from taste.
-const organizeThink = false
+const (
+	organizeBatch    = 4
+	organizeReplicas = 2
+)
 
 // organizeSchema makes a malformed plan unrepresentable rather than merely
 // discouraged: `i` is bounded to the actual file count, so the out-of-range
 // index that validMoves used to drop silently can't be emitted, and the
 // envelope can't carry prose. `folder` stays a free string on purpose — an enum
 // of existing folders was measured correct for reuse but it also forbids the
-// NEW franchise and decade folders the prompt exists to create.
+// NEW franchise folders the prompt exists to create. A hosted model ignores the
+// schema entirely, so the prompt spells the shape out too.
 func organizeSchema(nFiles int) map[string]any {
 	move := map[string]any{
 		"type":                 "object",
@@ -172,23 +190,16 @@ func organizeSchema(nFiles int) map[string]any {
 			"folder": map[string]any{"type": "string", "minLength": 1, "maxLength": folderMaxLen},
 		},
 	}
-	props := map[string]any{"moves": map[string]any{"type": "array", "items": move}}
-	required := []string{"moves"}
-	if organizeThink {
-		// Ordered first so the tokens land before any decision commits.
-		props["reasoning"] = map[string]any{"type": "string"}
-		required = []string{"reasoning", "moves"}
-	}
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             required,
-		"properties":           props,
+		"required":             []string{"moves"},
+		"properties":           map[string]any{"moves": map[string]any{"type": "array", "items": move}},
 	}
 }
 
-func organizeChat(prompt string, nFiles int) (string, error) {
-	return saturnChat(context.Background(), "", prompt,
+func organizeChat(model, prompt string, nFiles int) (string, error) {
+	return saturnChat(context.Background(), model, "", prompt,
 		jsonSchema("organize_moves", organizeSchema(nFiles)), organizeTimeout)
 }
 
@@ -215,37 +226,6 @@ func parseOrganize(content string) ([]orgAssign, error) {
 	return obj.Moves, nil
 }
 
-// Per-index vote, ties toward earlier runs. An index only one run assigned
-// still passes through — flaky runs leave gaps the others fill.
-func mergeAssigns(runs [][]orgAssign) []orgAssign {
-	votes := map[int]map[string]int{}
-	best := map[int]string{}
-	for _, run := range runs {
-		seen := map[int]bool{}
-		for _, a := range run {
-			folder := strings.TrimSpace(a.Folder)
-			if folder == "" || seen[a.I] {
-				continue
-			}
-			seen[a.I] = true
-			if votes[a.I] == nil {
-				votes[a.I] = map[string]int{}
-			}
-			votes[a.I][folder]++
-			if b, ok := best[a.I]; !ok || votes[a.I][folder] > votes[a.I][b] {
-				best[a.I] = folder
-			}
-		}
-	}
-
-	out := make([]orgAssign, 0, len(best))
-	for i, folder := range best {
-		out = append(out, orgAssign{I: i, Folder: folder})
-	}
-	sort.Slice(out, func(a, b int) bool { return out[a].I < out[b].I })
-	return out
-}
-
 // Release-name folders in this library genuinely run past 80 chars ("Sapne vs
 // Everyone S01 720p 10bit DS4K AMZN WEBRip x265 HEVC Hindi DDP 5.1 ESub -
 // Immortal" is 89). At 80 the grammar TRUNCATED the name mid-string and the
@@ -253,6 +233,8 @@ func mergeAssigns(runs [][]orgAssign) []orgAssign {
 // not a judgement failure. The bound is shared with organizeSchema so the
 // validator and the grammar can never disagree.
 const folderMaxLen = 120
+
+var countSfxRe = regexp.MustCompile(` \(\d+\)$`)
 
 func folderOK(name string) bool {
 	if name == "" || len(name) > folderMaxLen {
@@ -278,6 +260,11 @@ func validMoves(items []OrgItem, assigns []orgAssign, existing map[string]map[st
 		}
 		seen[a.I] = true
 		it := items[a.I]
+		// The listing shows "root/folder (count)" and a model copies the count
+		// back, which named a NEW folder "The Roundup … (2)" beside the real one.
+		if trimmed := countSfxRe.ReplaceAllString(folder, ""); existing[it.Root][folder] == 0 && existing[it.Root][trimmed] > 0 {
+			folder = trimmed
+		}
 		g := group{it.Root, folder}
 		byGroup[g] = append(byGroup[g], OrgMove{File: it.File, Root: it.Root, Folder: folder})
 	}
@@ -298,51 +285,10 @@ func validMoves(items []OrgItem, assigns []orgAssign, existing map[string]map[st
 	return out
 }
 
-const (
-	organizeRuns     = 3
-	organizeConverge = 0.8
-)
-
-// First non-blank assignment per index wins — the dedup mergeAssigns votes on.
-func assignMap(run []orgAssign) map[int]string {
-	m := map[int]string{}
-	for _, a := range run {
-		folder := strings.TrimSpace(a.Folder)
-		if folder == "" {
-			continue
-		}
-		if _, ok := m[a.I]; !ok {
-			m[a.I] = folder
-		}
-	}
-	return m
-}
-
-// Identical assignments over the union of indices either run covered; at
-// ≥organizeConverge the third run can't change the vote, so it's skipped.
-func runsAgree(a, b []orgAssign) float64 {
-	am, bm := assignMap(a), assignMap(b)
-	union := len(am)
-	agree := 0
-	for i, folder := range bm {
-		if af, ok := am[i]; ok {
-			if af == folder {
-				agree++
-			}
-		} else {
-			union++
-		}
-	}
-	if union == 0 {
-		return 0
-	}
-	return float64(agree) / float64(union)
-}
-
 type orgStatus struct {
-	Stage string    `json:"stage"` // idle | loading model | classifying | merging | done | error
-	Run   int       `json:"run"`
-	Runs  int       `json:"runs"`
+	Stage string    `json:"stage"` // idle | searching | classifying | done | error
+	Run   int       `json:"run"`   // batches finished
+	Runs  int       `json:"runs"`  // batches in flight
 	Note  string    `json:"note"`
 	Moves []OrgMove `json:"moves"`
 	Total int       `json:"total"`
@@ -352,9 +298,8 @@ type orgStatus struct {
 // A finished plan stays until the next plan or apply resets it, so a reloaded
 // page can still fetch it.
 var (
-	orgMu      sync.Mutex
-	orgState   = orgStatus{Stage: "idle", Moves: []OrgMove{}}
-	orgWarming atomic.Bool
+	orgMu    sync.Mutex
+	orgState = orgStatus{Stage: "idle", Moves: []OrgMove{}}
 )
 
 func orgSet(mut func(*orgStatus)) {
@@ -370,7 +315,7 @@ func orgSnap() orgStatus {
 }
 
 func orgRunning(stage string) bool {
-	return stage == "loading model" || stage == "classifying" || stage == "merging"
+	return stage == "searching" || stage == "classifying"
 }
 
 func runOrganize(lib *library.Library) {
@@ -385,67 +330,141 @@ func runOrganize(lib *library.Library) {
 		return
 	}
 
-	// One cheap probe up front: a cold model costs a full timeout per run, and
-	// "gateway down" and "pinned id gone from the catalogue" are different
-	// fixes, so they get different messages instead of three 10min stalls.
-	if err := saturnUp(context.Background(), 20*time.Second); err != nil {
-		fail(fmt.Errorf("saturn unavailable at %s: %w", saturnHost(), err))
+	// One cheap probe up front: a down gateway would otherwise cost a full
+	// timeout per run.
+	model, err := organizeModel(context.Background(), 20*time.Second)
+	if err != nil {
+		fail(fmt.Errorf("saturn unavailable at %s: %w", SaturnHost(), err))
 		return
 	}
+	log.Printf("[organize] model %s", model)
 
 	folders := existingFolders(lib)
-	prompt := organizePrompt(items, folders)
+	web := organizeSearch(items)
 
-	var runs [][]orgAssign
-	var lastErr error
-	for r := 1; r <= organizeRuns; r++ {
-		orgSet(func(s *orgStatus) { s.Stage = "classifying"; s.Run = r })
-		content, err := organizeChat(prompt, len(items))
-		var assigns []orgAssign
-		if err == nil {
-			assigns, err = parseOrganize(content)
-			if err != nil {
-				log.Printf("[organize] run %d parse: %v — content=%s", r, err, sample([]byte(content), 240))
-			}
+	var batches [][]int
+	for i := 0; i < len(items); i += organizeBatch {
+		var idx []int
+		for j := i; j < min(i+organizeBatch, len(items)); j++ {
+			idx = append(idx, j)
 		}
-		if err != nil {
-			lastErr = err
-			log.Printf("[organize] run %d: %v", r, err)
-			continue
-		}
-		if len(assigns) == 0 {
-			log.Printf("[organize] run %d: blank", r)
-			continue
-		}
-		log.Printf("[organize] run %d: %d assignments", r, len(assigns))
-		runs = append(runs, assigns)
-		if len(runs) == 2 && runsAgree(runs[0], runs[1]) >= organizeConverge {
-			log.Printf("[organize] runs agree ≥%.0f%% — skipping run %d", organizeConverge*100, organizeRuns)
-			orgSet(func(s *orgStatus) { s.Note = "first two runs agreed — skipped run 3" })
-			break
+		for range organizeReplicas {
+			batches = append(batches, idx)
 		}
 	}
-	if len(runs) == 0 {
-		if lastErr == nil {
-			lastErr = fmt.Errorf("all runs returned blank plans")
-		}
+	orgSet(func(s *orgStatus) { s.Stage = "classifying"; s.Runs = len(batches) })
+
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		assigns []orgAssign
+		lastErr error
+		failed  int
+	)
+	for _, idx := range batches {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := organizeDecide(model, items, folders, idx, web)
+			mu.Lock()
+			if err != nil {
+				lastErr = err
+				failed++
+				log.Printf("[organize] batch %v: %v", idx, err)
+			}
+			assigns = append(assigns, got...)
+			mu.Unlock()
+			orgSet(func(s *orgStatus) { s.Run++ })
+		}()
+	}
+	wg.Wait()
+	if failed == len(batches) {
 		fail(lastErr)
 		return
 	}
 
-	orgSet(func(s *orgStatus) { s.Stage = "merging" })
-	moves := validMoves(items, mergeAssigns(runs), folders)
+	moves := validMoves(items, assigns, folders)
 	if moves == nil {
 		moves = []OrgMove{}
 	}
-	orgSet(func(s *orgStatus) { s.Stage = "done"; s.Moves = moves; s.Total = len(items) })
+	log.Printf("[organize] %d moves from %d files, %d/%d batches failed", len(moves), len(items), failed, len(batches))
+	orgSet(func(s *orgStatus) {
+		s.Stage = "done"
+		s.Moves = moves
+		s.Total = len(items)
+		if failed > 0 {
+			s.Note = fmt.Sprintf("%d of %d batches failed — some files weren't considered", failed, len(batches))
+		}
+	})
+}
+
+// organizeDecide keeps only answers about its own batch: every call sees the
+// whole list as context and a model will happily answer for a neighbour.
+func organizeDecide(model string, items []OrgItem, folders map[string]map[string]int, idx []int, web map[int][]string) ([]orgAssign, error) {
+	content, err := organizeChat(model, organizePrompt(items, folders, idx, web), len(items))
+	if err != nil {
+		return nil, err
+	}
+	got, err := parseOrganize(content)
+	if err != nil {
+		return nil, fmt.Errorf("%w — content=%s", err, sample([]byte(content), 240))
+	}
+	mine := map[int]bool{}
+	for _, i := range idx {
+		mine[i] = true
+	}
+	var out []orgAssign
+	for _, a := range got {
+		if mine[a.I] {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+// organizeSearch looks up films only (a year in the name). Episodes and web
+// series read off their names; which franchise a film belongs to is a fact
+// the model has to be told — The Outlaws (2017) is the first Roundup film and
+// nothing in its name says so, and the model missed it without the lookup.
+// 3 wide: saturn's search provider rate-limits a burst (8 wide lost 24 of 34
+// lookups; 3 wide lost none).
+func organizeSearch(items []OrgItem) map[int][]string {
+	orgSet(func(s *orgStatus) { s.Stage = "searching" })
+	web := map[int][]string{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	pool := NewPool(3)
+	for i, it := range items {
+		y := fileYear(it.File)
+		if y == 0 {
+			continue
+		}
+		q := library.CleanName(it.File)
+		if !strings.Contains(q, strconv.Itoa(y)) {
+			q += " " + strconv.Itoa(y)
+		}
+		wg.Add(1)
+		pool.Go(func() {
+			defer wg.Done()
+			hits, err := saturnSearch(context.Background(), q+" film", 3)
+			if err != nil {
+				log.Printf("[organize] search %q: %v", q, err)
+				return
+			}
+			mu.Lock()
+			web[i] = hits
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+	return web
 }
 
 // Returns immediately; an already-running job just gets its state back.
 func OrganizePlan(c *gin.Context, lib *library.Library) {
 	orgMu.Lock()
 	if !orgRunning(orgState.Stage) {
-		orgState = orgStatus{Stage: "classifying", Runs: organizeRuns, Moves: []OrgMove{}}
+		orgState = orgStatus{Stage: "searching", Moves: []OrgMove{}}
 		go runOrganize(lib)
 	}
 	s := orgState
@@ -455,20 +474,6 @@ func OrganizePlan(c *gin.Context, lib *library.Library) {
 
 func OrganizeStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, orgSnap())
-}
-
-// Fired when the Organize section mounts, so the cold-load minute is usually
-// paid before the user asks for a plan.
-func OrganizeWarm(c *gin.Context) {
-	if orgWarming.CompareAndSwap(false, true) {
-		go func() {
-			defer orgWarming.Store(false)
-			if err := saturnWarm(context.Background()); err != nil {
-				log.Printf("[organize] warm: %v", err)
-			}
-		}()
-	}
-	c.JSON(http.StatusOK, gin.H{"warming": true})
 }
 
 // Same-filesystem rename only — plan moves never cross roots.

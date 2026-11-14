@@ -18,7 +18,6 @@
     onMute,
     onNext,
     onPip,
-    onEpisodes,
     onFullscreen,
     clip = null,
     trickplay,
@@ -38,7 +37,6 @@
     onMute: () => void;
     onNext?: () => void;
     onPip?: () => void;
-    onEpisodes?: () => void;
     onFullscreen: () => void;
     clip?: [number | null, number | null] | null;
     // Hovered second -> inline CSS for the tile, "" when there is no sprite.
@@ -281,6 +279,7 @@
         {/each}
 
         <div class="fill"></div>
+        <div class="ticks"></div>
 
         {#each cuts as c}
           <div class="cut" style="left:{c}%"></div>
@@ -374,12 +373,6 @@
       >
         {fmtSpeed(speed)}×
       </button>
-
-      {#if onEpisodes}
-        <button class="ctrl ptr cc" aria-label="Up next" onclick={onEpisodes}>
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h11M4 12h11M4 18h7M18 13l3 3-3 3" /></svg>
-        </button>
-      {/if}
 
       {#if onNext}
         <button class="ctrl ptr cc" aria-label="Next" onclick={onNext}>
@@ -528,6 +521,21 @@
     transform: translate(-1px, -50%);
     background: rgba(3, 2, 6, 0.85);
     border-radius: 1px;
+    pointer-events: none;
+    transition: height var(--m-fast, 130ms) var(--ease-out);
+  }
+
+  /* 10% … 90%: nine cells over the first 90% of the beam, a hairline at each
+     cell's right edge. Dark like .cut but 1px and only bar-height, so a
+     chapter edge still reads as the stronger mark. */
+  .ticks {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 90%;
+    height: var(--h, 3px);
+    transform: translateY(-50%);
+    background: linear-gradient(to left, rgba(3, 2, 6, 0.45) 1px, transparent 1px) 0 0 / calc(100% / 9) 100% repeat-x;
     pointer-events: none;
     transition: height var(--m-fast, 130ms) var(--ease-out);
   }

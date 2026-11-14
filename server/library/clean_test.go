@@ -37,7 +37,8 @@ func exists(path string) bool {
 func TestCleanAll_KeepsUnknownExtensions(t *testing.T) {
 	root := t.TempDir()
 	keep := []string{"Disc/movie.m2ts", "Disc/movie.vob", "Disc/poster.jpg", "Disc/movie.srt", "Disc/notes.doc"}
-	junk := []string{"Disc/readme.nfo", "Disc/rarbg.txt", "Disc/movie.mkv.part", "Disc/keygen.exe"}
+	junk := []string{"Disc/readme.nfo", "Disc/rarbg.txt", "Disc/movie.mkv.part", "Disc/keygen.exe",
+		"Disc/www.YTS.MX.jpg", "Disc/WWW.YIFY-TORRENTS.COM.jpg", "Disc/YTS.GG - Official site.jpg"}
 	for _, rel := range append(append([]string{}, keep...), junk...) {
 		touch(t, root, rel)
 	}
@@ -107,5 +108,35 @@ func TestCleanAll_FlattensSingleVideo(t *testing.T) {
 	}
 	if exists(filepath.Join(root, "Movie.2024")) {
 		t.Error("emptied dir survived")
+	}
+}
+
+// Saved .torrents are History's record: moved out of the root, never deleted,
+// with the mtime (the download date) intact. A fresh one is someone's in-flight
+// metadata and stays where aria2 resumes from.
+func TestCleanAll_StashesTorrents(t *testing.T) {
+	root := t.TempDir()
+	done := touch(t, root, "abc.torrent")
+	before, _ := os.Stat(done)
+	fresh := filepath.Join(root, "def.torrent")
+	if err := os.WriteFile(fresh, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	CleanAll([]string{root})
+
+	stashed := filepath.Join(root, TorrentStash, "abc.torrent")
+	after, err := os.Stat(stashed)
+	if err != nil {
+		t.Fatalf("finished torrent not stashed: %v", err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("stash changed the download date: %v -> %v", before.ModTime(), after.ModTime())
+	}
+	if exists(done) {
+		t.Error("finished torrent still at the root")
+	}
+	if !exists(fresh) {
+		t.Error("in-flight torrent was moved out from under aria2")
 	}
 }

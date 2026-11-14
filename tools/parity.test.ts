@@ -72,16 +72,19 @@ check("help is bound to a key", player.source.includes("help: () => (helpOpen = 
 check("the rail is bound to a key", player.source.includes("rail: () => (railOpen = !railOpen)"));
 check("Escape has one owner", player.source.includes("esc: closeTop"));
 check("help has a component", player.source.includes("<Help open={helpOpen}"));
-check("the dock can open the rail", player.source.includes("onEpisodes={hasEps"));
 check("the dock drives volume", player.source.includes("onVolume={(v)"));
 check("the dock drives mute", player.source.includes("onMute={() =>"));
 
 const bar = built("src/player/bar.svelte");
-check("help has a visible control", /aria-label="Keyboard shortcuts"[\s\S]{0,200}onclick=\{onHelp\}/.test(bar.source));
+// Help, whisper and up next are keys only (?, w, t): the buttons were cut to
+// lighten the chrome, and whisper runs on its own after conversion anyway.
+check("help and whisper have no bar button", !bar.source.includes("onHelp") && !bar.source.includes("runWhisper"));
 
 // -------------------------------------------------------------------- dock
 
 const dock = built("src/player/dock.svelte");
+check("up next has no dock button", !dock.source.includes("onEpisodes"));
+check("the timeline has decade ticks", dock.source.includes('class="ticks"') && /\.ticks[\w.-]*\s*\{[^}]*pointer-events: none/.test(dock.css));
 check("the scrub track is focusable", /class="track ptr"[\s\S]{0,220}tabindex="0"/.test(dock.source));
 check("the track handles keys", dock.source.includes("onkeydown={onKey}"));
 for (const k of ["ArrowRight", "ArrowLeft", "Home", "End", "PageUp", "PageDown"])
@@ -128,10 +131,10 @@ check("dropdown returns focus", drop.source.includes("from?.focus?.()"));
 
 const rail = built("src/player/related.svelte");
 check("the rail is controllable from outside", rail.source.includes("open = $bindable(false)"));
-check("the rail opens over moving picture", rail.source.includes("(paused || open)"));
-// The closed 40px strip would swallow taps in the back-10s zone; the open one
-// is the only episode picker a phone has.
-check("touch keeps the closed strip out of the way", /@media \(hover: none\)[\s\S]{0,120}\.rail[\w.\-]*:not\(\.open\)/.test(rail.css));
+// Only the deliberate reveal: a strip parked on the left whenever paused cost
+// the frame its full width (and swallowed taps in the back-10s zone on touch).
+check("the rail shows only when opened", rail.source.includes("!embed && open &&") && !rail.source.includes("paused ||"));
+check("a closed rail takes no space", /\.rail\.out[\w.\-]*\s*\{[^}]*display: none/.test(rail.css));
 check("touch can still show the rail", /@media \(hover: none\)[\s\S]{0,240}\.rail\.open/.test(rail.css));
 
 const help = built("src/player/help.svelte");
@@ -169,8 +172,6 @@ for (const [feature, handler] of [
   ["clip a section", "onClip"],
   ["mark clip in/out", "mark(0)"],
   ["tune", "onTune"],
-  ["help", "onHelp"],
-  ["up next", "onEpisodes"],
   ["mute", "onMute"],
   ["fullscreen", "onFullscreen"],
   ["next episode", "onNext"],

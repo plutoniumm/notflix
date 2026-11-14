@@ -9,7 +9,6 @@
     name:
       | "audio"
       | "captions"
-      | "whisper"
       | "download"
       | "search"
       | "settings"
@@ -32,7 +31,6 @@
   const META: Record<string, Meta> = {
     audio: { vb: "0 0 24 24", w: 18, h: 18, stroke: 2, rnd: true },
     captions: { vb: "0 0 20 15", w: 20, h: 15 },
-    whisper: { vb: "0 0 24 24", w: 18, h: 18, stroke: true },
     download: { vb: "0 0 24 24", w: 18, h: 18, stroke: true },
     search: { vb: "0 0 24 24", w: 18, h: 18, stroke: 2, rnd: true },
     settings: { vb: "0 0 24 24", w: 18, h: 18, stroke: 2, rnd: true },
@@ -75,11 +73,6 @@
       />
       <rect x="2.5" y="9" width="6" height="2" rx="1" fill="currentColor" />
       <rect x="10.5" y="9" width="7" height="2" rx="1" fill="currentColor" />
-    {:else if name === "whisper"}
-      <rect x="9" y="2" width="6" height="12" rx="3" />
-      <path d="M5 10a7 7 0 0 0 14 0" />
-      <line x1="12" y1="17" x2="12" y2="21" />
-      <line x1="8" y1="21" x2="16" y2="21" />
     {:else if name === "download"}
       <path d="M12 3v13M5 12l7 7 7-7" />
       <line x1="4" y1="21" x2="20" y2="21" />

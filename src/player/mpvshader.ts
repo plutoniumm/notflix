@@ -24,6 +24,9 @@ export type Pass = {
   save: string;
   width: string[];
   height: string[];
+  // //!OFFSET: the sub-pixel shift this pass leaves in its output, in that
+  // output's own texels. NNEDI3 doubles one axis per pass and shifts it -0.5.
+  offset: [number, number];
   body: string;
 };
 
@@ -75,6 +78,9 @@ export function parse(src: string): Pass[] {
 
     const get = (k: string) => dirs.find(([d]) => d === k)?.[1];
     hook = get("HOOK")?.[0] ?? hook;
+    // Sizes may say `2 HOOKED.w *`; evalSize knows textures by name, and an
+    // unknown name is 0 — NNEDI3 rendered into a 1-pixel strip.
+    const size = (k: string) => get(k)?.map((t) => t.replace(/^HOOKED\./, `${hook}.`));
 
     const pass: Pass = {
       binds: dirs.filter(([d]) => d === "BIND").map(([, v]) => (v[0] === "HOOKED" ? hook : v[0])),
@@ -82,8 +88,9 @@ export function parse(src: string): Pass[] {
       // FSRCNNX and Anime4K end their chains.
       save: get("SAVE")?.[0] ?? hook,
       // No WIDTH/HEIGHT means "same size as what you hooked".
-      width: get("WIDTH") ?? [`${hook}.w`],
-      height: get("HEIGHT") ?? [`${hook}.h`],
+      width: size("WIDTH") ?? [`${hook}.w`],
+      height: size("HEIGHT") ?? [`${hook}.h`],
+      offset: (get("OFFSET")?.map(Number).filter((n) => !isNaN(n)) as [number, number]) ?? [0, 0],
       body: body.join("\n"),
     };
 
@@ -165,6 +172,44 @@ function preamble(binds: string[]): string {
 
 type Target = { tex: WebGLTexture; fb: WebGLFramebuffer; w: number; h: number };
 
+// Live-action networks (FSRCNNX, NNEDI3) hook LUMA: they see brightness only and
+// mpv merges colour back afterwards. A <video> hands WebGL R'G'B', so LUMA is
+// derived here (Rec.709), and the merge adds the network's brightness DETAIL
+// onto a bilinear upscale of the colour frame. Adding the same delta to R, G
+// and B moves Y' by exactly that delta and leaves Cb/Cr alone, so colour can
+// never be touched by a network that never saw it. Without the split, LUMA fell
+// back to MAIN and the network read the RED channel as brightness. `limited`
+// hands it video-range Y' (16-235), which is what mpv's LUMA plane carries —
+// measured identical to full range on both networks.
+export type Luma = "full" | "limited";
+
+const SPLIT = `#version 300 es
+precision highp float;
+uniform sampler2D MAIN_raw;
+uniform float lim;
+in vec2 vpos;
+out vec4 fragColor;
+void main() {
+  float y = dot(texture(MAIN_raw, vpos).rgb, vec3(0.2126, 0.7152, 0.0722));
+  if (lim > 0.5) y = y * (219.0 / 255.0) + 16.0 / 255.0;
+  fragColor = vec4(y, 0.0, 0.0, 1.0);
+}`;
+
+const MERGE = `#version 300 es
+precision highp float;
+uniform sampler2D MAIN_raw;
+uniform sampler2D LUMA_raw;
+uniform vec2 off;
+uniform float lim;
+in vec2 vpos;
+out vec4 fragColor;
+void main() {
+  vec3 c = texture(MAIN_raw, vpos).rgb;
+  float y = texture(LUMA_raw, vpos + off).x;
+  if (lim > 0.5) y = (y - 16.0 / 255.0) * (255.0 / 219.0);
+  fragColor = vec4(clamp(c + (y - dot(c, vec3(0.2126, 0.7152, 0.0722))), 0.0, 1.0), 1.0);
+}`;
+
 // Anime4K's widest pass binds 8 textures; 15 is the floor WebGL2 guarantees.
 const SCRATCH = 15;
 
@@ -177,10 +222,14 @@ export class Chain {
   #passes: Pass[] = [];
   #targets = new Map<string, Target>();
   #quad: WebGLBuffer | null = null;
+  #luma: Luma | null;
+  #split: WebGLProgram | null = null;
+  #merge: WebGLProgram | null = null;
   ok = false;
 
-  constructor(gl: WebGL2RenderingContext, sources: string[]) {
+  constructor(gl: WebGL2RenderingContext, sources: string[], luma: Luma | null = null) {
     this.#gl = gl;
+    this.#luma = luma;
 
     // Signed activations need a float render target. Without this extension the
     // chain cannot run correctly at all, so the caller falls back rather than
@@ -210,6 +259,17 @@ export class Chain {
       console.warn("[anime4k]", e);
 
       return;
+    }
+
+    if (luma) {
+      try {
+        this.#split = this.#compile(SPLIT);
+        this.#merge = this.#compile(MERGE);
+      } catch (e) {
+        console.warn("[mpvshader] luma", e);
+
+        return;
+      }
     }
 
     this.#quad = gl.createBuffer();
@@ -296,10 +356,22 @@ export class Chain {
 
     const dims = new Map<string, [number, number]>([["MAIN", [mainW, mainH]]]);
     const texOf = new Map<string, WebGLTexture>([["MAIN", main]]);
+    const lim = this.#luma === "limited" ? 1 : 0;
+    let offX = 0;
+    let offY = 0;
+
+    if (this.#split) {
+      const t = this.#target("LUMA~split", mainW, mainH);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb);
+      gl.viewport(0, 0, mainW, mainH);
+      this.#draw(this.#split, [["MAIN", main]], { lim });
+      dims.set("LUMA", [mainW, mainH]);
+      texOf.set("LUMA", t.tex);
+    }
 
     for (let i = 0; i < this.#passes.length; i++) {
       const pass = this.#passes[i];
-      const last = i === this.#passes.length - 1;
+      const last = !this.#merge && i === this.#passes.length - 1;
       const w = last ? outW : evalSize(pass.width, dims);
       const h = last ? outH : evalSize(pass.height, dims);
 
@@ -374,10 +446,44 @@ export class Chain {
       if (wrote) {
         dims.set(wrote.name, [wrote.w, wrote.h]);
         texOf.set(wrote.name, wrote.tex);
+        if (wrote.name === "LUMA") {
+          offX += pass.offset[0] / wrote.w;
+          offY += pass.offset[1] / wrote.h;
+        }
       }
     }
 
+    // Read the luma at the shift it was left with: the other direction
+    // measured 1.3 dB worse on NNEDI3, which shifts every axis it doubles.
+    if (this.#merge) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(outX, outY, outW, outH);
+      this.#draw(this.#merge, [["MAIN", main], ["LUMA", texOf.get("LUMA")!]], { lim, off: [offX, offY] });
+    }
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  #draw(prog: WebGLProgram, texs: [string, WebGLTexture][], u: Record<string, number | number[]>) {
+    const gl = this.#gl;
+    gl.useProgram(prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.#quad);
+    const loc = gl.getAttribLocation(prog, "p");
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    texs.forEach(([name, tex], unit) => {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      const s = gl.getUniformLocation(prog, `${name}_raw`);
+      if (s) gl.uniform1i(s, unit);
+    });
+    for (const [k, v] of Object.entries(u)) {
+      const l = gl.getUniformLocation(prog, k);
+      if (!l) continue;
+      if (typeof v === "number") gl.uniform1f(l, v);
+      else gl.uniform2f(l, v[0], v[1]);
+    }
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
   destroy() {

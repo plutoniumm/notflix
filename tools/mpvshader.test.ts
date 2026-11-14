@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { parse, evalSize } = await import("../src/player/mpvshader.ts");
+const { parse, evalSize, Chain } = await import("../src/player/mpvshader.ts");
 
 const SRC = `
 // license header, ignored
@@ -71,8 +71,8 @@ test("read-write alias on the same name is detectable from the parse", () => {
 
 // Shaders in this dialect disagree about ordering: Anime4K writes //!DESC
 // first, FSRCNNX writes //!HOOK first and omits //!SAVE on its last pass and
-// //!WIDTH on most. FSRCNNX is no longer vendored (see upscale.ts), but the
-// parser claims to read the format, not one file of it — and a DESC-triggered
+// //!WIDTH on most. The parser claims to read the format, not one file of
+// it — and a DESC-triggered
 // split silently attached a HOOK line to the PREVIOUS pass, which is the kind
 // of thing that only shows up as a wrong image.
 const FSRCNNX_SHAPE = `
@@ -122,4 +122,83 @@ vec4 hook() { return HOOKED_tex(HOOKED_pos); }
   assert.deepEqual(p.binds, ["LUMA"]);
   assert.ok(p.body.includes("LUMA_tex(LUMA_pos)"), p.body);
   assert.ok(!p.body.includes("HOOKED_"), "HOOKED_ leaked through");
+});
+
+// NNEDI3 sizes itself as `2 HOOKED.w *`. evalSize knows textures by name, and
+// HOOKED resolved to 0 — the pass rendered into a 1-pixel strip.
+test("HOOKED in WIDTH/HEIGHT resolves to the hooked texture", () => {
+  const [p] = parse(`
+//!HOOK LUMA
+//!BIND HOOKED
+//!WIDTH 2 HOOKED.w *
+//!HEIGHT HOOKED.h
+//!OFFSET 0.000000 -0.500000
+vec4 hook() { return HOOKED_tex(HOOKED_pos); }
+`);
+  assert.deepEqual(p.width, ["2", "LUMA.w", "*"]);
+  const dims = new Map([["LUMA", [960, 540] as [number, number]]]);
+  assert.equal(evalSize(p.width, dims), 1920);
+  assert.equal(evalSize(p.height, dims), 540);
+});
+
+test("OFFSET parses, and a pass without one is unshifted", () => {
+  const [p] = parse("//!HOOK LUMA\n//!OFFSET -0.500000 0.000000\nvec4 hook() { return vec4(0.0); }\n");
+  assert.deepEqual(p.offset, [-0.5, 0]);
+  assert.deepEqual(parse(FSRCNNX_SHAPE)[0].offset, [0, 0]);
+});
+
+// A recording stand-in for WebGL2: every program is remembered by the fragment
+// source it was linked from, so a test can read the order things were drawn in.
+function fakeGL() {
+  const src = new Map<object, string>();
+  const frag = new Map<object, string>();
+  const drawn: string[] = [];
+  let cur: object | null = null;
+  const gl: any = new Proxy({}, {
+    get(_, k: string) {
+      switch (k) {
+        case "FRAGMENT_SHADER": return 2;
+        case "createShader": return (t: number) => ({ t });
+        case "shaderSource": return (sh: any, s: string) => src.set(sh, s);
+        case "createProgram": return () => ({});
+        case "attachShader": return (p: any, sh: any) => { if (sh.t === 2) frag.set(p, src.get(sh)!); };
+        case "useProgram": return (p: any) => { cur = p; };
+        case "drawArrays": return () => drawn.push(frag.get(cur!) ?? "");
+        case "getShaderParameter": case "getProgramParameter": return () => true;
+        case "getExtension": case "createTexture": case "createFramebuffer": case "createBuffer": case "getUniformLocation": return () => ({});
+        case "getAttribLocation": case "getError": return () => 0;
+        default: return () => {};
+      }
+    },
+  });
+  return { gl, drawn };
+}
+
+const LUMA_NET = `
+//!HOOK LUMA
+//!BIND HOOKED
+//!WIDTH HOOKED.w 2 *
+//!HEIGHT HOOKED.h 2 *
+vec4 hook() { return vec4(0.5); }
+`;
+
+// Without the split the LUMA bind fell back to MAIN and the network read the
+// RED channel as brightness, then drew its luma straight to the screen as red.
+test("a LUMA chain splits first and merges colour back last", () => {
+  const { gl, drawn } = fakeGL();
+  const chain = new Chain(gl, [LUMA_NET], "full");
+  assert.ok(chain.ok);
+  chain.run({} as any, 960, 540, 0, 0, 1920, 1080);
+  assert.equal(drawn.length, 3);
+  assert.match(drawn[0], /dot\(texture\(MAIN_raw/, "first draw is not the luma split");
+  assert.match(drawn[1], /vec4\(0\.5\)/, "the network pass did not run in between");
+  assert.match(drawn[2], /LUMA_raw[\s\S]*c \+ \(y - dot/, "last draw is not the colour merge");
+});
+
+test("an RGB chain draws its own last pass, with no split or merge", () => {
+  const { gl, drawn } = fakeGL();
+  const chain = new Chain(gl, [SRC]);
+  chain.run({} as any, 960, 540, 0, 0, 1920, 1080);
+  assert.equal(drawn.length, 2);
+  assert.ok(!drawn.some((d) => d.includes("MAIN_raw, vpos).rgb, vec3(0.2126")), "a split ran for an RGB chain");
 });

@@ -7,6 +7,4 @@ an 8-pass denoise/deblock net. Both are trained on cel animation. Weights are
 inline GLSL literals, which is why the files are large and why nothing is
 fetched at runtime.
 
-FSRCNNX was vendored here too, for the live-action path, and removed: it ran
-clean but measured -3%, no better than a passthrough. See the note in
-`upscale.ts`. Live action uses the hand-written analytic FSR.
+The live-action networks (FSRCNNX, NNEDI3) live in `../livenets/`.

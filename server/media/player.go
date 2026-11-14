@@ -5,9 +5,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -72,13 +72,11 @@ func VideoHead(c *gin.Context, videosDir string) {
 	c.Status(http.StatusOK)
 }
 
+// Gin has already unescaped the path param: unescaping again turned "+" into a space. Only a
+// whole ".." element is traversal; "Movie..2020.mp4" is a name.
 func getfname(c *gin.Context) (string, error) {
-	name, err := url.QueryUnescape(c.Param("filename"))
-	if err != nil {
-		return "", fmt.Errorf("invalid filename")
-	}
-
-	if strings.Contains(name, "..") {
+	name := c.Param("filename")
+	if slices.Contains(strings.Split(filepath.ToSlash(name), "/"), "..") {
 		return "", fmt.Errorf("invalid path traversal attempt")
 	}
 
@@ -96,8 +94,9 @@ func resolve(base, name string) (string, error) {
 		return "", fmt.Errorf("error resolving path")
 	}
 
+	// The trailing separator keeps a sibling like "<base>Evil" outside "<base>".
 	absBase, _ := filepath.Abs(base)
-	if !strings.HasPrefix(abs, absBase) {
+	if abs != absBase && !strings.HasPrefix(abs, absBase+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid video path")
 	}
 
